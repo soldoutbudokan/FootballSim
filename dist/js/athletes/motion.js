@@ -120,6 +120,9 @@ export class Animator {
     const holder = ctx.holderId === p.id;
     let a = SIM_ACTIONS.has(p.action) ? p.action : 'run';
     if (a === 'ready') a = 'run';
+    // Stay in the stance after the snap until this player actually moves, so
+    // he fires out of it instead of standing up first.
+    if (this.action === 'ready' && a === 'run' && !holder && p.engaged == null && this.speed < 0.6 && ctx.state.time < 1.2) return 'ready';
     // After the whistle players on the ground stay there.
     if (ctx.dead && (this.action === 'down' || this.action === 'tackle')) return this.action;
     if (ctx.dead && this.action === 'wrapped') return 'down';
@@ -148,7 +151,8 @@ export class Animator {
     if (role === 'ol' || role === 'dl') cadence *= 1.1;
     const churning = this.action === 'block' || this.action === 'wrapped';
     if (churning) cadence = Math.max(cadence, 3.2);
-    this.stepLen = Math.max(0.2, v / cadence);
+    // Sideways movement is a quick step-together shuffle, not a stride.
+    this.stepLen = Math.max(0.2, v / cadence) * (1 - 0.6 * Math.abs(this.local.x));
     let dist = v * ctx.dt;
     if (Number.isFinite(p.phase) && this.lastPhase !== null && !teleport) {
       const delta = p.phase - this.lastPhase;
@@ -171,8 +175,8 @@ export class Animator {
     const s = fract(this.cycle);
     const lateral = Math.abs(this.local.x);
     const duty = lerp(0.62, 0.36, run) - 0.06 * sprint;
-    const reachLen = Math.min(2 * duty * this.stepLen, 1.2) * moving * (1 - 0.5 * lateral);
-    const lift = (lerp(0.06, 0.27, run) + 0.17 * sprint) * moving * (1 - 0.55 * bp) * (1 - 0.45 * lateral);
+    const reachLen = Math.min(2 * duty * this.stepLen, 1.2) * moving * (1 - 0.35 * lateral);
+    const lift = (lerp(0.06, 0.27, run) + 0.22 * sprint) * moving * (1 - 0.55 * bp) * (1 - 0.45 * lateral);
     const behind = lerp(0.1, 0.28, run) * (1 - bp);
     const width = lerp(0.115, 0.07, run) + 0.13 * lateral + 0.04 * bp;
     const dx = this.local.x, dz = this.local.y;
@@ -186,14 +190,20 @@ export class Animator {
         along = lerp(reachLen * (0.5 - behind), -reachLen * (0.5 + behind), u);
         h = heel * 0.07; pitch = heel * 0.55;
       } else {
-        const u = (ph - duty) / (1 - duty);
-        along = lerp(-reachLen * (0.5 + behind), reachLen * (0.5 - behind), smoothstep(0.1, 0.92, u));
-        h = lift * Math.sin(Math.PI * u ** 0.75);
+        // Swing: heel recovers high behind, the knee drives through, and at
+        // speed the foot reaches out and paws back just before contact.
+        const u = (ph - duty) / (1 - duty), paw = 0.14 * sprint;
+        along = lerp(-reachLen * (0.5 + behind), reachLen * (0.5 - behind) + paw, smoothstep(0.06, 0.8, u)) - paw * smoothstep(0.8, 1, u);
+        h = lift * Math.sin(Math.PI * u ** 0.85);
         pitch = run * (u < 0.4 ? 0.55 : lerp(0.55, -0.2, (u - 0.4) / 0.6));
       }
       const foot = pose.feet[i];
       foot.set(side * width + dx * along, d.ankle + h, dz * along);
+      // Feet never cross the midline: sideways motion becomes a shuffle.
+      foot.x = side * Math.max(side * foot.x, 0.07);
       if (stance && moving > 0.05) this.pinFoot(i, foot); else this.locks[i].active = false;
+      // A planted foot the body has slid past is picked up rather than crossed.
+      if (side * foot.x < 0.05) { foot.x = side * 0.05; this.locks[i].active = false; }
       pose.footRot[i].set(pitch, side * 0.1, 0);
       pose.knees[i].set(side * 0.2, 0, 1);
     }
@@ -201,9 +211,10 @@ export class Animator {
     // Pelvis: two bobs per cycle (lowest mid-stance), counter-rotating hips and
     // shoulders, forward lean from speed and acceleration, bank into turns.
     const bob = -Math.cos(TAU * 2 * (s - duty / 2)) * lerp(0.012, 0.034, run) * moving;
-    const crouch = 0.025 + 0.04 * run + 0.02 * sprint + 0.11 * bp;
     const bank = this.lean * smoothstep(1.5, 5, v);
     const accelLean = clamp(this.accel / 9, -0.3, 0.6) * smoothstep(0.5, 3, v);
+    // Low and leaning when exploding out of a stance or a cut.
+    const crouch = 0.025 + 0.04 * run + 0.02 * sprint + 0.11 * bp + 0.09 * Math.max(0, accelLean);
     const swing = Math.cos(TAU * s) * moving;
     pose.pelvis.set(-bank * 0.1, d.hipY - crouch + bob, 0);
     pose.hips.set(0.04 + 0.08 * run + 0.06 * sprint + 0.12 * accelLean + 0.12 * bp, -0.1 * run * swing, 0.035 * moving * Math.sin(TAU * s) + bank * 0.26);
@@ -223,6 +234,8 @@ export class Animator {
         lerp(-0.22 - 0.06 * sprint, 0.3 + 0.04 * sprint, t),
       );
       pose.hands[i].lerp(hang, 1 - run);
+      // Backpedalling defensive backs keep their arms bent and close to the hips.
+      if (bp > 0) pose.hands[i].lerp(_v.set(side * (sx + 0.02), sy - 0.4, 0.04 + 0.13 * w), bp);
       pose.elbows[i].set(side * 0.35, -0.35, -1);
       pose.wrists[i].set(-0.1 * run, 0, 0);
     }

@@ -47,15 +47,19 @@ function weldSeam(geometry, rows, cols) {
   }
 }
 
-export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom = true, flipU = false } = {}) {
+// `ao(v, t)` optionally bakes ambient occlusion into vertex colours, with v
+// the height along the loft (0 = bottom) and t the angle around it (0 = +X).
+export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom = true, flipU = false, ao = null } = {}) {
   const rings = interpolateRings(keys, subdiv);
-  const positions = [], uvs = [], indices = [];
+  const positions = [], uvs = [], indices = [], colors = [];
   const cols = radial + 1, y0 = rings[0].y, y1 = rings[rings.length - 1].y, span = (y1 - y0) || 1;
+  const shade = (v, t) => { const k = ao ? ao(v, t) : 1; colors.push(k, k, k); };
   for (const r of rings) {
     for (let j = 0; j <= radial; j++) {
-      const [px, pz] = superellipse(j / radial * TAU, r.w, r.d, r.n);
+      const t = j / radial * TAU, [px, pz] = superellipse(t, r.w, r.d, r.n), v = (r.y - y0) / span;
       positions.push(r.x + px, r.y, r.z + pz);
-      uvs.push(flipU ? 1 - j / radial : j / radial, (r.y - y0) / span);
+      uvs.push(flipU ? 1 - j / radial : j / radial, v);
+      shade(v, t);
     }
   }
   for (let i = 0; i < rings.length - 1; i++) {
@@ -68,6 +72,7 @@ export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom =
     const centre = positions.length / 3;
     positions.push(ring.x, ring.y, ring.z);
     uvs.push(0.5, (ring.y - y0) / span);
+    shade((ring.y - y0) / span, Math.PI / 2);
     for (let j = 0; j < radial; j++) {
       const a = rowStart + j, b = a + 1;
       if (up) indices.push(centre, b, a); else indices.push(centre, a, b);
@@ -78,6 +83,7 @@ export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom =
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   weldSeam(geometry, rings.length, cols);

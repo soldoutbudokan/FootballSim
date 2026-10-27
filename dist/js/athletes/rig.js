@@ -2,7 +2,8 @@ import * as THREE from '../../vendor/three.module.js';
 import { loft, helmetShell, helmetHardware, chinStrap, helmetVisor, glove, mirrorX, cleat } from './geometry.js';
 import { solveTwoBone } from './ik.js';
 import { eulerQuat, SPINE_SPLIT } from './pose.js';
-import { hashString, SIDES } from './math.js';
+import { hashString, SIDES, smoothstep } from './math.js';
+import { tint } from './geometry.js';
 import { jerseyFor, accessoriesFor } from './uniform.js';
 
 // ---------------------------------------------------------------------------
@@ -102,45 +103,62 @@ function dimensionsFor(spec) {
 // ---------------------------------------------------------------------------
 // Shared geometry, built once for all rigs (see geometry.js for the shapes).
 
+// Baked occlusion for the cloth: armpits and the sides under the arms, the
+// jersey tucked into the belt, the seat and crotch of the pants, skin under
+// the sleeves and socks under the knee cuffs.
+const side = t => Math.abs(Math.cos(t)) ** 6;
+const AO = {
+  chest: (v, t) => 1 - 0.3 * side(t) * smoothstep(0.2, 0.55, v) * (1 - smoothstep(0.62, 0.86, v)) - 0.1 * (1 - smoothstep(0, 0.35, v)),
+  abdomen: (v, t) => 0.76 + 0.24 * smoothstep(0, 0.55, v) - 0.08 * side(t),
+  pelvis: v => (0.7 + 0.3 * smoothstep(0, 0.5, v)) * (1 - 0.12 * smoothstep(0.82, 1, v)),
+  thigh: v => 1 - 0.2 * smoothstep(0.82, 1, v),
+  upperArm: v => 1 - 0.32 * smoothstep(0.62, 0.95, v),
+  sleeve: (v, t) => 0.86 + 0.14 * smoothstep(0, 0.6, v),
+  neck: v => 0.55 + 0.25 * v,
+  sock: v => 1 - 0.3 * smoothstep(0.86, 1, v),
+  forearm: v => 0.92 + 0.08 * smoothstep(0, 0.8, v),
+  knee: v => 0.84 + 0.16 * smoothstep(0, 0.3, v),
+};
+
 export function createGeometries() {
   return {
     pelvis: loft([
-      { y: -0.096, w: 0.04, d: 0.045, z: -0.01 }, { y: -0.075, w: 0.13, d: 0.096, z: -0.012 }, { y: -0.03, w: 0.174, d: 0.122, z: -0.014 },
-      { y: 0.03, w: 0.183, d: 0.127, z: -0.008 }, { y: 0.1, w: 0.178, d: 0.124 }, { y: 0.17, w: 0.17, d: 0.12 },
-    ], { radial: 16, subdiv: 2 }),
+      { y: -0.094, w: 0.04, d: 0.045, z: -0.01 }, { y: -0.074, w: 0.12, d: 0.09, z: -0.012 }, { y: -0.03, w: 0.166, d: 0.118, z: -0.014 },
+      { y: 0.03, w: 0.18, d: 0.125, z: -0.008 }, { y: 0.1, w: 0.177, d: 0.123 }, { y: 0.17, w: 0.17, d: 0.12 },
+    ], { radial: 16, subdiv: 2, ao: AO.pelvis }),
     belt: loft([{ y: 0.126, w: 0.176, d: 0.126 }, { y: 0.152, w: 0.172, d: 0.123 }], { radial: 16, subdiv: 1, capTop: false, capBottom: false }),
     abdomen: loft([
       { y: -0.05, w: 0.162, d: 0.114 }, { y: 0.04, w: 0.17, d: 0.124 }, { y: 0.14, w: 0.186, d: 0.134 }, { y: 0.27, w: 0.206, d: 0.142 },
-    ], { radial: 16, subdiv: 2, capTop: false, capBottom: false }),
+    ], { radial: 16, subdiv: 2, capTop: false, capBottom: false, ao: AO.abdomen }),
     chest: loft([
       { y: -0.06, w: 0.212, d: 0.146, n: 2.2 }, { y: 0.04, w: 0.224, d: 0.153, n: 2.3 }, { y: 0.14, w: 0.244, d: 0.16, n: 2.45 },
       { y: 0.205, w: 0.26, d: 0.165, n: 2.6 }, { y: 0.255, w: 0.268, d: 0.166, n: 2.7 }, { y: 0.3, w: 0.254, d: 0.158, n: 2.6 },
       { y: 0.335, w: 0.22, d: 0.14, n: 2.4 }, { y: 0.36, w: 0.165, d: 0.115, n: 2.2 }, { y: 0.377, w: 0.105, d: 0.088 },
       { y: 0.383, w: 0.072, d: 0.068 },
-    ], { radial: 22, subdiv: 2, capBottom: false, flipU: true }),
-    neck: loft([{ y: 0.3, w: 0.063, d: 0.064 }, { y: 0.47, w: 0.056, d: 0.058 }], { radial: 12, subdiv: 1, capBottom: false }),
+    ], { radial: 22, subdiv: 2, capBottom: false, flipU: true, ao: AO.chest }),
+    neck: loft([{ y: 0.3, w: 0.063, d: 0.064 }, { y: 0.47, w: 0.056, d: 0.058 }], { radial: 12, subdiv: 1, capBottom: false, ao: AO.neck }),
     thigh: loft([
-      { y: 0.065, w: 0.068, d: 0.072 }, { y: 0.0, w: 0.09, d: 0.096 }, { y: -0.09, w: 0.091, d: 0.098 },
+      { y: 0.065, w: 0.07, d: 0.074 }, { y: 0.0, w: 0.094, d: 0.099 }, { y: -0.09, w: 0.095, d: 0.1 }, { y: -0.2, w: 0.088, d: 0.094 },
       { y: -0.3, w: 0.077, d: 0.083 }, { y: -0.44, w: 0.063, d: 0.068 }, { y: -0.495, w: 0.059, d: 0.063 },
-    ], { radial: 14, subdiv: 2 }),
+    ], { radial: 14, subdiv: 2, ao: AO.thigh }),
     knee: loft([
-      { y: 0.055, w: 0.058, d: 0.062 }, { y: 0.0, w: 0.062, d: 0.068, z: 0.006 }, { y: -0.07, w: 0.06, d: 0.065, z: 0.002 }, { y: -0.115, w: 0.058, d: 0.062 },
-    ], { radial: 14, subdiv: 1 }),
+      { y: 0.055, w: 0.058, d: 0.062 }, { y: 0.0, w: 0.062, d: 0.067, z: 0.004 }, { y: -0.07, w: 0.061, d: 0.066, z: 0.002 }, { y: -0.128, w: 0.06, d: 0.064 },
+    ], { radial: 14, subdiv: 1, ao: AO.knee }),
     sock: loft([
-      { y: -0.06, w: 0.049, d: 0.052 }, { y: -0.15, w: 0.058, d: 0.064, z: -0.008 }, { y: -0.28, w: 0.05, d: 0.054, z: -0.004 },
+      { y: -0.06, w: 0.045, d: 0.047 }, { y: -0.16, w: 0.056, d: 0.061, z: -0.006 }, { y: -0.28, w: 0.05, d: 0.054, z: -0.004 },
       { y: -0.42, w: 0.036, d: 0.04 }, { y: -0.5, w: 0.034, d: 0.041 },
-    ], { radial: 12, subdiv: 2 }),
+    ], { radial: 12, subdiv: 2, ao: AO.sock }),
     upperArm: loft([
       { y: 0.05, w: 0.055, d: 0.058 }, { y: -0.02, w: 0.066, d: 0.068 }, { y: -0.14, w: 0.064, d: 0.066 },
       { y: -0.28, w: 0.053, d: 0.054 }, { y: -0.385, w: 0.044, d: 0.045 },
-    ], { radial: 12, subdiv: 2 }),
+    ], { radial: 12, subdiv: 2, ao: AO.upperArm }),
     sleeve: loft([
       { y: 0.065, w: 0.068, d: 0.07 }, { y: -0.04, w: 0.077, d: 0.079 }, { y: -0.15, w: 0.075, d: 0.077 }, { y: -0.178, w: 0.074, d: 0.076 },
-    ], { radial: 12, subdiv: 2, capBottom: false }),
+    ], { radial: 12, subdiv: 2, capBottom: false, ao: AO.sleeve }),
     forearm: loft([
       { y: 0.035, w: 0.043, d: 0.046 }, { y: -0.06, w: 0.05, d: 0.048 }, { y: -0.2, w: 0.04, d: 0.037 },
       { y: -0.33, w: 0.031, d: 0.026 }, { y: -0.36, w: 0.029, d: 0.024 },
-    ], { radial: 10, subdiv: 2 }),
+    ], { radial: 10, subdiv: 2, ao: AO.forearm }),
     tape: loft([{ y: -0.255, w: 0.039, d: 0.034 }, { y: -0.335, w: 0.034, d: 0.029 }], { radial: 12, subdiv: 1, capTop: false, capBottom: false }),
     gloveL: glove(),
     gloveR: mirrorX(glove()),
@@ -149,7 +167,7 @@ export function createGeometries() {
     hardware: helmetHardware(),
     strap: chinStrap(),
     visor: helmetVisor(),
-    face: (() => { const g = new THREE.SphereGeometry(1, 12, 9); g.scale(0.078, 0.1, 0.09); return g; })(),
+    face: (() => { const g = new THREE.SphereGeometry(1, 12, 9); g.scale(0.078, 0.1, 0.09); return tint(g, '#ffffff'); })(),
     towel: (() => { const g = new THREE.BoxGeometry(0.11, 0.24, 0.008, 1, 4, 1); g.translate(0, -0.12, 0); return g; })(),
   };
 }

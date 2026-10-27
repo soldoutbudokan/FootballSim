@@ -142,10 +142,13 @@ export const ACTIONS = {
   },
 
   pocket(anim, pose, age, data, p, ctx) {
-    pose.hands[0].set(0.075, 0.15, 0.27); pose.hands[1].set(-0.075, 0.16, 0.27);
+    pose.hands[0].set(0.075, 0.09, 0.28); pose.hands[1].set(-0.075, 0.1, 0.28);
     pose.elbows[0].set(0.9, -1, 0); pose.elbows[1].set(-0.9, -1, 0);
     pose.wrists[0].set(-0.2, 0, -0.9); pose.wrists[1].set(-0.2, 0, 0.9);
+    // Quarterbacks drop back tall, even when shuffling backwards.
     pose.spine.x = Math.min(pose.spine.x, 0.12);
+    pose.hips.x = Math.min(pose.hips.x, 0.16);
+    pose.pelvis.y = Math.max(pose.pelvis.y, anim.dims.hipY - 0.12);
     pose.head.y = 0.35 * Math.sin(ctx.time * 0.8 + anim.seed * 3);
   },
 
@@ -333,7 +336,7 @@ export const ACTIONS = {
     pose.spine.x += 0.45 * lurch; pose.spine.z += side * 0.3 * lurch;
     pose.head.x -= 0.3 * lurch;
     for (let i = 0; i < 2; i++) {
-      _a.set(SIDES[i] * 0.45, 0.12 + 0.12 * Math.sin(age * 14 + i * 2), 0.22 + 0.1 * Math.cos(age * 11 + i));
+      _a.set(SIDES[i] * 0.42, -0.1 + 0.08 * Math.sin(age * 14 + i * 2), 0.25 + 0.08 * Math.cos(age * 11 + i));
       pose.hands[i].lerp(_a, lurch);
       pose.elbows[i].lerp(_b.set(SIDES[i], -0.2, -0.3), lurch);
     }

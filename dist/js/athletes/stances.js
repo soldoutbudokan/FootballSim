@@ -90,8 +90,8 @@ export function applyStance(anim, pose, p, ctx) {
       pose.head.set(0.02, 0.45 * Math.sin(t * 0.45 + seed * 5), 0);
       feet(0.25, 0.02, -0.25, -0.08);
       anim.prepareChest(pose);
-      anim.handAt(pose, 0, 0.12, 1.14 * k, 0.42);
-      anim.handAt(pose, 1, -0.12, 1.14 * k, 0.42);
+      anim.handAt(pose, 0, 0.14, 1.27 * k, 0.38);
+      anim.handAt(pose, 1, -0.14, 1.27 * k, 0.38);
       pose.wrists[0].set(-0.4, 0, -0.6); pose.wrists[1].set(-0.4, 0, 0.6);
       elbowsOut(0.7, -1, -0.2);
       break;

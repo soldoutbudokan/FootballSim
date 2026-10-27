@@ -65,6 +65,21 @@ const SCENARIOS = {
     p.B.vx = 0; p.B.vz = Math.min(9.3, 4 + t * 6);
   }, 'B'),
 
+  // Steady gaits: a jogging receiver, a walking lineman, a sliding quarterback.
+  jog: () => scripted(presnap(), 2, (t, s, p) => {
+    if (t === 0) { standStill(s); Object.assign(p.Y, { x: -4, z: 40 }); }
+    p.Y.vx = 0; p.Y.vz = 4.5;
+  }, 'Y'),
+  walk: () => scripted(presnap(), 3, (t, s, p) => {
+    if (t === 0) { standStill(s); s.phase = 'dead'; s.deadTime = 0; Object.assign(p.RG, { x: 2, z: 36 }); }
+    s.deadTime = t; s.time = 0;
+    p.RG.vx = 0; p.RG.vz = 1.5;
+  }, 'RG'),
+  shuffle: () => scripted(presnap(), 2, (t, s, p) => {
+    if (t === 0) { standStill(s); s.carrier = s.selected = 'QB'; }
+    p.QB.vx = 2.2 * Math.min(1, t * 3); p.QB.vz = 0; p.QB.facing = 0; p.QB.holdFacing = true;
+  }, 'QB'),
+
   // Stem at speed, brake into the break, plant and cut 90 degrees inside.
   cut: () => scripted(presnap(), 2.2, (t, s, p) => {
     const x = p.X;

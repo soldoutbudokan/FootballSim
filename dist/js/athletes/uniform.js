@@ -196,12 +196,12 @@ export function createMaterials(players) {
   const std = (params) => new THREE.MeshStandardMaterial(params);
   const materials = {
     atlas,
-    chest: withAtlasOffset(std({ map: atlas.texture, roughness: 0.8 }), atlas.scale),
-    cloth: std({ color: '#ffffff', roughness: 0.8 }),
-    pants: std({ color: TEAM.silver, roughness: 0.42, metalness: 0.18 }),
+    chest: withAtlasOffset(std({ map: atlas.texture, roughness: 0.8, vertexColors: true }), atlas.scale),
+    cloth: std({ color: '#ffffff', roughness: 0.8, vertexColors: true }),
+    pants: std({ color: TEAM.silver, roughness: 0.42, metalness: 0.18, vertexColors: true }),
     belt: std({ color: TEAM.belt, roughness: 0.6 }),
-    sock: std({ color: TEAM.sock, roughness: 0.92 }),
-    skin: std({ color: '#ffffff', roughness: 0.56 }),
+    sock: std({ color: TEAM.sock, roughness: 0.92, vertexColors: true }),
+    skin: std({ color: '#ffffff', roughness: 0.56, vertexColors: true }),
     glove: std({ color: '#ffffff', roughness: 0.6 }),
     cleat: std({ color: '#ffffff', roughness: 0.42, vertexColors: true }),
     tape: std({ color: '#f3f2ec', roughness: 0.85 }),
