@@ -12,7 +12,7 @@ The release contains all runtime assets, including Three.js 0.180.0 and its MIT 
 
 ## Included
 
-- 22 articulated players with instanced helmets, facemasks, pads, uniforms and procedural running, blocking, throwing, catching and tackle poses.
+- 22 articulated players with instanced helmets, facemasks, pads, uniforms and procedural running, blocking, throwing, catching and tackle poses. Photographed grass materials and an HDR reflection environment complement the procedural stadium; asset credits are in `ASSETS.md`.
 - Eight concepts: Mesh, PA Flood, Four Verticals, Quick Slants, Dagger, Smash, Inside Zone and HB Stretch. Flip any play.
 - Four CPU defensive looks: Cover 3, Cover 2, 2-man and Cover 0 blitz; optional concealed random coverage. Three difficulty levels.
 - Acceleration, route landmarks, zone/man pursuit, pass protection, pressure and movement accuracy penalties, ballistic passing, swept catch checks, interceptions, handoffs, sprint stamina, jukes and tackles.

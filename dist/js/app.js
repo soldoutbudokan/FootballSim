@@ -107,6 +107,6 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnim
 try {
   view=new FieldScene($('field'),sim.players);view.setLighting(prefs.lighting);view.cameraMode=prefs.camera;
   graphics=new AdaptiveGraphics((profile,scale)=>{view.setQuality(profile,scale);$('quality-label').textContent=(prefs.graphics==='auto'?'AUTO · ':'')+profile.label.toUpperCase()+(scale<1?' · '+Math.round(scale*100)+'%':'');},prefs.graphics);
-  syncPlay();$('load-status').textContent='FIELD READY · NO DOWNLOAD REQUIRED';$('input-device').textContent=isTouch?'TOUCH CONTROLS':'KEYBOARD + MOUSE';frameId=requestAnimationFrame(frame);
+  syncPlay();$('load-status').textContent='FIELD READY · NO INSTALL REQUIRED';$('input-device').textContent=isTouch?'TOUCH CONTROLS':'KEYBOARD + MOUSE';frameId=requestAnimationFrame(frame);
   if(new URLSearchParams(location.search).has('debug'))window.footballsim={sim,view,graphics,start,snap,get paused(){return paused;},get replay(){return replay;}};
 } catch(error){console.error(error);$('start').disabled=true;$('load-status').textContent='WEBGL 2 REQUIRED';$('error').hidden=false;$('error-message').textContent='FootballSim needs WebGL 2. Enable hardware acceleration in your browser, then reload. '+(error.message||'');}

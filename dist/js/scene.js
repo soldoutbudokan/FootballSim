@@ -1,4 +1,5 @@
 import * as THREE from '../vendor/three.module.js';
+import { HDRLoader } from '../vendor/HDRLoader.js';
 import { FORMATION, RECEIVERS, ROUTE_COLORS, routeFor } from './plays.js';
 import { WIDTH, seededRandom } from './sim.js';
 import { pixelRatio, PROFILES } from './graphics.js';
@@ -27,7 +28,7 @@ function makeRig(batch,scene,spec,palette,skin) {
   part(body,sphereGeo,palette.jersey,0,1.43,0,.405,.18,.22);
   part(body,sphereGeo,palette.pants,0,.96,0,.26,.21,.18);
   part(body,cylinderGeo,palette.belt,0,1.025,0,.255,.035,.185);
-  const head=new THREE.Group();head.position.set(0,1.77,0);body.add(head);
+  const head=new THREE.Group();head.position.set(0,1.77,0);head.scale.setScalar(.84);body.add(head);
   part(head,sphereGeo,skin,0,-.035,.12,.16,.185,.15);
   part(head,sphereGeo,palette.helmet,0,.035,-.025,.237,.248,.25);
   part(head,sphereGeo,palette.stripe,0,.08,-.035,.035,.218,.242);
@@ -63,7 +64,7 @@ function makeRig(batch,scene,spec,palette,skin) {
   const number=canvasTexture(128,128,(c,w,h)=>{c.clearRect(0,0,w,h);c.textAlign='center';c.fillStyle=palette.number;c.font='bold 15px Arial';c.fillText(spec.team==='offense'?'OFFENSE':'DEFENSE',w/2,24);c.font='900 76px Arial';c.fillText(String(spec.number),w/2,98);});
   const numberMaterial=new THREE.MeshStandardMaterial({map:number,transparent:true,roughness:1,depthWrite:false});
   for(const side of [-1,1]){const mesh=new THREE.Mesh(new THREE.PlaneGeometry(.4,.42),numberMaterial);mesh.position.set(0,1.285,side*.212);if(side<0)mesh.rotation.y=Math.PI;body.add(mesh);}
-  const scale=spec.role==='ol'||spec.role==='dl'?1.1:spec.role==='te'?1.035:1;root.scale.set(scale,scale,scale);
+  const scale=spec.role==='ol'||spec.role==='dl'?1.1:spec.role==='te'?1.035:1;root.scale.set(scale*.86,scale,scale);
   return {root,body,head,arms,legs};
 }
 function animateRig(rig,p,time,deadTime=0){
@@ -96,7 +97,9 @@ export class FieldScene {
     this.cameraMode='broadcast';this.profile=PROFILES[1];this.scale=1;this.firstFrame=true;this.currentSpot=35;this.art=new THREE.Group();this.scene.add(this.art);
     this.ambient=new THREE.HemisphereLight('#d4e8ff','#526444',2.05);this.scene.add(this.ambient);
     this.sun=new THREE.DirectionalLight('#fff0ce',3.1);this.sun.position.set(-44,62,10);this.sun.target.position.set(0,0,-45);this.sun.castShadow=true;this.sun.shadow.bias=-.00015;this.sun.shadow.normalBias=.035;this.sun.shadow.camera.left=-40;this.sun.shadow.camera.right=40;this.sun.shadow.camera.top=45;this.sun.shadow.camera.bottom=-45;this.sun.shadow.camera.near=1;this.sun.shadow.camera.far=180;this.scene.add(this.sun,this.sun.target);
+    this.assetsReady=false;this.assetManager=new THREE.LoadingManager(()=>{this.assetsReady=true;});this.assetManager.onError=url=>console.error('Environment asset failed: '+url);
     this.buildSky();this.buildField();this.buildStadium();this.buildGrass();
+    new HDRLoader(this.assetManager).load('./assets/noon_grass_1k.hdr',texture=>{texture.mapping=THREE.EquirectangularReflectionMapping;this.environmentTexture=texture;this.scene.environment=texture;this.scene.environmentIntensity=this.lighting==='night'?.12:.38;});
     const common={cage:mat('#a7b4bd',.38,.6),visor:mat('#17242d',.15,.3),belt:mat('#162431'),boots:mat('#101922',.5),gloves:mat('#f0f1e5'),socks:mat('#e2e9e2')};
     const offense={...common,jersey:mat('#10364d',.78),pants:mat('#ecf0e7',.9),helmet:mat('#123b52',.27,.5),stripe:mat('#bbef77',.55),number:'#f6f8ea'};
     const defense={...common,jersey:mat('#e9eeec',.8),pants:mat('#283442',.85),helmet:mat('#d8dfe0',.29,.5),stripe:mat('#d37648',.55),number:'#1b3445'};
@@ -118,7 +121,7 @@ export class FieldScene {
     const tex=canvasTexture(2048,4096,(c,w,h)=>{
       const sx=w/WIDTH,sy=h/120; c.fillStyle='#306343';c.fillRect(0,0,w,h);
       for(let z=10;z<110;z+=5){c.fillStyle=(z/5)%2?'#39734a':'#336943';c.fillRect(0,(120-z-5)*sy,w,5*sy);}
-      const noise=document.createElement('canvas');noise.width=256;noise.height=512;const n=noise.getContext('2d'),data=n.createImageData(256,512);for(let i=0;i<data.data.length;i+=4){const v=rand()*255;data.data[i]=v;data.data[i+1]=v;data.data[i+2]=v;data.data[i+3]=35;}n.putImageData(data,0,0);c.drawImage(noise,0,0,w,h);
+      const noise=document.createElement('canvas');noise.width=256;noise.height=512;const n=noise.getContext('2d'),data=n.createImageData(256,512);for(let i=0;i<data.data.length;i+=4){const v=rand()*255;data.data[i]=v;data.data[i+1]=v;data.data[i+2]=v;data.data[i+3]=10;}n.putImageData(data,0,0);c.drawImage(noise,0,0,w,h);
       c.fillStyle='#163c43';c.fillRect(0,0,w,10*sy);c.fillRect(0,110*sy,w,10*sy);
       c.fillStyle='#f1f3db';c.strokeStyle='#eef0d8';
       c.lineWidth=.12*sx;c.strokeRect(.12*sx,.12*sy,w-.24*sx,h-.24*sy);
@@ -130,7 +133,14 @@ export class FieldScene {
       for(const y of [5*sy,115*sy]){c.save();c.translate(w/2,y);if(y>h/2)c.rotate(Math.PI);c.font='900 140px Arial';c.fillStyle='#dae8d1';c.fillText('F O O T B A L L S I M',0,0);c.restore();}
     });tex.anisotropy=Math.min(8,this.renderer.capabilities.getMaxAnisotropy());
     const ground=mat('#496a43');box(this.scene,ground,0,-.2,-60,160,.3,225);
-    const field=new THREE.Mesh(new THREE.PlaneGeometry(WIDTH,120),new THREE.MeshStandardMaterial({map:tex,roughness:.95}));field.rotation.x=-Math.PI/2;field.position.set(0,.006,-60);field.receiveShadow=true;this.scene.add(field);
+    const loader=new THREE.TextureLoader(this.assetManager),tile=2/.9144;
+    const detail=loader.load('./assets/sparse_grass_diff_1k.jpg');detail.colorSpace=THREE.SRGBColorSpace;detail.wrapS=detail.wrapT=THREE.RepeatWrapping;
+    const normal=loader.load('./assets/sparse_grass_nor_gl_1k.jpg'),roughness=loader.load('./assets/sparse_grass_rough_1k.jpg');
+    for(const t of [detail,normal,roughness]){t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=Math.min(8,this.renderer.capabilities.getMaxAnisotropy());}
+    for(const t of [normal,roughness])t.repeat.set(WIDTH/tile,120/tile);
+    this.turfMaterial=new THREE.MeshStandardMaterial({map:tex,normalMap:normal,normalScale:new THREE.Vector2(.2,.2),roughnessMap:roughness,roughness:.98});
+    this.turfMaterial.onBeforeCompile=shader=>{shader.uniforms.turfDetail={value:detail};shader.fragmentShader='uniform sampler2D turfDetail;\n'+shader.fragmentShader;shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>','#include <map_fragment>\nvec3 grassDetail = texture2D(turfDetail, vMapUv * vec2(24.384,54.864)).rgb;\nfloat fieldPaint = smoothstep(0.48,0.75,max(diffuseColor.r,max(diffuseColor.g,diffuseColor.b)));\nfloat grassVariation = clamp(dot(grassDetail,vec3(0.2126,0.7152,0.0722))*2.2+0.67,0.72,1.25);\ndiffuseColor.rgb *= mix(grassVariation,1.0,fieldPaint);');};
+    const field=new THREE.Mesh(new THREE.PlaneGeometry(WIDTH,120),this.turfMaterial);field.rotation.x=-Math.PI/2;field.position.set(0,.006,-60);field.receiveShadow=true;this.scene.add(field);
     const sideline=mat('#e3e5d5');box(this.scene,sideline,-27.7,-.005,-60,1.9,.02,123);box(this.scene,sideline,27.7,-.005,-60,1.9,.02,123);
     const orange=mat('#e96322');for(const x of [-WIDTH/2,WIDTH/2])for(const z of [10,110])box(this.scene,orange,x,.22,-z,.15,.44,.15);
     this.los=new THREE.Mesh(new THREE.PlaneGeometry(WIDTH,.12),new THREE.MeshBasicMaterial({color:'#6edbff',transparent:true,opacity:.55,depthWrite:false}));this.los.rotation.x=-Math.PI/2;this.los.position.y=.023;this.scene.add(this.los);
@@ -168,7 +178,7 @@ export class FieldScene {
   }
   setLighting(mode){
     const presets={day:{top:'#4c85b2',bottom:'#dae1d7',fog:'#b8d3df',sun:'#fff0ce',intensity:3.1,ambient:2.05,pos:[-44,62,10],exposure:1.08},sunset:{top:'#4d6d91',bottom:'#e6b188',fog:'#bcae9d',sun:'#ffc18a',intensity:3.3,ambient:1.4,pos:[-75,24,-5],exposure:1.02},night:{top:'#071322',bottom:'#344957',fog:'#233744',sun:'#d6ebff',intensity:2.2,ambient:1.25,pos:[-36,65,-15],exposure:1.18}};
-    const p=presets[mode]||presets.day;this.skyMaterial.uniforms.top.value.set(p.top);this.skyMaterial.uniforms.bottom.value.set(p.bottom);this.scene.fog.color.set(p.fog);this.sun.color.set(p.sun);this.sun.intensity=p.intensity;this.ambient.intensity=p.ambient;this.lightOffset=p.pos;this.sun.position.set(...p.pos);this.renderer.toneMappingExposure=p.exposure;this.skyMaterial.uniforms.sunDir.value.copy(this.sun.position).normalize();
+    const p=presets[mode]||presets.day;this.lighting=mode;this.scene.environmentIntensity=mode==='night'?.12:.38;this.skyMaterial.uniforms.top.value.set(p.top);this.skyMaterial.uniforms.bottom.value.set(p.bottom);this.scene.fog.color.set(p.fog);this.sun.color.set(p.sun);this.sun.intensity=p.intensity;this.ambient.intensity=p.ambient;this.lightOffset=p.pos;this.sun.position.set(...p.pos);this.renderer.toneMappingExposure=p.exposure;this.skyMaterial.uniforms.sunDir.value.copy(this.sun.position).normalize();
   }
   setQuality(profile,scale=1){this.profile=profile;this.scale=scale;this.renderer.shadowMap.enabled=profile.shadow>0;this.sun.castShadow=profile.shadow>0;if(profile.shadow&&this.sun.shadow.mapSize.x!==profile.shadow){this.sun.shadow.mapSize.set(profile.shadow,profile.shadow);if(this.sun.shadow.map){this.sun.shadow.map.dispose();this.sun.shadow.map=null;}}this.crowd.count=profile.crowd;this.grass.count=profile.grass;this.details.visible=profile.detail;this.resize();}
   resize(){const w=this.canvas.clientWidth||window.innerWidth,h=this.canvas.clientHeight||window.innerHeight;this.renderer.setPixelRatio(pixelRatio(w,h,window.devicePixelRatio||1,this.profile,this.scale));this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();}

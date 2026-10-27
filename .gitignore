@@ -4,3 +4,5 @@ test-results/
 *.log
 /dist/vendor/three.core.js
 /dist/vendor/three.module.js
+/dist/assets/*.jpg
+/dist/assets/*.hdr

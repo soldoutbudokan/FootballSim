@@ -6,8 +6,9 @@ const url=process.env.TEST_URL||'http://127.0.0.1:8000';await mkdir('test-result
 const browser=await chromium.launch({headless:true,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
 const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{if(r.status()>=400)errors.push(r.status()+' '+r.url());});
+page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
 try {
-  await page.goto(url+'/?debug=1');await page.waitForFunction(()=>window.footballsim?.view.renderer.info.render.calls>0,{},{timeout:60000});
+  await page.goto(url+'/?debug=1');await page.waitForFunction(()=>window.footballsim?.view.assetsReady&&window.footballsim.view.renderer.info.render.calls>0,{},{timeout:60000});
   assert.equal(await page.locator('#error').isVisible(),false);await page.screenshot({path:'test-results/01-welcome.png'});
   await page.getByRole('button',{name:'ENTER THE FIELD'}).click();await page.waitForFunction(()=>window.footballsim.sim.phase==='presnap');
   await page.screenshot({path:'test-results/02-presnap.png'});
