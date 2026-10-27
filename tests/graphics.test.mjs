@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {AdaptiveGraphics,PROFILES,pixelRatio} from '../dist/js/graphics.js';
+test('high DPI displays respect physical pixel budgets',()=>{for(const p of PROFILES){const r=pixelRatio(3840,2160,3,p);assert.ok(3840*2160*r*r<=p.pixels+1);assert.ok(r<=p.dpr);}});
+test('sustained overload lowers auto quality; one stall does not',()=>{const a=new AdaptiveGraphics(()=>{});for(let i=0;i<180;i++)a.sample(16.67);a.sample(190);assert.equal(a.level,1);for(let i=0;i<210;i++)a.sample(40);assert.equal(a.level,0);});
+test('quality changes wait until a rep boundary',()=>{const a=new AdaptiveGraphics(()=>{});for(let i=0;i<200;i++)a.sample(40,true,false);assert.equal(a.level,1);a.sample(40,true,true);assert.equal(a.level,0);});
+test('sustained headroom can raise auto quality',()=>{const a=new AdaptiveGraphics(()=>{});for(let i=0;i<1000;i++)a.sample(16.67);assert.equal(a.level,2);});
+test('manual quality cannot be changed by frame rate samples',()=>{const a=new AdaptiveGraphics(()=>{},'ultra');for(let i=0;i<400;i++)a.sample(100);assert.equal(a.profile.id,'ultra');});
+test('paused/menu samples do not downgrade the device',()=>{const a=new AdaptiveGraphics(()=>{});for(let i=0;i<300;i++)a.sample(100,false);assert.equal(a.level,1);});
+test('invalid saved graphics choices return to auto',()=>{const a=new AdaptiveGraphics(()=>{},'broken');assert.equal(a.mode,'auto');assert.equal(a.profile.id,'balanced');});

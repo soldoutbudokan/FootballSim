@@ -1,0 +1,30 @@
+name: Verify FootballSim
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test && npm run check && npm run build
+      - name: Install browser test runner
+        run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Check the release in Chromium
+        run: |
+          node scripts/serve.mjs .pages-dist > /tmp/footballsim-server.log 2>&1 &
+          node tests/browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: footballsim-browser-checks
+          path: test-results/

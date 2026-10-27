@@ -8,7 +8,7 @@ Intended Pages address: **https://soldoutbudokan.github.io/FootballSim/**.
 
 One-time repository setup: open **Settings → Pages → Build and deployment → Source → GitHub Actions**. The `Verify FootballSim` workflow runs simulation checks and a Chromium gameplay smoke test. A successful push verification on `main` triggers `Publish GitHub Pages`. After enabling Pages, the publishing workflow can also be run manually from Actions. GitHub Pages is the intended public host; no account or backend is needed to play.
 
-The repository contains all runtime assets, including Three.js 0.180.0 and its MIT license. The game makes no third-party asset requests. Paths are relative, so it works under `/FootballSim/` and other static subdirectories. The release build versions CSS and the complete JavaScript import graph together to prevent mixed cached releases.
+The release contains all runtime assets, including Three.js 0.180.0 and its MIT license. The build downloads CricSim's renderer from a pinned commit and verifies each file's Git blob hash; subsequent local builds use that verified copy. The published game makes no third-party asset requests. Paths are relative, so it works under `/FootballSim/` and other static subdirectories. The release build versions CSS and the complete JavaScript import graph together to prevent mixed cached releases.
 
 ## Included
 
@@ -61,7 +61,7 @@ This is a playable original browser simulation inspired by professional football
 
 ## Development
 
-Requires Node 22 or later. Runtime and core tests have no package dependencies.
+Requires Node 22 or later. Runtime and core tests have no package dependencies. The first development run or build needs network access to retrieve the pinned renderer; subsequent runs use the verified local copy.
 
 ```sh
 npm run dev       # http://localhost:8000
