@@ -9,3 +9,6 @@ test-results/
 !/dist/vendor/THREE-LICENSE.txt
 /dist/assets/*
 /dist/fonts/*
+
+# Harness-managed agent worktrees
+.claude/worktrees/
