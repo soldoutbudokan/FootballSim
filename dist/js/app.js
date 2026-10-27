@@ -32,7 +32,7 @@ function releaseCharge(index){if(!charge||charge.index!==index)return;const dura
   charge=null;$('charge').hidden=true;document.querySelectorAll('.target-button').forEach(b=>b.classList.remove('active'));
 }
 function cycleCamera(){const cameras=['broadcast','wide','qb'];prefs.camera=cameras[(cameras.indexOf(prefs.camera)+1)%3];view.cameraMode=prefs.camera;$('camera').value=prefs.camera;savePrefs();toast({broadcast:'Broadcast camera',wide:'All-22 wide camera',qb:'Quarterback camera'}[prefs.camera]);}
-function openPlaybook(){if(!inMenu&&!['presnap','dead'].includes(sim.phase)){toast('Call the next play after this rep.');return;}openDialog('playbook');}
+function openPlaybook(){if(replay)closeReplay();if(!inMenu&&!['presnap','dead'].includes(sim.phase)){toast('Call the next play after this rep.');return;}openDialog('playbook');}
 function togglePause(){if(inMenu)return;if(activeDialog)closeDialog();else openDialog('pause');}
 function renderStats(){const s=sim.stats;$('session-stats').innerHTML=`<div><strong>${s.completions}/${s.attempts}</strong><span>COMP / ATT</span></div><div><strong>${s.yards}</strong><span>TOTAL YARDS</span></div><div><strong>${s.td}</strong><span>TOUCHDOWNS</span></div><div><strong>${s.reps}</strong><span>REPS</span></div><div><strong>${s.ints}</strong><span>INTS</span></div><div><strong>${s.sacks}</strong><span>SACKS</span></div>`;}
 function openReplay(){if(sim.phase!=='dead'||sim.recording.length<2)return;clearInput();replay={time:0,playing:true,frames:sim.recording.slice(),duration:sim.recording.at(-1).time};$('replay-controls').hidden=false;$('result').hidden=true;$('replay-play').textContent='Ⅱ';view.firstFrame=true;audio.suspend();}
@@ -51,7 +51,7 @@ function fieldPosition(z){const yard=Math.round(z-10);return yard<50?'OWN '+yard
 function renderHUD(){
   const dead=sim.phase==='dead',pre=sim.phase==='presnap',live=!pre&&!dead,passing=sim.phase==='live'&&sim.play.type!=='run'&&!sim.crossedLine;
   document.body.classList.toggle('playing',live);
-  $('phase-badge').innerHTML='<span class="live-dot"></span>'+({presnap:'PRE-SNAP',live:sim.play.type==='run'?'HANDOFF':'IN THE POCKET',air:'BALL IN FLIGHT',run:'BALL CARRIER',dead:'REP COMPLETE'}[sim.phase]);
+  $('phase-badge').innerHTML='<span class="live-dot"></span>'+(replay?'INSTANT REPLAY':{presnap:'PRE-SNAP',live:sim.play.type==='run'?'HANDOFF':'IN THE POCKET',air:'BALL IN FLIGHT',run:'BALL CARRIER',dead:'REP COMPLETE'}[sim.phase]);
   $('coverage-label').textContent='DEFENSE · '+(sim.config.coverage==='random'&&pre?'DISGUISED':COVERAGES[sim.coverage].label.toUpperCase());
   $('down-distance').textContent=['','1ST','2ND','3RD','4TH'][sim.down]+' & '+(sim.spot+sim.toGo>=110?'GOAL':sim.toGo);
   $('field-position').textContent=fieldPosition(sim.spot);$('rep-number').textContent=String(sim.stats.reps+(pre?1:0)).padStart(2,'0');
@@ -72,7 +72,7 @@ $('replay-open').onclick=openReplay;$('replay-close').onclick=closeReplay;$('rep
 $('replay-scrub').oninput=()=>{if(replay){replay.time=Number($('replay-scrub').value)/1000*replay.duration;replay.playing=false;$('replay-play').textContent='▶';}};
 $('sound').onclick=async()=>{await audio.setEnabled(!audio.enabled);$('sound').setAttribute('aria-pressed',String(audio.enabled));$('sound').setAttribute('aria-label',audio.enabled?'Mute sound':'Enable sound');$('sound').querySelector('.mute-dot').hidden=audio.enabled;if(paused)audio.suspend();};
 document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{playFilter=b.dataset.filter;document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el===b));renderPlaybook();});
-$('flip-play').onchange=()=>{sim.config.flip=$('flip-play').checked;sim.reset();syncPlay();};
+$('flip-play').onchange=()=>{if(sim.phase==='dead')sim.next();sim.config.flip=$('flip-play').checked;sim.reset();syncPlay();};
 for(const [id,key] of [['graphics','graphics'],['lighting','lighting'],['camera','camera'],['pass-style','passStyle']]){$(id).value=prefs[key];$(id).onchange=()=>{prefs[key]=$(id).value;savePrefs();if(key==='graphics')graphics?.select(prefs.graphics);if(key==='lighting')view?.setLighting(prefs.lighting);if(key==='camera'&&view)view.cameraMode=prefs.camera;};}
 $('apply-settings').onclick=()=>{if(replay)closeReplay();sim.reset();sim.configure({coverage:$('coverage').value,difficulty:$('difficulty').value,mode:$('practice-mode').value,spot:Number($('spot').value)});syncPlay();closeDialog();toast('Practice conditions updated.');};
 window.addEventListener('keydown',e=>{

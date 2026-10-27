@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_sha == github.sha
     runs-on: ubuntu-latest
     environment:
       name: github-pages

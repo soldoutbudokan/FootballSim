@@ -194,7 +194,7 @@ export class FieldScene {
     const controlled=state.players.find(p=>p.id===(state.carrier||state.selected))||state.players[0];
     state.players.forEach((p,i)=>{const visual={...p};if(state.phase==='presnap')visual.action='ready';else if(state.carrier===p.id&&!['throw','catch','down','juke'].includes(p.action))visual.action='carry';animateRig(this.rigs.get(p.id),visual,state.time,state.deadTime);this.dummy.position.set(p.x,.022,-p.z);this.dummy.rotation.set(-Math.PI/2,0,0);this.dummy.scale.set(1,1,1);this.dummy.updateMatrix();this.contactShadows.setMatrixAt(i,this.dummy.matrix);});
     this.contactShadows.instanceMatrix.needsUpdate=true;
-    this.ball.position.set(state.ball.x,state.ball.y,-state.ball.z);this.ball.rotation.set(state.phase==='air'?state.time*24:.25,Math.PI/2,0);this.ball.visible=true;
+    this.ball.position.set(state.ball.x,state.ball.y,-state.ball.z);if(state.phase==='dead'&&controlled.action==='down')this.ball.position.y=Math.max(.22,state.ball.y-state.deadTime*3);this.ball.rotation.set(state.phase==='air'?state.time*24:.25,Math.PI/2,0);this.ball.visible=true;
     this.ring.position.set(controlled.x,.036,-controlled.z);this.ring.visible=!menu&&state.phase!=='dead';this.art.visible=showArt&&state.phase==='presnap';
     const target=new THREE.Vector3(),position=new THREE.Vector3();
     if(menu){const t=performance.now()*.000045;target.set(0,1,-state.spot-8);position.set(24+Math.sin(t)*5,17,-state.spot+23);}
