@@ -2,7 +2,10 @@
 node_modules/
 test-results/
 *.log
-/dist/vendor/three.core.js
-/dist/vendor/three.module.js
-/dist/assets/*.jpg
-/dist/assets/*.hdr
+# Third-party runtime files are downloaded and hash-verified by scripts/vendor.mjs
+# from the manifests in scripts/assets/. Only original files are committed.
+/dist/vendor/*
+!/dist/vendor/HDRLoader.js
+!/dist/vendor/THREE-LICENSE.txt
+/dist/assets/*
+/dist/fonts/*

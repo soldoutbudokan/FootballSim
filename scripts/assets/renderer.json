@@ -1,0 +1,7 @@
+{
+  "source": "Three.js 0.180.0 reused from CricSim's pinned commit; Git blob hashes verified before use.",
+  "files": [
+    { "dest": "dist/vendor/three.core.js", "url": "https://raw.githubusercontent.com/soldoutbudokan/CricSim/b70aaf8a1bae5aa4ca42690b8c4e3ee8a79d05a6/dist/vendor/three.core.js", "gitBlobSha1": "7dcd0fbcbc04b8d9a20ecb96c1ce344cb55150d5" },
+    { "dest": "dist/vendor/three.module.js", "url": "https://raw.githubusercontent.com/soldoutbudokan/CricSim/b70aaf8a1bae5aa4ca42690b8c4e3ee8a79d05a6/dist/vendor/three.module.js", "gitBlobSha1": "477ca4dafa7af919a2b9818e01b5ae25198d4aa4" }
+  ]
+}

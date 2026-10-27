@@ -1,0 +1,9 @@
+{
+  "source": "Poly Haven CC0 grass maps and HDR reused from CricSim's pinned commit; SHA-256 verified.",
+  "files": [
+    { "dest": "dist/assets/sparse_grass_diff_1k.jpg", "url": "https://raw.githubusercontent.com/soldoutbudokan/CricSim/b70aaf8a1bae5aa4ca42690b8c4e3ee8a79d05a6/dist/assets/sparse_grass_diff_1k.jpg", "sha256": "ae94f2b34597b9108eefd88217f55eccaec6d6b382e858a478ee92df90e66617" },
+    { "dest": "dist/assets/sparse_grass_nor_gl_1k.jpg", "url": "https://raw.githubusercontent.com/soldoutbudokan/CricSim/b70aaf8a1bae5aa4ca42690b8c4e3ee8a79d05a6/dist/assets/sparse_grass_nor_gl_1k.jpg", "sha256": "1c840a24807346ddaaf94a5057aee4078fcec3a4cd84bfe45da7d3b480ef460b" },
+    { "dest": "dist/assets/sparse_grass_rough_1k.jpg", "url": "https://raw.githubusercontent.com/soldoutbudokan/CricSim/b70aaf8a1bae5aa4ca42690b8c4e3ee8a79d05a6/dist/assets/sparse_grass_rough_1k.jpg", "sha256": "9ebe6d03a9551c17d1802835c92c1442acb8f5d38d4874ee8c37770f11c4bed1" },
+    { "dest": "dist/assets/noon_grass_1k.hdr", "url": "https://raw.githubusercontent.com/soldoutbudokan/CricSim/b70aaf8a1bae5aa4ca42690b8c4e3ee8a79d05a6/dist/assets/noon_grass_1k.hdr", "sha256": "63413e8b3d8b4c394396d05ab9c7c590a8d70e2cf45187054d198d42f0209939" }
+  ]
+}

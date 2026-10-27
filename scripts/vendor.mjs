@@ -1,34 +1,32 @@
-// Reuse CricSim's exact Three.js 0.180.0 distribution at build time. Both files
-// are shipped inside the Pages artifact; players make no cross-site requests.
-import {readFile,writeFile,mkdir} from 'node:fs/promises';
+// Downloads every third-party runtime file listed in scripts/assets/*.json and
+// verifies it (SHA-256 of the bytes, or a Git blob SHA-1) before it is used.
+// Verified files are cached in the working tree; the published release ships
+// them, so players make no cross-site requests. Each manifest entry may also
+// carry "replace": [[from, to], ...] string substitutions applied after the hash
+// check (used to make vendored ES modules import the local renderer copy).
+import {readFile,writeFile,mkdir,readdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-const revision='b70aaf8a1bae5aa4ca42690b8c4e3ee8a79d05a6';
-const files={
-  'three.core.js':'7dcd0fbcbc04b8d9a20ecb96c1ce344cb55150d5',
-  'three.module.js':'477ca4dafa7af919a2b9818e01b5ae25198d4aa4',
-};
-function blobHash(bytes){return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');}
-await mkdir('dist/vendor',{recursive:true});
-for(const [name,expected] of Object.entries(files)){
-  const dest='dist/vendor/'+name;let cached;try{cached=await readFile(dest);}catch{}
-  if(cached&&blobHash(cached)===expected)continue;
-  const url=`https://raw.githubusercontent.com/soldoutbudokan/CricSim/${revision}/dist/vendor/${name}`;
-  const response=await fetch(url,{signal:AbortSignal.timeout(60000)});if(!response.ok)throw new Error(`Renderer download failed: ${response.status} (${name})`);
-  const bytes=Buffer.from(await response.arrayBuffer());if(blobHash(bytes)!==expected)throw new Error('Renderer integrity check failed: '+name);
-  await writeFile(dest,bytes);console.log('Prepared '+name+' (verified '+expected+')');
+import path from 'node:path';
+const dir='scripts/assets';
+const manifests=(await readdir(dir)).filter(f=>f.endsWith('.json')).sort();
+const blobHash=bytes=>createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');
+function apply(bytes,entry){if(!entry.replace)return bytes;let text=bytes.toString('utf8');for(const [from,to] of entry.replace){if(!text.includes(from))throw new Error(`Replacement text not found in ${entry.dest}: ${from}`);text=text.split(from).join(to);}return Buffer.from(text,'utf8');}
+for(const name of manifests){
+  const manifest=JSON.parse(await readFile(path.join(dir,name),'utf8'));
+  for(const entry of manifest.files){
+    if(!entry.dest||!entry.url||!(entry.sha256||entry.gitBlobSha1))throw new Error(`Manifest ${name}: each file needs dest, url and sha256 or gitBlobSha1.`);
+    const matches=bytes=>entry.sha256?sha256(bytes)===entry.sha256:blobHash(bytes)===entry.gitBlobSha1;
+    const verifiedPath=entry.replace?entry.dest+'.verified':entry.dest;
+    let cached;try{cached=await readFile(verifiedPath);}catch{}
+    if(cached&&matches(cached)){if(entry.replace){let out;try{out=await readFile(entry.dest);}catch{}if(!out||!out.equals(apply(cached,entry)))await writeFile(entry.dest,apply(cached,entry));}continue;}
+    const response=await fetch(entry.url,{signal:AbortSignal.timeout(90000)});
+    if(!response.ok)throw new Error(`Download failed: ${response.status} (${entry.dest})`);
+    const bytes=Buffer.from(await response.arrayBuffer());
+    if(!matches(bytes))throw new Error(`Integrity check failed: ${entry.dest} (${entry.sha256?sha256(bytes):blobHash(bytes)})`);
+    await mkdir(path.dirname(entry.dest),{recursive:true});
+    if(entry.replace){await writeFile(verifiedPath,bytes);await writeFile(entry.dest,apply(bytes,entry));}else await writeFile(entry.dest,bytes);
+    console.log(`Prepared ${entry.dest} (verified)`);
+  }
 }
-const assets={
-  'sparse_grass_diff_1k.jpg':'ae94f2b34597b9108eefd88217f55eccaec6d6b382e858a478ee92df90e66617',
-  'sparse_grass_nor_gl_1k.jpg':'1c840a24807346ddaaf94a5057aee4078fcec3a4cd84bfe45da7d3b480ef460b',
-  'sparse_grass_rough_1k.jpg':'9ebe6d03a9551c17d1802835c92c1442acb8f5d38d4874ee8c37770f11c4bed1',
-  'noon_grass_1k.hdr':'63413e8b3d8b4c394396d05ab9c7c590a8d70e2cf45187054d198d42f0209939',
-};
-await mkdir('dist/assets',{recursive:true});
-for(const [name,expected] of Object.entries(assets)){
-  const dest='dist/assets/'+name;let cached;try{cached=await readFile(dest);}catch{}
-  const hash=b=>createHash('sha256').update(b).digest('hex');if(cached&&hash(cached)===expected)continue;
-  const response=await fetch(`https://raw.githubusercontent.com/soldoutbudokan/CricSim/${revision}/dist/assets/${name}`,{signal:AbortSignal.timeout(60000)});
-  if(!response.ok)throw new Error(`Environment download failed: ${response.status} (${name})`);
-  const bytes=Buffer.from(await response.arrayBuffer());if(hash(bytes)!==expected)throw new Error('Environment integrity check failed: '+name);
-  await writeFile(dest,bytes);console.log('Prepared verified environment asset: '+name);
-}
+console.log(`Vendored assets from ${manifests.length} manifest(s) are present and verified.`);
