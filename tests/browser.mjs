@@ -3,8 +3,9 @@ import {chromium} from 'playwright';
 import {mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 const url=process.env.TEST_URL||'http://127.0.0.1:8000';await mkdir('test-results',{recursive:true});
-const browser=await chromium.launch({headless:true,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+const browser=await chromium.launch({headless:true,executablePath:process.env.TEST_CHROME_PATH||undefined,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
 const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];
+page.setDefaultTimeout(60000);
 page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{if(r.status()>=400)errors.push(r.status()+' '+r.url());});
 page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
 try {
@@ -14,6 +15,9 @@ try {
   await page.screenshot({path:'test-results/02-presnap.png'});
   await page.getByRole('button',{name:'Choose play'}).click();assert.equal(await page.locator('.play-card').count(),8);await page.screenshot({path:'test-results/03-playbook.png'});
   await page.getByRole('button',{name:'Mesh concept — SHORT',exact:true}).click();
+  // Capture the default visual tier above, then use the low GPU budget for
+  // interaction checks on shared software-rendering CI machines.
+  await page.locator('#settings-open').click();await page.locator('#graphics').selectOption('performance');await page.getByRole('button',{name:'Close settings',exact:true}).click();
   await page.getByRole('button',{name:'SNAP BALL'}).click();await page.waitForFunction(()=>window.footballsim.sim.time>1.5);
   await page.keyboard.down('1');await page.waitForTimeout(250);await page.keyboard.up('1');
   await page.waitForFunction(()=>window.footballsim.sim.stats.attempts===1);await page.waitForFunction(()=>window.footballsim.sim.phase==='dead',{},{timeout:60000});
@@ -25,4 +29,7 @@ try {
   await page.locator('#playbook-open').click();await page.getByRole('button',{name:'Quick slants — QUICK GAME',exact:true}).click();await page.locator('#snap').click();await page.waitForFunction(()=>window.footballsim.sim.time>.4);await page.keyboard.press('x');await page.waitForFunction(()=>window.footballsim.sim.phase==='dead');await page.locator('#result-playbook').click();await page.locator('#flip-play').check();assert.equal(await page.evaluate(()=>window.footballsim.sim.down),2);await page.getByRole('button',{name:'Mesh concept — SHORT',exact:true}).click();assert.equal(await page.evaluate(()=>window.footballsim.sim.config.flip),true);
   await page.setViewportSize({width:390,height:844});await page.screenshot({path:'test-results/06-mobile.png'});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.deepEqual(errors,[]);console.log('Browser checks passed: render, playbook, passing, handoff, replay, pause, settings, mobile layout.');
+} catch(error) {
+  console.error('Browser state at failure:',await page.evaluate(()=>({phase:window.footballsim?.sim.phase,time:window.footballsim?.sim.time,paused:window.footballsim?.paused,hidden:document.hidden,quality:window.footballsim?.graphics.profile.id})).catch(()=>({unavailable:true})));
+  await page.screenshot({path:'test-results/failure.png'}).catch(()=>{});throw error;
 } finally {await browser.close();}
