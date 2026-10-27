@@ -1,6 +1,6 @@
 import * as THREE from '../vendor/three.module.js';
 import { GRAVITY } from './sim.js';
-import { RigBatch, Rig, createGeometries } from './athletes/rig.js';
+import { Squad, Rig, createGeometries } from './athletes/rig.js';
 import { Animator } from './athletes/motion.js';
 import { createMaterials } from './athletes/uniform.js';
 import { Football } from './athletes/ball.js';
@@ -19,18 +19,22 @@ export class Athletes {
   constructor(scene, players) {
     this.scene = scene;
     this.materials = createMaterials(players);
-    this.geometry = createGeometries();
-    this.batch = new RigBatch(scene);
+    const geometry = createGeometries();
+    this.squad = new Squad(scene, players.length, this.materials);
+    this.group = this.squad.group;
     this.rigs = new Map();
     this.animators = new Map();
+    const atlas = this.materials.atlas;
     players.forEach((spec, i) => {
-      const rig = new Rig(this.batch, spec, i, this.materials, this.geometry, this.materials.atlas.offsets.get(spec.id));
+      const cell = { offset: atlas.offsets.get(spec.id), scale: atlas.scale, white: atlas.white };
+      const rig = new Rig(this.squad, spec, i, geometry, cell);
       this.rigs.set(spec.id, rig);
       this.animators.set(spec.id, new Animator(rig, spec));
     });
-    this.batch.finish();
-    this.ball = new Football(scene, this.materials);
-    this.markers = new Markers(scene, players.length);
+    this.squad.finish();
+    for (const g of Object.values(geometry)) g.dispose();
+    this.ball = new Football(this.group, this.materials);
+    this.markers = new Markers(this.group, players.length);
     this.qbId = players.find(p => p.role === 'qb')?.id ?? 'QB';
     this.lastClock = null;
     this.time = 0;
@@ -40,7 +44,7 @@ export class Athletes {
 
   setQuality(profile) {
     // Small parts (towels, tape, belts, chin straps) are skipped on the lowest tier.
-    this.batch.setDetail(profile.detail !== false);
+    this.squad.setDetail(profile.detail !== false);
     this.markers.setQuality(profile);
   }
 
@@ -51,13 +55,13 @@ export class Athletes {
       if (!anim) continue;
       anim.rig.apply(anim.update(p, ctx), p.x, p.z, anim.yaw);
     }
+    this.squad.commit();
     this.ball.update(ctx, this);
     const controlled = state.players.find(p => p.id === (state.carrier || state.selected)) || state.players[0];
     this.markers.update(ctx, this, controlled, this.ball, menu);
-    this.batch.update();
-    // The renderer refreshes the rest of the scene graph itself; only do it
-    // here if someone has turned that off.
-    if (this.scene.matrixWorldAutoUpdate === false) this.scene.updateMatrixWorld();
+    // Everything this module draws lives under one group; its world matrices
+    // are current when update() returns, whatever the scene's auto-update.
+    this.group.updateMatrixWorld(true);
     return controlled;
   }
 

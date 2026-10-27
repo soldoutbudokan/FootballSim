@@ -30,7 +30,7 @@ export class Animator {
     this.work = new Pose();
     this.prevPose = new Pose();
     this.yaw = Math.PI;
-    this.speed = 0; this.accel = 0; this.lean = 0; this.heading = 0; this.backpedal = false;
+    this.speed = 0; this.accel = 0; this.lean = 0; this.turn = 0; this.heading = 0; this.backpedal = false;
     this.cycle = this.seed; this.stepLen = 1; this.lastPhase = null;
     this.local = new THREE.Vector2(0, 1);     // movement direction in the root frame
     this.action = null; this.age = 0; this.data = {};
@@ -94,16 +94,16 @@ export class Animator {
     const speed = Number.isFinite(p.speed) ? p.speed : Math.hypot(vx, vz);
     const heading = speed > 0.4 ? Math.atan2(vx, vz) : this.heading;
     if (teleport) {
-      this.accel = 0; this.lean = 0;
+      this.accel = 0; this.lean = 0; this.turn = 0;
     } else if (dt > 0) {
       this.accel = damp(this.accel, clamp((speed - this.speed) / dt, -25, 25), 7, dt);
-      let lean = p.lean;
-      if (!Number.isFinite(lean)) {
-        // Lateral acceleration from the rate of change of heading.
-        const turnRate = speed > 0.8 ? wrapAngle(heading - this.heading) / dt : 0;
-        lean = clamp(speed * turnRate / 12, -1, 1);
-      }
-      this.lean = damp(this.lean, lean, 9, dt);
+      // Banking follows the simulation's lean (plan 3.1); a simulation that
+      // does not report it gets an upright runner.
+      this.lean = damp(this.lean, Number.isFinite(p.lean) ? clamp(p.lean, -1, 1) : 0, 9, dt);
+      // Signed turn rate (positive = turning to his right), used to read the
+      // direction of a cut when the snapshot carries no lean.
+      const turnRate = speed > 0.8 ? wrapAngle(heading - this.heading) / dt : 0;
+      this.turn = damp(this.turn, clamp(turnRate, -12, 12), 12, dt);
     }
     this.speed = speed;
     this.heading = heading;

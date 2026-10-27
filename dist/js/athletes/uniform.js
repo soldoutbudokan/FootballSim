@@ -111,8 +111,8 @@ function fabricNoise(ctx, x, y, w, h, seed, strength) {
 // Jersey atlas: one 512 x 256 cell per player holding the unwrapped chest
 // piece (u around the torso starting at the left side, back at u = 0.25,
 // front at u = 0.75, so both numbers read left to right; v from the waist
-// seam up to the collar). Each instance of
-// the chest mesh looks up its own cell through a per-instance UV offset.
+// seam up to the collar). The last cell is plain white: every other body
+// part samples it, so the whole squad shares one textured material.
 
 export const ATLAS = { cols: 4, rows: 6, cellW: 512, cellH: 256, pad: 4 };
 
@@ -122,6 +122,7 @@ const CHEST_PERIMETER = 1.34, CHEST_SPAN = 0.42;
 
 export function buildJerseyAtlas(players) {
   const { cols, rows, cellW, cellH, pad } = ATLAS;
+  if (players.length >= cols * rows) throw new Error('Jersey atlas holds ' + (cols * rows - 1) + ' players');
   const c = canvas(cols * cellW, rows * cellH), ctx = c.getContext('2d');
   const pxPerYdU = cellW / CHEST_PERIMETER, pxPerYdV = cellH / CHEST_SPAN, squeeze = pxPerYdU / pxPerYdV;
   const offsets = new Map();
@@ -130,7 +131,7 @@ export function buildJerseyAtlas(players) {
     const { jersey, number } = jerseyFor(spec);
     ctx.fillStyle = jersey;
     ctx.fillRect(x0, y0, cellW, cellH);
-    fabricNoise(ctx, x0, y0, cellW, cellH, hashString(spec.id), spec.team === 'defense' && spec.role !== 'qb' ? 0.035 : 0.06);
+    fabricNoise(ctx, x0, y0, cellW, cellH, hashString(spec.id), spec.team === 'defense' && spec.role !== 'qb' ? 0.03 : 0.05);
     // Side seams and a slightly darker collar band.
     ctx.fillStyle = 'rgba(0,0,0,0.10)';
     for (const u of [0, 0.5]) ctx.fillRect(x0 + u * cellW - 1, y0, 3, cellH);
@@ -142,23 +143,31 @@ export function buildJerseyAtlas(players) {
     drawNumber(ctx, text, x0 + cellW * 0.25, y0 + cellH * 0.55, pxPerYdV * 0.25, number, squeeze);
     offsets.set(spec.id, [(x0 + pad) / c.width, 1 - (y0 + cellH - pad) / c.height]);
   });
+  const last = cols * rows - 1, wx = (last % cols) * cellW, wy = Math.floor(last / cols) * cellH;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(wx, wy, cellW, cellH);
   const texture = new THREE.CanvasTexture(c);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
   const scale = [(cellW - 2 * pad) / c.width, (cellH - 2 * pad) / c.height];
-  return { texture, offsets, scale };
+  const white = [(wx + cellW / 2) / c.width, 1 - (wy + cellH / 2) / c.height];
+  return { texture, offsets, scale, white };
 }
 
 // Navy shell with one silver centre stripe; the last rows down to the edge
-// are the dark rubber trim around the face opening, jaw flaps and back.
+// are the dark rubber trim around the face opening, jaw flaps and back. The
+// bottom fifth of the texture is white for the facemask, strap and visor,
+// which share the helmet material (the shell maps to v = 0.2..1).
 function helmetStripeTexture() {
-  const c = canvas(256, 64), ctx = c.getContext('2d');
+  const c = canvas(256, 80), ctx = c.getContext('2d');
   ctx.fillStyle = TEAM.navy; ctx.fillRect(0, 0, 256, 64);
   ctx.fillStyle = TEAM.silver; ctx.fillRect(116, 0, 24, 64);
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(126, 0, 4, 64);
+  ctx.fillStyle = '#e4e6ea'; ctx.fillRect(126, 0, 4, 64);
   ctx.fillStyle = '#161a20'; ctx.fillRect(0, 59, 256, 5);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 64, 256, 16);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
   return t;
 }
 
@@ -182,42 +191,24 @@ function leatherTexture() {
   return t;
 }
 
-// Adds a per-instance UV offset to a standard material's map lookup.
-function withAtlasOffset(material, scale) {
-  material.onBeforeCompile = shader => {
-    shader.uniforms.atlasScale = { value: new THREE.Vector2(...scale) };
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 atlasOffset;\nuniform vec2 atlasScale;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n\tvMapUv = atlasOffset + vMapUv * atlasScale;\n#endif');
-  };
-  material.customProgramCacheKey = () => 'athlete-jersey-atlas';
-  return material;
-}
+// Roughness and metalness per kind of surface; baked per vertex because the
+// squad's cloth, skin, rubber and metal share one material.
+export const SURFACE = {
+  cloth: [0.86, 0], pants: [0.62, 0.04], belt: [0.6, 0], sock: [0.92, 0], skin: [0.55, 0],
+  sleeve: [0.7, 0], glove: [0.62, 0], cleat: [0.42, 0], tape: [0.85, 0], towel: [1, 0],
+  shell: [0.32, 0.25], facemask: [0.45, 0.35], strap: [0.35, 0], visor: [0.06, 0.7],
+};
 
-// All athlete materials, shared by every rig. Colours that vary per player
-// (jerseys, skin, gloves, cleats) come from instance colours on white bases.
+// The squad's materials: one for every body (vertex colours carry the
+// jersey, pants, skin, glove and cleat colours; the atlas carries the
+// numbers), one clear-coated material for the helmets, and the ball.
 export function createMaterials(players) {
   const atlas = buildJerseyAtlas(players);
-  const std = (params) => new THREE.MeshStandardMaterial(params);
-  const materials = {
+  return {
     atlas,
-    chest: withAtlasOffset(std({ map: atlas.texture, roughness: 0.8, vertexColors: true }), atlas.scale),
-    cloth: std({ color: '#ffffff', roughness: 0.8, vertexColors: true }),
-    pants: std({ color: TEAM.silver, roughness: 0.42, metalness: 0.18, vertexColors: true }),
-    belt: std({ color: TEAM.belt, roughness: 0.6 }),
-    sock: std({ color: TEAM.sock, roughness: 0.92, vertexColors: true }),
-    skin: std({ color: '#ffffff', roughness: 0.56, vertexColors: true }),
-    glove: std({ color: '#ffffff', roughness: 0.6 }),
-    cleat: std({ color: '#ffffff', roughness: 0.42, vertexColors: true }),
-    tape: std({ color: '#f3f2ec', roughness: 0.85 }),
-    towel: std({ color: '#f5f5f2', roughness: 1 }),
-    helmet: new THREE.MeshPhysicalMaterial({ map: helmetStripeTexture(), roughness: 0.34, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1 }),
-    hardware: std({ color: '#ffffff', roughness: 0.45, metalness: 0.35, vertexColors: true }),
-    strap: std({ color: '#f1f1ec', roughness: 0.35 }),
-    visor: new THREE.MeshPhysicalMaterial({ color: '#0c1117', roughness: 0.06, metalness: 0.7, clearcoat: 1, side: THREE.DoubleSide }),
-    leather: std({ map: leatherTexture(), roughness: 0.62 }),
-    laces: std({ color: '#f4f1e8', roughness: 0.7 }),
+    body: new THREE.MeshStandardMaterial({ name: 'athlete-body', map: atlas.texture, vertexColors: true, roughness: 1, metalness: 1 }),
+    helmet: new THREE.MeshPhysicalMaterial({ name: 'athlete-helmet', map: helmetStripeTexture(), vertexColors: true, roughness: 1, metalness: 1, clearcoat: 1, clearcoatRoughness: 0.1 }),
+    leather: new THREE.MeshStandardMaterial({ name: 'ball-leather', map: leatherTexture(), roughness: 0.62 }),
+    laces: new THREE.MeshStandardMaterial({ name: 'ball-laces', color: '#f4f1e8', roughness: 0.7 }),
   };
-  materials.helmet.side = THREE.FrontSide;
-  return materials;
 }
