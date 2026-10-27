@@ -1,0 +1,13 @@
+{
+  "source": "three.js r180 glTF/FBX loaders and skeleton utilities (MIT) for skinned character models; Xbot.glb is a DEVELOPMENT-ONLY stand-in (Mixamo rig) kept out of the release build.",
+  "files": [
+    { "dest": "dist/vendor/GLTFLoader.js", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/loaders/GLTFLoader.js", "sha256": "67ac5551fdafa6e349bd80c8f8e5e39c136d6b2fb1ad647db9abb21dc86f9e4a", "replace": [["from 'three'", "from './three.module.js'"], ["'../utils/BufferGeometryUtils.js'", "'./BufferGeometryUtils.js'"]] },
+    { "dest": "dist/vendor/BufferGeometryUtils.js", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/utils/BufferGeometryUtils.js", "sha256": "fda7e946b8e0b5ab39b779206589e7a1079a22eb24efb89d7223e03fdfb1f751", "replace": [["from 'three'", "from './three.module.js'"]] },
+    { "dest": "dist/vendor/SkeletonUtils.js", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/utils/SkeletonUtils.js", "sha256": "0761b1e003917b215d25dd81439d854b36034b5a57ce84c2cfe3b02428d7b253", "replace": [["from 'three'", "from './three.module.js'"]] },
+    { "dest": "dist/vendor/FBXLoader.js", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/loaders/FBXLoader.js", "sha256": "d97724a6bea228003e02c64651d969a9a62003a00be314ef6995c390116f547d", "replace": [["from 'three'", "from './three.module.js'"], ["'../libs/fflate.module.js'", "'./fflate.module.js'"], ["'../curves/NURBSCurve.js'", "'./NURBSCurve.js'"]] },
+    { "dest": "dist/vendor/fflate.module.js", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/libs/fflate.module.js", "sha256": "209a4412eb48ce609edb4391992a792ffcc3983d30ee7e2b0b89a8c470f3cd8a" },
+    { "dest": "dist/vendor/NURBSCurve.js", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/curves/NURBSCurve.js", "sha256": "bef2607618a7778455e71a1f0bd206951c382d313e2e245808cc7d3533d60fb6", "replace": [["from 'three'", "from './three.module.js'"], ["'../curves/NURBSUtils.js'", "'./NURBSUtils.js'"]] },
+    { "dest": "dist/vendor/NURBSUtils.js", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/curves/NURBSUtils.js", "sha256": "c6bd7c4137d585098923f189687898ea3e8762ea3ecbe255d749a56353894379", "replace": [["from 'three'", "from './three.module.js'"]] },
+    { "dest": "dist/dev/Xbot.glb", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/models/gltf/Xbot.glb", "sha256": "002f8d269de68e5dce3d25195caf390d1aa359bbfaae3fcf4c8dc78ec36c3ba5" }
+  ]
+}

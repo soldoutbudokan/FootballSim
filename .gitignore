@@ -12,3 +12,4 @@ test-results/
 
 # Harness-managed agent worktrees
 .claude/worktrees/
+/dist/dev/
