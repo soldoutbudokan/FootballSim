@@ -182,12 +182,12 @@ export class FieldScene {
   }
   setQuality(profile,scale=1){this.profile=profile;this.scale=scale;this.renderer.shadowMap.enabled=profile.shadow>0;this.sun.castShadow=profile.shadow>0;if(profile.shadow&&this.sun.shadow.mapSize.x!==profile.shadow){this.sun.shadow.mapSize.set(profile.shadow,profile.shadow);if(this.sun.shadow.map){this.sun.shadow.map.dispose();this.sun.shadow.map=null;}}this.crowd.count=profile.crowd;this.grass.count=profile.grass;this.details.visible=profile.detail;this.resize();}
   resize(){const w=this.canvas.clientWidth||window.innerWidth,h=this.canvas.clientHeight||window.innerHeight;this.renderer.setPixelRatio(pixelRatio(w,h,window.devicePixelRatio||1,this.profile,this.scale));this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();}
-  setPlay(play,spot,flip,toGo=10){
+  setPlay(play,spot,flip,toGo=null){
     this.currentSpot=spot;while(this.art.children.length){const child=this.art.children[0];this.art.remove(child);child.geometry?.dispose();child.material?.dispose();}
     RECEIVERS.forEach((id,i)=>{const p=FORMATION.find(p=>p.id===id),route=routeFor(play,id,spot,flip),points=[new THREE.Vector3(flip?-p.x:p.x,.07,-(spot+p.z)),...route.map(p=>new THREE.Vector3(p.x,.07,-p.z))];
       const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineDashedMaterial({color:ROUTE_COLORS[i],dashSize:.65,gapSize:.25,transparent:true,opacity:.85}));line.computeLineDistances();this.art.add(line);
       if(points.length>1){const end=points.at(-1),prev=points.at(-2),d=end.clone().sub(prev).normalize(),perp=new THREE.Vector3(-d.z,0,d.x);const ap=[end.clone().addScaledVector(d,-.8).addScaledVector(perp,.4),end,end.clone().addScaledVector(d,-.8).addScaledVector(perp,-.4)];this.art.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ap),new THREE.LineBasicMaterial({color:ROUTE_COLORS[i]})));}
-    });this.los.position.z=-spot;this.firstDown.position.z=-Math.min(110,spot+toGo);this.sun.target.position.z=-spot-7;const off=this.lightOffset||[-44,62,10];this.sun.position.set(off[0],off[1],-spot+off[2]);
+    });this.los.position.z=-spot;this.firstDown.visible=toGo!==null;this.firstDown.position.z=-Math.min(110,spot+(toGo??0));this.sun.target.position.z=-spot-7;const off=this.lightOffset||[-44,62,10];this.sun.position.set(off[0],off[1],-spot+off[2]);
   }
   project(x,y,z){this.projectVector.set(x,y,-z).project(this.camera);return {x:(this.projectVector.x*.5+.5)*this.canvas.clientWidth,y:(-.5*this.projectVector.y+.5)*this.canvas.clientHeight,visible:this.projectVector.z<1&&this.projectVector.z>-1&&Math.abs(this.projectVector.x)<1.05&&Math.abs(this.projectVector.y)<1.05};}
   render(state,dt,{menu=false,showArt=false,replay=false}={}){

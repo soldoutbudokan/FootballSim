@@ -13,11 +13,13 @@ The release contains all runtime assets, including Three.js 0.180.0 and its MIT 
 ## Included
 
 - 22 articulated players with instanced helmets, facemasks, pads, uniforms and procedural running, blocking, throwing, catching and tackle poses. Photographed grass materials and an HDR reflection environment complement the procedural stadium; asset credits are in `ASSETS.md`.
+- Random offense and defense are selected for each new rep by default. Select a named play to repeat it, or choose **Random every rep** in the playbook/settings to restore random offense.
 - Eight concepts: Mesh, PA Flood, Four Verticals, Quick Slants, Dagger, Smash, Inside Zone and HB Stretch. Flip any play.
-- Four CPU defensive looks: Cover 3, Cover 2, 2-man and Cover 0 blitz; optional concealed random coverage. Three difficulty levels.
+- Pre-snap hot routes (H): choose receiver 1–5, then a streak, slant, drag, in, out, curl, flat or corner. Z opens eight audibles for the current snap. Both preserve drive progress; audibles retain the defensive call.
+- Four CPU defensive looks: Cover 3, Cover 2, 2-man and Cover 0 blitz; optional concealed random coverage. Three difficulty levels. Defensive fronts vary between even, over, under and wide alignments; coverage calls use different corner cushions, safety shells and blitz positions. Two-man keeps two deep safeties, and Cover 0 assigns the five remaining defenders to the five eligible receivers.
 - Acceleration, route landmarks, zone/man pursuit, pass protection, pressure and movement accuracy penalties, ballistic passing, swept catch checks, interceptions, handoffs, sprint stamina, jukes and tackles.
 - Automatic control transfer to the receiver or running back. No defensive player control.
-- Repeat-spot practice or drive practice with downs, distance, first downs, touchdowns and turnover resets.
+- Repeat-spot practice hides downs, distance and the first-down line. **Move the chains** enables them, adds a prominent drive display, and tracks gains, first downs, touchdowns and turnover resets.
 - Instant half-speed replay with scrubbing; session passing, rushing, sack, interception and touchdown totals.
 - Broadcast, All-22 and quarterback cameras; afternoon, sunset and stadium-light settings. Keyboard, pointer/touch and standard-mapped gamepad inputs.
 - Synthesized field ambience and snap, catch, whistle and touchdown sounds; opt-in sound control.
@@ -35,6 +37,9 @@ The release contains all runtime assets, including Three.js 0.180.0 and its MIT 
 | Q / E | Juke left / right |
 | X | Throw away |
 | B | Playbook between reps |
+| H (pre-snap) | Hot routes: receiver 1–5, then the displayed route key |
+| Z (pre-snap) | Audible: choose play 1–8 |
+| F | Enter / exit fullscreen |
 | Tab | Toggle pre-snap route art |
 | C | Cycle camera |
 | R | Replay after a rep |

@@ -34,3 +34,21 @@ export const COVERAGES = {
 export function routeFor(play, id, spot, flip=false) {
   return (play.routes[id] || []).map(([x,z]) => ({ x:flip?-x:x, z:Math.min(118, spot+z) }));
 }
+
+export const HOT_ROUTES = [
+  {id:'streak',label:'Streak',key:'V'}, {id:'slant',label:'Slant',key:'S'},
+  {id:'drag',label:'Drag',key:'D'}, {id:'in',label:'In',key:'I'},
+  {id:'out',label:'Out',key:'O'}, {id:'curl',label:'Curl',key:'C'},
+  {id:'flat',label:'Flat',key:'L'}, {id:'corner',label:'Corner',key:'R'},
+];
+export function hotRouteFor(id,kind) {
+  const p=FORMATION.find(p=>p.id===id);if(!p||!RECEIVERS.includes(id))return null;
+  const x=p.x,inside=x<0?1:-1,outside=-inside,edge=v=>Math.max(-25.5,Math.min(25.5,v));
+  const routes={
+    streak:[[x,10],[x,42]], slant:[[x,3],[edge(x+inside*10),13],[edge(x+inside*20),23]],
+    drag:[[x,3],[edge(x+inside*12),4],[edge(x+inside*25),5]],
+    in:[[x,10],[edge(x+inside*13),10]], out:[[x,8],[edge(x+outside*12),8]],
+    curl:[[x,11],[x,8]], flat:[[edge(x+outside*7),1],[edge(x+outside*16),3]],
+    corner:[[x,11],[edge(x+outside*12),24]],
+  };return routes[kind]||null;
+}

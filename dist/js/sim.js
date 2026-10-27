@@ -1,4 +1,4 @@
-import { FORMATION, PLAYS, RECEIVERS, routeFor, COVERAGES } from './plays.js';
+import { FORMATION, PLAYS, RECEIVERS, routeFor, hotRouteFor, COVERAGES } from './plays.js';
 export const STEP=1/120, WIDTH=53.333333, GOAL=110, GRAVITY=10.73;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
@@ -13,23 +13,53 @@ const DEFENSE=[
   {id:'CB1',number:23,role:'cb',x:-21,z:6,speed:8.7}, {id:'CB2',number:24,role:'cb',x:21,z:6,speed:8.7},
   {id:'FS',number:31,role:'s',x:-9,z:17,speed:8.5}, {id:'SS',number:32,role:'s',x:9,z:17,speed:8.5},
 ];
+const FRONTS=[
+  {name:'Even',x:[-4.8,-1.6,1.6,4.8]}, {name:'Over',x:[-5.8,-2.8,.65,4.2]},
+  {name:'Under',x:[-4.2,-.65,2.8,5.8]}, {name:'Wide 9',x:[-7,-2,2,7]},
+];
+function defensiveAlignment(coverage,front,random) {
+  const support={
+    cover3:[[-9,5],[-1,6],[6,5],[-21,8],[21,8],[0,20],[10,8]],
+    cover2:[[-8,5],[0,6],[8,5],[-22,4],[22,4],[-12,18],[12,18]],
+    man:[[-10,2.5],[-2,4],[6.4,2.5],[-21,2],[21,2],[-11,20],[11,20]],
+    blitz:[[-2.7,1.5],[2.7,1.5],[-10,2.5],[-21,1.8],[21,1.8],[-3.5,4],[6.4,2.5]],
+  }[coverage];
+  return DEFENSE.map((spec,i)=>{
+    const [x,z]=i<4?[FRONTS[front].x[i],1.2]:support[i-4];
+    return {...spec,x:x+(random()-.5)*.8,z:Math.max(.8,z+(random()-.5)*.7)};
+  });
+}
 export class Simulation {
-  constructor(seed=Date.now()) {
-    this.random=seededRandom(seed);this.config={spot:35,coverage:'cover3',difficulty:'pro',mode:'reps',flip:false};
+  constructor(seed=Date.now(),options={}) {
+    this.random=seededRandom(seed);this.config={spot:35,offense:'random',coverage:'random',difficulty:'pro',mode:'reps',flip:false,...options};
     this.stats={reps:0,attempts:0,completions:0,yards:0,passing:0,rushing:0,td:0,ints:0,sacks:0};
-    this.down=1;this.toGo=10;this.spot=35;this.play=PLAYS[0];this.events=[];this.reset();
+    this.spot=clamp(Number(this.config.spot)||35,11,105);this.down=1;this.toGo=Math.min(10,GOAL-this.spot);this.play=PLAYS[0];this.events=[];this.reset(true);
   }
-  configure(options) {if(this.phase!=='presnap'&&this.phase!=='dead')return false;Object.assign(this.config,options);this.config.spot=clamp(Number(this.config.spot)||35,11,105);this.spot=this.config.spot;this.down=1;this.toGo=Math.min(10,GOAL-this.spot);this.reset();return true;}
-  selectPlay(id){if(!['presnap','dead'].includes(this.phase))return false;this.play=PLAYS.find(p=>p.id===id)||this.play;this.reset();return true;}
-  reset() {
+  configure(options) {if(this.phase!=='presnap'&&this.phase!=='dead')return false;Object.assign(this.config,options);this.config.spot=clamp(Number(this.config.spot)||35,11,105);this.spot=this.config.spot;this.down=1;this.toGo=Math.min(10,GOAL-this.spot);this.reset(true);return true;}
+  selectPlay(id){if(!['presnap','dead'].includes(this.phase)||(id!=='random'&&!PLAYS.some(p=>p.id===id)))return false;this.config.offense=id;this.reset(true);return true;}
+  reset(newCalls=false) {
     this.phase='presnap';this.time=0;this.deadTime=0;this.pass=null;this.throwIntent=null;this.result=null;this.handoff=false;this.crossedLine=false;this.tackler=null;
     this.selected='QB';this.carrier='QB';this.jukeCooldown=0;this.recording=[];this.recordClock=0;this.completed=false;this.threw=false;this.events=[];
-    const cover=this.config.coverage; this.coverage=cover==='random'?['cover3','cover2','man','blitz'][Math.floor(this.random()*4)]:cover;
+    if(newCalls){
+      this.play=this.config.offense==='random'?PLAYS[Math.floor(this.random()*PLAYS.length)]:PLAYS.find(p=>p.id===this.config.offense)||this.play;
+      const cover=this.config.coverage;this.coverage=cover==='random'?['cover3','cover2','man','blitz'][Math.floor(this.random()*4)]:cover;
+      const front=Math.floor(this.random()*FRONTS.length);this.defensiveFront=FRONTS[front].name;this.alignment=defensiveAlignment(this.coverage,front,this.random);this.hotRoutes={};this.audibled=false;
+    }
     this.players=FORMATION.map(p=>player(p,'offense',this.spot,this.config.flip));
-    this.players.push(...DEFENSE.map(p=>player(p,'defense',this.spot)));
-    this.players.forEach(p=>{p.shed=2.5+this.random()*2.8;p.route=routeFor(this.play,p.id,this.spot,this.config.flip);});
+    this.players.push(...this.alignment.map(p=>player({...p,z:Math.min(p.z,118-this.spot)},'defense',this.spot,this.config.flip)));
+    this.players.forEach(p=>{p.shed=2.5+this.random()*2.8;p.route=routeFor(this.effectivePlay,p.id,this.spot,this.config.flip);});
     this.byId=Object.fromEntries(this.players.map(p=>[p.id,p]));
     this.ball={x:0,y:.45,z:this.spot,vx:0,vy:0,vz:0};this.lastBall={...this.ball};this.saveFrame();
+  }
+  get effectivePlay(){return {...this.play,routes:{...this.play.routes,...Object.fromEntries(Object.entries(this.hotRoutes).map(([id,kind])=>[id,hotRouteFor(id,kind)]))}};}
+  setHotRoute(id,kind){
+    if(this.phase!=='presnap'||this.play.type==='run'||!RECEIVERS.includes(id)||(kind!=='default'&&!hotRouteFor(id,kind)))return false;
+    if(kind==='default')delete this.hotRoutes[id];else this.hotRoutes[id]=kind;
+    this.byId[id].route=routeFor(this.effectivePlay,id,this.spot,this.config.flip);this.byId[id].routeIndex=0;return true;
+  }
+  audible(id){
+    const play=PLAYS.find(p=>p.id===id);if(this.phase!=='presnap'||!play)return false;
+    this.play=play;this.hotRoutes={};this.audibled=true;this.reset();return true;
   }
   snap() {if(this.phase!=='presnap')return false;this.phase='live';this.events.push('snap');this.stats.reps++;return true;}
   requestThrow(id,style='bullet',lead={x:0,z:0}) {
@@ -114,13 +144,15 @@ export class Simulation {
       if(pursuit){const c=this.byId[this.carrier||'R'];target={x:c.x+c.vx*.24,z:c.z+c.vz*.24};}
       else if(i<rushCount){const qb=this.byId.QB;target={x:qb.x+(i===0?-1:i===3?1:0)*Math.max(0,1-this.time*.35),z:qb.z};factor*=.84;}
       else {
-        const ids=['Y','R','A','X','B','Y','A'];const receiver=this.byId[ids[i-4]];
-        if(this.coverage==='man'||this.coverage==='blitz'){target={x:receiver.x+receiver.vx*.13,z:receiver.z+1.2+receiver.vz*.13};}
+        const ids=this.coverage==='blitz'?['','','Y','X','B','R','A']:['Y','R','A','X','B','Y','A'];const receiver=this.byId[ids[i-4]];
+        if(this.coverage==='blitz'||(this.coverage==='man'&&i<9)){target={x:receiver.x+receiver.vx*.13,z:receiver.z+1.2+receiver.vz*.13};}
         else {
           let zx=d.x,depth=8;
-          if(this.coverage==='cover3') {
+          if(this.coverage==='man'){zx=(i===9?-12:12)*(this.config.flip?-1:1);depth=24;}
+          else if(this.coverage==='cover3') {
             const zones=[[-11,7],[0,9],[11,7],[-19,23],[19,23],[0,26],[7,12]];[zx,depth]=zones[i-4];
           } else {const zones=[[-8,11],[0,12],[8,11],[-23,5],[23,5],[-12,25],[12,25]];[zx,depth]=zones[i-4];}
+          if(this.config.flip&&this.coverage!=='man')zx=-zx;
           target={x:zx,z:Math.min(115,this.spot+depth)};
           const near=RECEIVERS.map(id=>this.byId[id]).filter(p=>Math.abs(p.x-zx)<(depth>20?12:8)&&p.z>this.spot+(depth>20?9:-2)).sort((a,b)=>dist(a,target)-dist(b,target))[0];
           if(near){target={x:zx*.28+near.x*.72,z:depth>20?Math.max(this.spot+depth,near.z+2):clamp(near.z+1,this.spot+2,this.spot+16)};}
@@ -181,7 +213,7 @@ export class Simulation {
       if(['touchdown','interception','safety'].includes(r.kind)||(this.down===4&&!r.firstDown)) {this.spot=this.config.spot;this.down=1;this.toGo=Math.min(10,GOAL-this.spot);}
       else {this.spot=clamp(this.spot+r.yards,11,109);if(r.firstDown){this.down=1;this.toGo=Math.min(10,GOAL-this.spot);}else {this.down++;this.toGo=Math.min(GOAL-this.spot,this.toGo-r.yards);}}
     }
-    this.reset();return true;
+    this.reset(true);return true;
   }
   snapshot(){return {phase:this.phase,time:this.time,deadTime:this.deadTime,carrier:this.carrier,selected:this.selected,spot:this.spot,ball:{...this.ball},players:this.players.map(p=>({id:p.id,x:p.x,z:p.z,vx:p.vx,vz:p.vz,facing:p.facing,action:p.action,actionTime:p.actionTime,phase:p.phase,stamina:p.stamina,engaged:p.engaged})),result:this.result};}
   saveFrame(){this.recording.push(this.snapshot());if(this.recording.length>460)this.recording.shift();}
