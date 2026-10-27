@@ -71,7 +71,7 @@ RECEIVERS.forEach((id,i)=>{
 function fieldPosition(z){const yard=Math.round(z-10);return yard<50?'OWN '+yard:yard===50?'MIDFIELD':'OPP '+(100-yard);}
 function renderHUD(){
   const dead=sim.phase==='dead',pre=sim.phase==='presnap',live=!pre&&!dead,passing=sim.phase==='live'&&sim.play.type!=='run'&&!sim.crossedLine;
-  document.body.classList.toggle('playing',live);
+  document.body.classList.toggle('playing',live);document.body.classList.toggle('drive-mode',sim.config.mode==='drive');
   $('phase-badge').innerHTML='<span class="live-dot"></span>'+(replay?'INSTANT REPLAY':{presnap:'PRE-SNAP',live:sim.play.type==='run'?'HANDOFF':'IN THE POCKET',air:'BALL IN FLIGHT',run:'BALL CARRIER',dead:'REP COMPLETE'}[sim.phase]);
   $('coverage-label').textContent='DEFENSE · '+(sim.config.coverage==='random'&&pre?'DISGUISED':COVERAGES[sim.coverage].label.toUpperCase());
   $('down-distance').hidden=sim.config.mode!=='drive';$('practice-label').textContent=sim.config.mode==='drive'?'MOVE THE CHAINS':'PRACTICE';

@@ -15,3 +15,5 @@
 @media(max-width:800px){.drive-status{top:130px;min-width:240px;padding:10px 15px}.drive-status strong{font-size:25px}.drive-status small{font-size:8px}}
 @media(max-width:520px){.brand{font-size:14px;gap:6px}.brand-mark{width:27px;font-size:29px}.topbar nav{gap:4px}.presnap-adjustments{margin-top:10px}.drive-status{top:130px;min-width:240px}.adjustment-card{font-size:12px;padding:13px;gap:8px}.receiver-picker{gap:8px}}
 @media(max-height:600px) and (orientation:landscape){.drive-status{top:67px;padding:6px 12px;min-width:210px}.drive-status>span{display:none}.drive-status strong{font-size:22px;margin:0 0 2px}.drive-status small{font-size:7px}.presnap-adjustments{margin-top:8px}}
+
+#fullscreen{display:inline-grid;place-items:center}.drive-mode .toast{top:230px}@media(max-height:600px) and (orientation:landscape){.drive-mode .toast{top:135px}}
