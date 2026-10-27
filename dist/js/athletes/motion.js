@@ -4,7 +4,6 @@ import { TAU, SIDES, clamp, lerp, smoothstep, fract, damp, wrapAngle, approachAn
 import { applyStance } from './stances.js';
 import { ACTIONS, startAction } from './actions.js';
 
-
 // Seconds each timed action lasts in the simulation (plan section 3.4).
 const DURATIONS = { throw: 0.4, catch: 0.45, juke: 0.45, cut: 0.2, tackle: 1.0, stumble: 0.7 };
 const SIM_ACTIONS = new Set(['ready', 'run', 'cut', 'juke', 'block', 'throw', 'catch', 'carry', 'wrapped', 'tackle', 'down', 'stumble']);
@@ -234,9 +233,12 @@ export class Animator {
         lerp(-0.22 - 0.06 * sprint, 0.3 + 0.04 * sprint, t),
       );
       pose.hands[i].lerp(hang, 1 - run);
-      // Backpedalling defensive backs keep their arms bent and close to the hips.
-      if (bp > 0) pose.hands[i].lerp(_v.set(side * (sx + 0.02), sy - 0.4, 0.04 + 0.13 * w), bp);
       pose.elbows[i].set(side * 0.35, -0.35, -1);
+      // Backpedalling defensive backs pump bent arms in front of the hips.
+      if (bp > 0) {
+        pose.hands[i].lerp(_v.set(side * (sx - 0.02), sy - 0.5, 0.2 + 0.1 * w), bp);
+        pose.elbows[i].lerp(_v.set(side * 0.5, -1, -0.35), bp);
+      }
       pose.wrists[i].set(-0.1 * run, 0, 0);
     }
   }
@@ -286,14 +288,19 @@ export class Animator {
     else ACTIONS[action]?.(this, pose, age, data, p, ctx);
   }
 
-  // Call after the pose's torso is final; then handAt/elbowAt convert points.
+  // Call once the pose's torso is final; chestPoint/handAt then convert
+  // tilt-frame points into that pose's chest frame.
   prepareChest(pose) {
     chestMatrix(pose, this.dims, this.chestInverse).invert();
   }
 
+  chestPoint(x, y, z, out) {
+    return out.set(x, y, z).applyMatrix4(this.chestInverse);
+  }
+
   // Hand target from a point in the tilt frame.
   handAt(pose, i, x, y, z) {
-    pose.hands[i].set(x, y, z).applyMatrix4(this.chestInverse);
+    this.chestPoint(x, y, z, pose.hands[i]);
   }
 
   // Scene-space point -> tilt frame of `pose` (uses this.yaw and position).

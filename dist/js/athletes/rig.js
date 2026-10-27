@@ -1,9 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { loft, helmetShell, helmetHardware, chinStrap, helmetVisor, glove, mirrorX, cleat } from './geometry.js';
+import { loft, helmetShell, helmetHardware, chinStrap, helmetVisor, glove, mirrorX, cleat, tint } from './geometry.js';
 import { solveTwoBone } from './ik.js';
 import { eulerQuat, SPINE_SPLIT } from './pose.js';
 import { hashString, SIDES, smoothstep } from './math.js';
-import { tint } from './geometry.js';
 import { jerseyFor, accessoriesFor } from './uniform.js';
 
 // ---------------------------------------------------------------------------
@@ -175,11 +174,10 @@ export function createGeometries() {
 // ---------------------------------------------------------------------------
 // One athlete: joint hierarchy, parts, and the pose solver.
 
-
 const HELMET_CENTRE = 0.115;
 
 const _q = new THREE.Quaternion(), _qi = new THREE.Quaternion(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
-const _v = new THREE.Vector3(), _t = new THREE.Vector3(), _pole = new THREE.Vector3(), _origin = new THREE.Vector3();
+const _t = new THREE.Vector3(), _pole = new THREE.Vector3(), _origin = new THREE.Vector3();
 const _e = new THREE.Euler(), X_AXIS = new THREE.Vector3(1, 0, 0);
 
 export class Rig {
@@ -233,9 +231,9 @@ export class Rig {
       const upper = joint(this.chest, s * d.shoulder[0], d.shoulder[1], d.shoulder[2]);
       const fore = joint(upper, 0, -d.upperArm, 0);
       const hand = joint(fore, 0, -d.forearm, 0);
-      part(upper, geometry.upperArm, materials.skin, { scale: [limb, d.k, limb], color: look.skin });
+      part(upper, geometry.upperArm, materials.skin, { scale: [limb, d.k, limb], color: look.armSleeve || look.skin });
       part(upper, geometry.sleeve, materials.cloth, { scale: [limb ** 0.7, d.k, limb ** 0.7], color: jersey });
-      part(fore, geometry.forearm, materials.skin, { scale: [limb, d.k, limb], color: look.skin });
+      part(fore, geometry.forearm, materials.skin, { scale: [limb, d.k, limb], color: look.armSleeve || look.skin });
       if (look.tape) part(fore, geometry.tape, materials.tape, { scale: [limb, d.k, limb], detail: true });
       part(hand, i === 0 ? geometry.gloveL : geometry.gloveR, materials.glove, { scale: [limb ** 0.5, d.k, limb ** 0.5], color: look.glove });
       this.uppers.push(upper); this.forearms.push(fore); this.hands.push(hand);

@@ -182,7 +182,8 @@ export function helmetShell({ columns = 34, rows = 13, inner = 0.925 } = {}) {
         const theta = -Math.PI + j / columns * TAU, phi = helmetEdge(theta) * i / rows;
         helmetPoint(theta, phi, scale, positions);
         const x = positions[positions.length - 3];
-        uvs.push(scale === 1 ? 0.5 + x / (2 * HELMET.rx) : 0.02, 0.5);
+        // u across the shell (centre stripe), v down from the crown (edge trim).
+        uvs.push(scale === 1 ? 0.5 + x / (2 * HELMET.rx) : 0.02, scale === 1 ? 1 - i / rows : 0.02);
       }
     }
   }

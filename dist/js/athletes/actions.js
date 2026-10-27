@@ -40,6 +40,14 @@ export function startAction(anim, action, data, p, ctx) {
       anim.carryArm = undefined;
       carryArm(anim, p);
       break;
+    case 'throw':
+      // Wind up facing downfield, follow through along the ball's flight.
+      data.face = (q, c) => {
+        const b = c.ball, flying = c.phase === 'air' && Math.hypot(b.vx || 0, b.vz || 0) > 1;
+        const dir = anim.spec.team === 'offense' ? 1 : -1;
+        return flying ? { x: q.x + b.vx, z: q.z + b.vz } : { x: q.x, z: q.z + 10 * dir };
+      };
+      break;
     case 'cut': plant(anim, data, 0.2); break;
     case 'juke': plant(anim, data, 0.45); break;
     case 'block':
@@ -125,9 +133,7 @@ export const ACTIONS = {
       if (w > 0) {
         anim.prepareChest(pose);
         for (let i = 0; i < 2; i++) {
-          anim.handAt(pose, i, SIDES[i] * 0.21 * anim.dims.torso, pose.pelvis.y + 0.13, 0.03);
-          _a.copy(pose.hands[i]);
-          pose.hands[i].copy(anim.base.hands[i]).lerp(_a, w);
+          pose.hands[i].lerp(anim.chestPoint(SIDES[i] * 0.21 * anim.dims.torso, pose.pelvis.y + 0.13, 0.03, _a), w);
           pose.elbows[i].lerp(_b.set(SIDES[i], -0.15, -0.25), w);
           pose.wrists[i].lerp(_b.set(0.3, 0, SIDES[i] * -1.2), w);
         }
@@ -229,13 +235,13 @@ export const ACTIONS = {
     const d = anim.dims;
     const target = data.target ? bodyPoint(ctx, data.target, 'pelvis', _a) : null;
     const targetAnim = data.target ? ctx.animators.get(data.target) : null;
-    const goingDown = ctx.dead || (targetAnim && (targetAnim.action === 'down' || targetAnim.action === 'wrapped' && targetAnim.age > 0.5));
+    const goingDown = ctx.dead || (targetAnim && (targetAnim.action === 'down' || (targetAnim.action === 'wrapped' && targetAnim.age > 0.5)));
     if (goingDown && data.fallAt === null) data.fallAt = age;
     if (age > 0.3 && !data.locked) { data.locked = true; data.holdYaw = anim.yaw; }
-    // Axis from the tackler toward the carrier, for wrapping the arms around.
-    if (target) {
-      _perp.set(target.x - (p.x), 0, target.z + p.z).normalize();
-    } else _perp.set(Math.sin(anim.yaw), 0, Math.cos(anim.yaw));
+    // Axis from the tackler toward the carrier (scene space, where z = -sim z)
+    // for wrapping the arms around him.
+    if (target) _perp.set(target.x - p.x, 0, target.z + p.z).normalize();
+    else _perp.set(Math.sin(anim.yaw), 0, Math.cos(anim.yaw));
     const ax = _perp.x, az = _perp.z;
 
     if (data.mode === 'wrap') {
@@ -335,19 +341,18 @@ export const ACTIONS = {
     pose.hips.x += 0.3 * lurch; pose.hips.z += side * 0.15 * lurch;
     pose.spine.x += 0.45 * lurch; pose.spine.z += side * 0.3 * lurch;
     pose.head.x -= 0.3 * lurch;
-    for (let i = 0; i < 2; i++) {
-      _a.set(SIDES[i] * 0.42, -0.1 + 0.08 * Math.sin(age * 14 + i * 2), 0.25 + 0.08 * Math.cos(age * 11 + i));
-      pose.hands[i].lerp(_a, lurch);
-      pose.elbows[i].lerp(_b.set(SIDES[i], -0.2, -0.3), lurch);
-    }
-    // The hand on the falling side reaches for the turf.
+    // The hand on the falling side reaches for the turf; the other flails out
+    // high for balance.
     const down = side > 0 ? 1 : 0, reach = bump(0.15, 0.65, u);
+    for (let i = 0; i < 2; i++) {
+      const high = i === down ? 0 : 0.32;
+      _a.set(SIDES[i] * 0.45, -0.1 + high + 0.08 * Math.sin(age * 14 + i * 2), 0.22 + 0.08 * Math.cos(age * 11 + i));
+      pose.hands[i].lerp(_a, lurch);
+      pose.elbows[i].lerp(_b.set(SIDES[i], -0.2 - high, -0.3), lurch);
+    }
     if (reach > 0) {
-      _b.copy(pose.hands[down]);
       anim.prepareChest(pose);
-      anim.handAt(pose, down, SIDES[down] * 0.4, 0.3, 0.55);
-      _a.copy(pose.hands[down]);
-      pose.hands[down].copy(_b).lerp(_a, reach);
+      pose.hands[down].lerp(anim.chestPoint(SIDES[down] * 0.4, 0.3, 0.55, _a), reach);
     }
     if (ctx.holderId === p.id) tuck(pose, carryArm(anim, p));
   },

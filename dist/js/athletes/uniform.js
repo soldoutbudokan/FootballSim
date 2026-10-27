@@ -36,6 +36,8 @@ export function accessoriesFor(spec, index) {
     cleat: h2 < 0.55 ? '#f3f3f1' : '#1b1c1f',
     visor: skilled && h > 0.62,
     tape: h2 > 0.35,
+    // Compression arm sleeves on some players (mostly linemen).
+    armSleeve: (h * 7.31) % 1 < (spec.role === 'ol' || spec.role === 'dl' ? 0.45 : 0.18) ? (h2 < 0.5 ? '#121720' : TEAM.navy) : null,
     towel: spec.role === 'qb' || spec.role === 'rb',
   };
 }
@@ -147,11 +149,14 @@ export function buildJerseyAtlas(players) {
   return { texture, offsets, scale };
 }
 
+// Navy shell with one silver centre stripe; the last rows down to the edge
+// are the dark rubber trim around the face opening, jaw flaps and back.
 function helmetStripeTexture() {
-  const c = canvas(256, 4), ctx = c.getContext('2d');
-  ctx.fillStyle = TEAM.navy; ctx.fillRect(0, 0, 256, 4);
-  ctx.fillStyle = TEAM.silver; ctx.fillRect(116, 0, 24, 4);
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(126, 0, 4, 4);
+  const c = canvas(256, 64), ctx = c.getContext('2d');
+  ctx.fillStyle = TEAM.navy; ctx.fillRect(0, 0, 256, 64);
+  ctx.fillStyle = TEAM.silver; ctx.fillRect(116, 0, 24, 64);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(126, 0, 4, 64);
+  ctx.fillStyle = '#161a20'; ctx.fillRect(0, 59, 256, 5);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
