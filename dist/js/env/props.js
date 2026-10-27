@@ -38,7 +38,25 @@ export function buildSidelineProps(parent, shadows) {
   cones(groups.detail, shadows);
   bench(groups.detail, shadows);
   dummies(groups.detail, shadows);
+  staff(groups.detail, shadows);
   return groups;
+}
+
+// A few coaches and staff standing along the sideline, facing the field.
+function staff(parent, shadows) {
+  const batch = new StaticBatch('staff');
+  const navy = standard('#13263b', 0.85, 0), silver = standard('#c9ccd1', 0.85, 0);
+  const khaki = standard('#b8ab8d', 0.9, 0), charcoal = standard('#2c3136', 0.9, 0);
+  const skins = ['#b5835e', '#7b5238', '#d2a07c', '#5e3d2a'].map(c => standard(c, 0.7, 0));
+  const people = [
+    [-29.9, 27.5, navy, khaki], [-30.4, 29.0, silver, navy], [-30.0, 40.5, navy, charcoal],
+    [-29.7, 58.5, navy, khaki], [-30.3, 66.0, silver, charcoal], [-29.8, 83.0, navy, khaki],
+  ];
+  people.forEach(([x, z, shirt, trousers], i) => {
+    figure(batch, x, 0, sceneZ(z), shirt, trousers, skins[i % skins.length]);
+    shadows.add(x, sceneZ(z), 0.7, 0.7, { strength: 0.45 });
+  });
+  batch.build(parent, { castShadow: true });
 }
 
 function frame(batch, spot) {

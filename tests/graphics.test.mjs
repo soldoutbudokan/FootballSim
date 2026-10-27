@@ -39,7 +39,7 @@ test('profiles describe environment props and keep the performance tier light', 
 function director(mode) {
   const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.25, 2600);
   const d = new CameraDirector(camera);
-  d.mode = normalizeCameraMode(mode);
+  d.setMode(normalizeCameraMode(mode));
   return { d, camera };
 }
 const run = (d, state, seconds, options = {}) => { for (let t = 0; t < seconds; t += 1 / 60) d.update(state, 1 / 60, { aspect: 16 / 9, ...options }); };

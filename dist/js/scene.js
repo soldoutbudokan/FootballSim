@@ -40,8 +40,7 @@ export class FieldScene {
   // saved values ('wide', 'qb') fall back to 'game'.
   get cameraMode() { return this.director.mode; }
   set cameraMode(mode) {
-    const next = normalizeCameraMode(mode);
-    if (next !== this.director.mode) this.director.mode = next;
+    this.director.setMode(normalizeCameraMode(mode));
   }
 
   get firstDown() { return this.environment.firstDown; }

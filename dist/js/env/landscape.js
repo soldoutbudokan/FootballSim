@@ -83,20 +83,21 @@ function treeSites(random) {
   const sites = [];
   const F = LAYOUT.fence;
   // Trees grow in clumps: pick clump centres in the belt, then scatter around them.
-  const belt = (x0, x1, z0, z1, count) => {
+  const belt = (x0, x1, z0, z1, count, scale = 1) => {
     let placed = 0;
     while (placed < count) {
       const cx = x0 + random() * (x1 - x0), cz = z0 + random() * (z1 - z0);
       const clump = 3 + Math.floor(random() * 9);
       for (let k = 0; k < clump && placed < count; k++, placed++) {
-        sites.push({ x: cx + (random() - 0.5) * 18, z: cz + (random() - 0.5) * 13 });
+        sites.push({ x: cx + (random() - 0.5) * 18, z: cz + (random() - 0.5) * 13, scale });
       }
     }
   };
   belt(-150, 190, F.north + 8, F.north + 60, 330);     // behind the far end zone
   belt(F.west - 80, F.west - 10, -80, F.north + 30, 190); // west
   belt(F.east + 12, F.east + 70, -30, F.north + 30, 170); // east, beyond the second field
-  belt(-130, 36, -110, -52, 110);                      // behind the team building
+  belt(-70, 45, -78, -50, 70, 1.35);                   // tall trees right behind the team building
+  belt(-130, 36, -110, -52, 80);                       // behind the team building
   belt(108, 190, -110, -50, 50);
   // Shuffle so that any prefix (lower graphics tiers) is spread evenly.
   for (let i = sites.length - 1; i > 0; i--) {
@@ -116,7 +117,7 @@ export function buildTrees(parent) {
   let indexCount = 0;
   for (const site of sites) {
     const template = templates[Math.floor(random() * templates.length)];
-    const scale = 0.85 + random() * 0.35;
+    const scale = (0.85 + random() * 0.35) * site.scale;
     const m = new THREE.Matrix4().compose(
       new THREE.Vector3(site.x, 0, sceneZ(site.z)),
       new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), random() * Math.PI * 2),

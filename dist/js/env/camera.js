@@ -51,6 +51,15 @@ export class CameraDirector {
     this.snapNext = true;
   }
 
+  // Switching views glides to the new framing; a held dead-ball shot belongs
+  // to the old view, so it is dropped.
+  setMode(mode) {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    this.hold = null;
+    this.transition = 1;
+  }
+
   update(state, dt, { menu = false, replay = false, aspect = 16 / 9 } = {}) {
     const controlled = state.players.find(p => p.id === (state.carrier || state.selected)) || state.players[0];
     let pose, smooth;
@@ -200,8 +209,8 @@ export class CameraDirector {
     const spot = state.spot;
     const x = -25 + s * 30, z = spot + 31 - s * 6;
     return {
-      position: new THREE.Vector3(x, 1.9 + s * 0.8, z),
-      target: new THREE.Vector3(x * 0.35 + 4, 3.2, spot - 22),
+      position: new THREE.Vector3(x, 2.3 + s * 0.8, z),
+      target: new THREE.Vector3(x * 0.35 + 4, 2.4, spot - 22),
       fov: 40,
       smooth: 0.9,
     };

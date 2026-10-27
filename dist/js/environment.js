@@ -140,8 +140,13 @@ export class Environment {
 
     // Shadow frustum: around the controlled player / ball, biased downfield so
     // receivers in their routes keep their shadows.
+    // The menu's wide cinematic shot gets a larger (softer) shadow area that
+    // also reaches the south goal post and the front of the team building.
     const anchor = this.actionPoint(state);
-    const target = new THREE.Vector3(anchor.x * 0.6, 0, sceneZ(anchor.z + 7));
+    const target = menu
+      ? new THREE.Vector3(-6, 0, sceneZ(state.spot - 12))
+      : new THREE.Vector3(anchor.x * 0.6, 0, sceneZ(anchor.z + 7));
+    this.lighting.setShadowSize(menu ? 110 : 48);
     const k = 1 - Math.exp(-dt * 10);
     this.shadowFocus.lerp(target, menu ? 1 : k);
     this.lighting.followFocus(this.shadowFocus);

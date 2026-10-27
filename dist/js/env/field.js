@@ -239,7 +239,11 @@ float mottled = texture2D(turfNoise, wp / 11.0 + 0.5).r;
 float stripe = clamp(sin(3.14159265 * (fp.y - 10.0) / 5.0) * 7.0, -1.0, 1.0);
 float endStripe = clamp(sin(3.14159265 * (fp.x + 26.666667) / 5.333333) * 7.0, -1.0, 1.0);
 stripe = (fp.y > 10.0 && fp.y < 110.0) ? stripe : endStripe;
-vec3 maintained = turfColor * (1.0 + turfStripe * stripe) * (0.94 + 0.12 * broad);
+// Blades lean the way the mower travelled (across the field), so the bands
+// show most from the sidelines and least from behind the end zone.
+vec2 viewXZ = normalize(vTurfWorld.xz - cameraPosition.xz + vec2(1e-4));
+float stripeContrast = turfStripe * (0.7 + 1.5 * abs(viewXZ.x));
+vec3 maintained = turfColor * (1.0 + stripeContrast * stripe) * (0.94 + 0.12 * broad);
 maintained *= mix(vec3(1.0), vec3(1.03, 1.0, 0.94), 0.5 + 0.5 * stripe);
 vec3 rough = turfRough * (0.8 + 0.4 * broad) * mix(vec3(1.0), vec3(1.1, 1.02, 0.78), smoothstep(0.45, 0.8, mottled));
 vec3 grass = mix(rough, maintained, onField) * variation;
@@ -276,7 +280,7 @@ export function createTurfMaterial(textures) {
     turfRough: { value: new THREE.Color('#4d6030') },
     turfDirtTint: { value: new THREE.Color('#d8c8b0') },
     turfPaint: { value: new THREE.Color('#f2f1ea') },
-    turfStripe: { value: 0.03 },
+    turfStripe: { value: 0.025 },
     turfNormalScale: { value: 0.55 },
     turfSecondX: { value: FIELD.secondFieldX },
   };

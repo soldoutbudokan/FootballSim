@@ -48,7 +48,7 @@ export const PRESETS = {
   },
 };
 
-const SHADOW_SIZE = 48;   // yards covered by the sun's shadow map
+const SHADOW_SIZE = 48;   // yards covered by the sun's shadow map during play
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class Lighting {
@@ -66,10 +66,6 @@ export class Lighting {
     this.sun.castShadow = true;
     const shadow = this.sun.shadow;
     shadow.mapSize.set(1024, 1024);
-    shadow.camera.left = -SHADOW_SIZE / 2;
-    shadow.camera.right = SHADOW_SIZE / 2;
-    shadow.camera.top = SHADOW_SIZE / 2;
-    shadow.camera.bottom = -SHADOW_SIZE / 2;
     shadow.camera.near = 1;
     shadow.camera.far = 260;
     shadow.bias = -0.0004;
@@ -78,6 +74,7 @@ export class Lighting {
     scene.add(this.sun, this.sun.target);
     this.sunDirection = new THREE.Vector3(0, 1, 0);
     this.focus = new THREE.Vector3(0, 0, -35);
+    this.setShadowSize(SHADOW_SIZE);
 
     this.spots = [];
     this.pmrem = new THREE.PMREMGenerator(renderer);
@@ -177,6 +174,16 @@ export class Lighting {
     }
   }
 
+  // Width in yards of the square area the sun's shadow map covers.
+  setShadowSize(size) {
+    if (this.shadowSize === size) return;
+    this.shadowSize = size;
+    const camera = this.sun.shadow.camera;
+    camera.left = camera.bottom = -size / 2;
+    camera.right = camera.top = size / 2;
+    camera.updateProjectionMatrix();
+  }
+
   // Keeps the tight shadow frustum centred on the action. The centre snaps to
   // whole shadow texels in light space so edges do not shimmer as it moves.
   followFocus(point, immediate = false) {
@@ -184,7 +191,7 @@ export class Lighting {
     const d = this.sunDirection;
     const right = new THREE.Vector3().crossVectors(UP, d).normalize();
     const up = new THREE.Vector3().crossVectors(d, right);
-    const texel = SHADOW_SIZE / this.sun.shadow.mapSize.x;
+    const texel = this.shadowSize / this.sun.shadow.mapSize.x;
     const a = Math.round(point.dot(right) / texel) * texel;
     const b = Math.round(point.dot(up) / texel) * texel;
     const c = point.dot(d);
