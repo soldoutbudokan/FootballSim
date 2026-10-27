@@ -87,17 +87,17 @@ function treeSites(random) {
     let placed = 0;
     while (placed < count) {
       const cx = x0 + random() * (x1 - x0), cz = z0 + random() * (z1 - z0);
-      const clump = 2 + Math.floor(random() * 6);
+      const clump = 3 + Math.floor(random() * 9);
       for (let k = 0; k < clump && placed < count; k++, placed++) {
-        sites.push({ x: cx + (random() - 0.5) * 16, z: cz + (random() - 0.5) * 12 });
+        sites.push({ x: cx + (random() - 0.5) * 18, z: cz + (random() - 0.5) * 13 });
       }
     }
   };
-  belt(-130, 175, F.north + 10, F.north + 48, 150);    // behind the far end zone
-  belt(F.west - 70, F.west - 14, -70, F.north + 20, 95);  // west
-  belt(F.east + 14, F.east + 60, -40, F.north + 20, 85);  // east, beyond the second field
-  belt(-120, 30, -95, -55, 60);                         // behind the team building
-  belt(110, 175, -95, -40, 20);
+  belt(-150, 190, F.north + 8, F.north + 60, 330);     // behind the far end zone
+  belt(F.west - 80, F.west - 10, -80, F.north + 30, 190); // west
+  belt(F.east + 12, F.east + 70, -30, F.north + 30, 170); // east, beyond the second field
+  belt(-130, 36, -110, -52, 110);                      // behind the team building
+  belt(108, 190, -110, -50, 50);
   // Shuffle so that any prefix (lower graphics tiers) is spread evenly.
   for (let i = sites.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));

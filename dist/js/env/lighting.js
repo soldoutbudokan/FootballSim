@@ -12,18 +12,18 @@ export const PRESETS = {
     exposure: 0.85,
     fog: '#c9d6df', fogDensity: 0.0017,
     sky: {
-      turbidity: 2.2, rayleigh: 2.6, mieCoefficient: 0.0035, mieDirectionalG: 0.8, gain: 0.27,
-      cloudCoverage: 0.56, cloudSoftness: 0.26, cloudOpacity: 0.88, cloudLit: '#ffffff', cloudShade: '#a4adb8',
+      turbidity: 2.0, rayleigh: 3.0, mieCoefficient: 0.0022, mieDirectionalG: 0.8, gain: 0.26,
+      cloudCoverage: 0.6, cloudSoftness: 0.17, cloudOpacity: 0.9, cloudLit: '#ffffff', cloudShade: '#a4adb8',
       cloudBrightness: 1.35, hazeHeight: 0.07, night: false,
     },
     poles: 0, windows: 0.45, lamps: 0,
   },
   sunset: {
-    sun: { elevation: 7.5, azimuth: 258, color: '#ffb36e', intensity: 3.4 },
-    hemisphere: { sky: '#a9b6d8', ground: '#5a4a34', intensity: 0.85 },
+    sun: { elevation: 7, azimuth: 292, color: '#ffae66', intensity: 3.4 },
+    hemisphere: { sky: '#b0bad8', ground: '#5a4a34', intensity: 1.0 },
     environment: { source: 'sky', intensity: 1.0 },
-    exposure: 1.22,
-    fog: '#c7b5a4', fogDensity: 0.002,
+    exposure: 1.4,
+    fog: '#d2b79c', fogDensity: 0.0021,
     sky: {
       turbidity: 6.5, rayleigh: 2.4, mieCoefficient: 0.006, mieDirectionalG: 0.86, gain: 0.34,
       cloudCoverage: 0.58, cloudSoftness: 0.24, cloudOpacity: 0.85, cloudLit: '#ffc59a', cloudShade: '#6d6475',
@@ -34,8 +34,8 @@ export const PRESETS = {
   night: {
     // The directional light stands in for the dominant (north-west) pole bank:
     // it is the one shadow-casting light. The four spot lights add the pools.
-    sun: { elevation: 52, azimuth: 300, color: '#e4ecff', intensity: 0.55, skyElevation: -9 },
-    hemisphere: { sky: '#2b3c5c', ground: '#0b100a', intensity: 0.32 },
+    sun: { elevation: 52, azimuth: 300, color: '#e4ecff', intensity: 0.4, skyElevation: -9 },
+    hemisphere: { sky: '#2b3c5c', ground: '#0b100a', intensity: 0.22 },
     environment: { source: 'sky', intensity: 1.0 },
     exposure: 1.05,
     fog: '#121a24', fogDensity: 0.0042,
@@ -44,7 +44,7 @@ export const PRESETS = {
       cloudCoverage: 0.6, cloudSoftness: 0.3, cloudOpacity: 0.7, cloudLit: '#3a4252', cloudShade: '#171c25',
       cloudBrightness: 0.06, hazeHeight: 0.1, night: true,
     },
-    poles: 2600, windows: 1.0, lamps: 1,
+    poles: 3400, windows: 1.0, lamps: 1,
   },
 };
 
@@ -94,7 +94,7 @@ export class Lighting {
   // Pole lights: `heads` are {position, aim} in scene coordinates.
   addPoleLights(heads) {
     for (const head of heads) {
-      const spot = new THREE.SpotLight('#eef3ff', 0, 0, THREE.MathUtils.degToRad(34), 0.55, 2);
+      const spot = new THREE.SpotLight('#eef3ff', 0, 0, THREE.MathUtils.degToRad(27), 0.6, 2);
       spot.position.copy(head.position);
       spot.target.position.copy(head.aim);
       spot.visible = false;

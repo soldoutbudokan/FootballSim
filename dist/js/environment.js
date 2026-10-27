@@ -69,7 +69,6 @@ export class Environment {
 
     this.grass = new GrassTufts(scene, this.turf.userData.uniforms);
     this.time = 0;
-    this.focus = new THREE.Vector3(0, 0, -30);
     this.shadowFocus = new THREE.Vector3(0, 0, -30);
     this.root.updateMatrixWorld(true);
     // Glass reflects the sky more strongly than the global environment level.
@@ -119,7 +118,6 @@ export class Environment {
     this.sideline.detail.visible = level >= 1;
     setTurfQuality(this.turf, level >= 1);
     this.grass.setCount(profile.grass || 0);
-    this.contactShadows.visible = true;
   }
 
   setPlay(play, spot, flip, toGo = null) {
@@ -144,7 +142,7 @@ export class Environment {
     // receivers in their routes keep their shadows.
     const anchor = this.actionPoint(state);
     const target = new THREE.Vector3(anchor.x * 0.6, 0, sceneZ(anchor.z + 7));
-    const k = 1 - Math.exp(-dt * 3);
+    const k = 1 - Math.exp(-dt * 10);
     this.shadowFocus.lerp(target, menu ? 1 : k);
     this.lighting.followFocus(this.shadowFocus);
 

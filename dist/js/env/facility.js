@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { FIELD, StaticBatch, canvasTexture, makeRandom, sceneZ, standard } from './common.js';
+import { StaticBatch, canvasTexture, makeRandom, sceneZ, standard } from './common.js';
 
 // Large practice-facility structures: the team building south of the fields,
 // the windscreen fence, the four light poles and the film tower.
@@ -125,6 +125,8 @@ export function buildTeamBuilding(parent, shadows) {
   // Wide roof overhang with a silver fascia and slim columns.
   const roofFront = front - B.overhang;
   batch.block(roof, cx + 1, B.height, (roofFront + back) / 2, width + 4, 0.45, back - roofFront + 0.5);
+  // Light metal soffit under the overhang so it does not read as a black slab.
+  batch.block(standard('#b9bdc0', 0.6, 0.3), cx + 1, B.height - 0.04, roofFront + B.overhang / 2 + 0.1, width + 3.8, 0.05, B.overhang + 0.3);
   batch.block(silver, cx + 1, B.height - 0.05, roofFront - 0.25, width + 4, 0.6, 0.12);
   for (let x = glassX0 + 2; x < B.east - 3; x += 8) {
     batch.tube(silver, [x, 0, roofFront + 0.6], [x, B.height, roofFront + 0.6], 0.13, { segments: 10 });
@@ -132,7 +134,10 @@ export function buildTeamBuilding(parent, shadows) {
   // Rooftop mechanical units.
   for (const [x, w] of [[-20, 6], [-4, 4], [12, 7]]) batch.block(standard('#8a8f93', 0.7, 0.3), x, B.height + 0.45, cz + 3, w, 1.6, 4);
   // Entrance: doors and a concrete apron / walkway toward the fields.
-  batch.block(standard('#1c242c', 0.25, 0.6), 2, 0, front - 0.08, 6, 3.0, 0.1);
+  // Entrance: glass doors in a dark frame under a canopy.
+  batch.block(standard('#1c242c', 0.35, 0.6), 2, 0, front - 0.1, 6.3, 3.15, 0.12);
+  for (const x of [-0.6, 1.0, 3.0, 4.6]) batch.block(glass, x, 0.05, front - 0.18, 1.5, 2.9, 0.04);
+  batch.block(silver, 2, 3.1, front - 1.3, 7, 0.18, 2.6);
   batch.block(concrete, cx, -0.04, front - 3.2, width + 6, 0.1, 6.4);
   batch.block(concrete, 2, -0.035, front - 8.5, 4, 0.1, 6);
   batch.build(parent, { castShadow: true, receiveShadow: true });
@@ -236,7 +241,7 @@ export function buildLightPoles(parent, shadows) {
   for (const pole of LAYOUT.poles) {
     const x = pole.x, z = sceneZ(pole.z);
     // Aim at a point on the main field between the hashes and the near numbers.
-    const aim = new THREE.Vector3(pole.x < 0 ? -6 : 6, 0, sceneZ(pole.z < 60 ? 42 : 78));
+    const aim = new THREE.Vector3(pole.x < 0 ? -7 : 7, 0, sceneZ(pole.z < 60 ? 36 : 84));
     const toAim = aim.clone().sub(new THREE.Vector3(x, H, z));
     const yaw = Math.atan2(-toAim.z, toAim.x);
     batch.block(concrete, x, 0, z, 1.1, 0.35, 1.1);
@@ -363,4 +368,3 @@ export function buildFilmTower(parent, shadows) {
   shadows.add(x0, z0, 3.4, 3.4, { yaw: Math.PI / 4, strength: 0.45 });
 }
 
-export { FIELD };

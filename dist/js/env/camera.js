@@ -106,7 +106,7 @@ export class CameraDirector {
   gamePose(state, controlled, aspect) {
     // Portrait screens get a wider lens so the play stays readable.
     const portrait = aspect < 1;
-    const fov = portrait ? clamp(42 / Math.sqrt(aspect), 42, 62) : 42;
+    const fov = portrait ? clamp(42 / Math.sqrt(aspect), 42, 56) : 42;
     if (state.phase === 'presnap') return this.formationPose(state, aspect, fov);
     if (state.phase === 'air') {
       // Track between the ball and where it will come down, a little wider.
@@ -142,7 +142,7 @@ export class CameraDirector {
     const position = new THREE.Vector3(), target = new THREE.Vector3(), f = new THREE.Vector3();
     for (let i = 0; i < 6; i++) {
       position.set(0, 3.2 + back * 0.2, los - back);
-      target.set(0, 0.4, los + 8);
+      target.set(0, 0.4, los + (aspect < 1 ? 14 : 8));
       f.copy(target).sub(position).normalize();
       const depth = (los - position.z) * f.z + (0 - position.y) * f.y;   // view depth of the LOS at x = 0
       const needed = spread / (tanH * 0.94);

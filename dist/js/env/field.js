@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { FIELD, StaticBatch, canvasTexture, makeFbm, makeRandom, sceneZ, standard } from './common.js';
+import { FIELD, StaticBatch, canvasTexture, makeFbm, sceneZ, standard } from './common.js';
 
 // The playing surfaces: one large natural-grass ground whose shader paints the
 // NFL markings of both practice fields analytically (crisp at any distance),
@@ -272,7 +272,7 @@ export function createTurfMaterial(textures) {
     turfNormal: { value: textures.normal },
     // Mean linear colour of the lawn photograph (used to normalise it).
     turfMean: { value: new THREE.Vector3(0.130, 0.244, 0.018) },
-    turfColor: { value: new THREE.Color('#355c2f') },
+    turfColor: { value: new THREE.Color('#30552b') },
     turfRough: { value: new THREE.Color('#4d6030') },
     turfDirtTint: { value: new THREE.Color('#d8c8b0') },
     turfPaint: { value: new THREE.Color('#f2f1ea') },
@@ -411,4 +411,3 @@ export function lineOverlay(color, width, opacity) {
   return mesh;
 }
 
-export { makeRandom };
