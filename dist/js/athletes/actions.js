@@ -1,5 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
 import { SIDES, clamp, lerp, smoothstep, bump, sampleTrack } from './math.js';
+import { armAngles } from './pose.js';
 
 // Action layer: each function modifies the locomotion base pose for one
 // action of plan section 3.4 (plus 'pocket', the quarterback holding the ball
@@ -87,15 +88,27 @@ function nearestOpponent(anim, p, ctx) {
   return best;
 }
 
-// Cut and juke: pick the plant foot (outside of the new direction) and pin it
-// where it lands, out wide and slightly ahead of the body.
+// Cut and juke: the plant foot is the outside foot of the new direction. The
+// direction comes from the simulation's lean, else from the turn rate or the
+// sideways drift; a juke on command may only show it a few frames in, so the
+// choice waits up to 0.12 s for a clear signal.
 function plant(anim, data, duration) {
-  let dir = Math.abs(anim.lean) > 0.08 ? Math.sign(anim.lean) : 0;
-  if (!dir && Math.abs(anim.local.x) > 0.12) dir = -Math.sign(anim.local.x);
-  data.dir = dir || (anim.seed < 0.5 ? 1 : -1);      // +1 = toward his right
-  data.plant = data.dir > 0 ? 0 : 1;                  // cutting right plants the left foot
   data.duration = duration;
-  _a.set(SIDES[data.plant] * 0.36, 0, 0.14);
+  data.dir = null;
+}
+
+function senseCut(anim, data, age) {
+  if (data.dir !== null) return;
+  let dir = 0;
+  if (Math.abs(anim.lean) > 0.15) dir = Math.sign(anim.lean);
+  else if (Math.abs(anim.turn) > 0.7) dir = Math.sign(anim.turn);
+  else if (Math.abs(anim.local.x) > 0.15) dir = -Math.sign(anim.local.x);
+  if (!dir && age < 0.12) return;
+  data.dir = dir || (anim.seed < 0.5 ? 1 : -1);     // +1 = toward his right
+  data.plant = data.dir > 0 ? 0 : 1;                 // cutting right plants the left foot
+  // At speed the plant lands well ahead of the hips (that is what brakes him)
+  // and the body travels over it.
+  _a.set(SIDES[data.plant] * 0.3, 0, clamp(0.1 + 0.055 * anim.speed, 0.15, 0.5));
   data.foot = anim.rootToWorld(_a, { x: 0, z: 0 });
 }
 
@@ -184,11 +197,21 @@ export const ACTIONS = {
     }
   },
 
-  // Hands where the ball arrived, then bring it in to the tuck.
+  // Hands where the ball arrived, then bring it in to the tuck. The meeting
+  // point is fixed in the chest frame when the catch starts, so the hands do
+  // not trail behind a receiver who keeps running.
   catch(anim, pose, age, data, p, ctx) {
     const i = carryArm(anim, p), j = 1 - i;
-    const secure = smoothstep(0.06, 0.32, age);
-    if (data.point) anim.worldToChest(pose, data.point, _a); else _a.set(0, 0.2, 0.42);
+    const secure = smoothstep(0.04, 0.26, age);
+    if (!data.local) {
+      data.local = data.point ? anim.worldToChest(pose, data.point, new THREE.Vector3()) : new THREE.Vector3(0, 0.2, 0.42);
+      // Never further than the arms reach, never behind the chest.
+      data.local.z = Math.max(0.18, data.local.z);
+      const reach = 0.9 * (anim.dims.upperArm + anim.dims.forearm);
+      const sh = _d.set(0, anim.dims.shoulder[1], 0), off = data.local.clone().sub(sh);
+      if (off.length() > reach) data.local.copy(sh).addScaledVector(off.normalize(), reach);
+    }
+    _a.copy(data.local);
     _b.copy(_a); _b.x += SIDES[i] * 0.07;
     _c.set(SIDES[i] * 0.105, 0.13, 0.19);
     pose.hands[i].copy(_b).lerp(_c, secure);
@@ -202,7 +225,7 @@ export const ACTIONS = {
     pose.hands[j].copy(_b).lerp(anim.base.hands[j], release);
     pose.elbows[j].set(SIDES[j] * 0.9, -0.8, -0.3);
     pose.wrists[j].set(-0.3, 0, SIDES[j] * 0.9 * (1 - release));
-    if (data.point) anim.lookAt(pose, data.point, 1 - secure);
+    if (data.point) anim.lookAt(pose, data.point, 0.7 * (1 - secure));
   },
 
   cut: plantAndDrive,
@@ -333,52 +356,68 @@ export const ACTIONS = {
     pose.head.set(lerp(pose.head.x, -1.15, f), data.roll * 1.6 * f, 0);
   },
 
-  // Missed tackle: lurch off balance, arms out, a hand down, recover.
+  // Missed tackle: he lunges past, pitches forward off balance, the hand on
+  // the falling side reaches for the turf and the other arm flies back for
+  // balance; then he gathers himself and runs on.
   stumble(anim, pose, age, data, p, ctx) {
-    const u = age / 0.7, lurch = bump(0, 0.85, u), side = data.side;
-    pose.pelvis.y -= 0.16 * lurch;
-    pose.pelvis.x -= side * 0.08 * lurch;
-    pose.hips.x += 0.3 * lurch; pose.hips.z += side * 0.15 * lurch;
-    pose.spine.x += 0.45 * lurch; pose.spine.z += side * 0.3 * lurch;
-    pose.head.x -= 0.3 * lurch;
-    // The hand on the falling side reaches for the turf; the other flails out
-    // high for balance.
-    const down = side > 0 ? 1 : 0, reach = bump(0.15, 0.65, u);
-    for (let i = 0; i < 2; i++) {
-      const high = i === down ? 0 : 0.32;
-      _a.set(SIDES[i] * 0.45, -0.1 + high + 0.08 * Math.sin(age * 14 + i * 2), 0.22 + 0.08 * Math.cos(age * 11 + i));
-      pose.hands[i].lerp(_a, lurch);
-      pose.elbows[i].lerp(_b.set(SIDES[i], -0.2 - high, -0.3), lurch);
-    }
+    const d = anim.dims, u = age / 0.7, side = data.side;
+    const lurch = bump(0, 0.95, u) ** 0.8, reach = bump(0.1, 0.8, u);
+    pose.pelvis.y -= 0.22 * lurch;
+    pose.pelvis.x -= side * 0.06 * lurch;
+    pose.hips.x += 0.4 * lurch; pose.hips.z += side * 0.12 * lurch;
+    pose.spine.x += 0.55 * lurch; pose.spine.z += side * 0.22 * lurch; pose.spine.y -= side * 0.25 * lurch;
+    pose.head.x = lerp(pose.head.x, 0.35, lurch);
+    pose.head.y += side * 0.3 * lurch;
+    // A wide, staggered base while he fights for balance.
+    for (let i = 0; i < 2; i++) pose.feet[i].x += SIDES[i] * 0.08 * lurch;
+    const down = side > 0 ? 1 : 0, flung = 1 - down;
+    armAngles(pose, flung, d, -0.75, 0.55, 0.75, 0, lurch);
+    armAngles(pose, down, d, 0.9, 0.25, 0.35, 0, lurch);
     if (reach > 0) {
       anim.prepareChest(pose);
-      pose.hands[down].lerp(anim.chestPoint(SIDES[down] * 0.4, 0.3, 0.55, _a), reach);
+      pose.hands[down].lerp(anim.chestPoint(SIDES[down] * 0.32 + pose.pelvis.x, 0.07, 0.62, _a), reach);
+      pose.wrists[down].set(-1.0 * reach, 0, 0);
     }
     if (ctx.holderId === p.id) tuck(pose, carryArm(anim, p));
   },
 };
 
-// Cut / juke: deep knee bend over a planted outside foot, body banked into
-// the new direction, then drive out of it.
+// Cut / juke: deep knee bend over a planted outside foot, hips shifted and
+// banked into the new direction (the body roll replaces, rather than adds
+// to, the running bank so a hard juke never tips him over), eyes to the new
+// direction, then drive out of it.
 function plantAndDrive(anim, pose, age, data, p, ctx) {
   const T = data.duration, u = age / T, juke = T > 0.3;
   const w = Math.sin(Math.PI * clamp(age / (T * 1.1), 0, 1));
-  const plantW = 1 - smoothstep(0.55, 0.9, u);
-  const dir = data.dir, i = data.plant, side = SIDES[i];
-  pose.pelvis.y -= (juke ? 0.17 : 0.11) * w;
-  pose.pelvis.x -= dir * 0.1 * w;
-  pose.hips.x += 0.12 * w; pose.hips.z += dir * 0.22 * w;
-  pose.spine.x += 0.14 * w; pose.spine.z += dir * 0.12 * w; pose.spine.y += -dir * 0.15 * w;
-  const local = anim.worldToRoot(data.foot, _a);
-  const f = pose.feet[i];
-  f.x = lerp(f.x, local.x, plantW); f.z = lerp(f.z, local.z, plantW); f.y = lerp(f.y, anim.dims.ankle, plantW);
-  pose.footRot[i].set(lerp(pose.footRot[i].x, 0.1, plantW), lerp(pose.footRot[i].y, -dir * 0.5, plantW), -side * 0.3 * plantW * w);
-  pose.knees[i].set(side * 0.1 - dir * 0.4, 0, 1);
-  // Free arm out for balance on the plant side.
+  senseCut(anim, data, age);
   const holding = ctx.holderId === p.id, arm = holding ? carryArm(anim, p) : -1;
   if (holding) tuck(pose, arm);
+  pose.pelvis.y -= (juke ? 0.16 : 0.1) * w;
+  pose.hips.x += 0.1 * w; pose.spine.x += 0.12 * w;
+  if (data.dir === null) return;
+
+  const dir = data.dir, i = data.plant, side = SIDES[i];
+  pose.pelvis.x = lerp(pose.pelvis.x, -dir * (juke ? 0.13 : 0.09), w);
+  pose.hips.z = lerp(pose.hips.z, dir * (juke ? 0.2 : 0.24), w);
+  pose.spine.z = lerp(pose.spine.z, dir * 0.08, w);
+  pose.spine.y += -dir * (juke ? 0.22 : 0.15) * w;
+  pose.head.y += -dir * 0.35 * w;
+  // The plant foot stays where it landed until the body has moved off it
+  // (ground contact at speed is short), then rejoins the stride.
+  const local = anim.worldToRoot(data.foot, _a);
+  const behind = -local.z, wide = Math.abs(local.x);
+  if (behind > 0.5 || wide > 0.7) data.released = true;
+  const plantW = data.released ? 0 : (1 - smoothstep(0.55, 0.9, u)) * (1 - smoothstep(0.3, 0.5, behind)) * (1 - smoothstep(0.55, 0.7, wide));
+  const f = pose.feet[i];
+  f.x = lerp(f.x, local.x, plantW); f.z = lerp(f.z, local.z, plantW); f.y = lerp(f.y, anim.dims.ankle, plantW);
+  pose.footRot[i].set(lerp(pose.footRot[i].x, 0.1, plantW), lerp(pose.footRot[i].y, -dir * 0.5, plantW), -side * 0.25 * plantW * w);
+  pose.knees[i].set(side * 0.1 - dir * 0.4, 0, 1);
+  // The other foot stays under the hips, ready to step into the new line.
+  const o = pose.feet[1 - i];
+  o.x = lerp(o.x, -side * 0.06, 0.6 * w);
+  // Free arm out for balance on the plant side.
   if (arm !== i) {
-    pose.hands[i].lerp(_b.set(side * 0.5, -0.22, 0.1), w * 0.8);
+    pose.hands[i].lerp(_b.set(side * 0.46, -0.24, 0.12), w * 0.8);
     pose.elbows[i].lerp(_c.set(side * 0.3, -1, -0.2), w);
   }
 }

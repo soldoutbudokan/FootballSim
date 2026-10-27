@@ -130,14 +130,14 @@ export function createGeometries() {
     // One pant leg from inside the pelvis, over the knee pad, to the cuff
     // below the knee; it is skinned across the knee so it bends as one piece.
     leg: loft([
-      { y: 0.065, w: 0.07, d: 0.074 }, { y: 0.0, w: 0.094, d: 0.099 }, { y: -0.09, w: 0.095, d: 0.1 }, { y: -0.2, w: 0.088, d: 0.094 },
-      { y: -0.3, w: 0.077, d: 0.083 }, { y: -0.4, w: 0.066, d: 0.071, z: 0.002 }, { y: -0.455, w: 0.064, d: 0.073, z: 0.009 },
-      { y: -0.51, w: 0.063, d: 0.072, z: 0.01 }, { y: -0.565, w: 0.06, d: 0.064, z: 0.003 }, { y: -0.6, w: 0.059, d: 0.062 },
-      { y: -0.606, w: 0.05, d: 0.053 },
+      { y: 0.065, w: 0.07, d: 0.074 }, { y: 0.0, w: 0.094, d: 0.099 }, { y: -0.09, w: 0.095, d: 0.1 }, { y: -0.2, w: 0.087, d: 0.093 },
+      { y: -0.3, w: 0.077, d: 0.082 }, { y: -0.38, w: 0.066, d: 0.07 }, { y: -0.44, w: 0.059, d: 0.066, z: 0.006 },
+      { y: -0.49, w: 0.057, d: 0.066, z: 0.01 }, { y: -0.54, w: 0.054, d: 0.058, z: 0.004 }, { y: -0.585, w: 0.053, d: 0.056 },
+      { y: -0.59, w: 0.047, d: 0.05 },
     ], { radial: 16, subdiv: 2, ao: AO.leg }),
     sock: loft([
-      { y: -0.08, w: 0.049, d: 0.051 }, { y: -0.17, w: 0.056, d: 0.062, z: -0.008 }, { y: -0.28, w: 0.05, d: 0.054, z: -0.005 },
-      { y: -0.4, w: 0.037, d: 0.041 }, { y: -0.5, w: 0.035, d: 0.042 },
+      { y: -0.07, w: 0.046, d: 0.048 }, { y: -0.115, w: 0.05, d: 0.053, z: -0.003 }, { y: -0.17, w: 0.054, d: 0.06, z: -0.008 },
+      { y: -0.28, w: 0.05, d: 0.054, z: -0.005 }, { y: -0.4, w: 0.037, d: 0.041 }, { y: -0.5, w: 0.035, d: 0.042 },
     ], { radial: 14, subdiv: 2, ao: AO.sock }),
     upperArm: loft([
       { y: 0.05, w: 0.055, d: 0.058 }, { y: -0.02, w: 0.066, d: 0.068 }, { y: -0.14, w: 0.064, d: 0.066 },
@@ -159,7 +159,15 @@ export function createGeometries() {
     strap: chinStrap(),
     visor: helmetVisor(),
     face: (() => { const g = new THREE.SphereGeometry(1, 14, 10); g.scale(0.078, 0.1, 0.09); return tint(g, '#ffffff'); })(),
-    towel: (() => { const g = new THREE.BoxGeometry(0.11, 0.24, 0.008, 1, 4, 1); g.translate(0, -0.12, 0); return g; })(),
+    // A hand towel, curved around the front of the thigh.
+    towel: (() => {
+      const g = new THREE.BoxGeometry(0.085, 0.2, 0.006, 3, 6, 1);
+      g.translate(0, -0.1, 0);
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) p.setZ(i, p.getZ(i) - 2.2 * p.getX(i) ** 2 + 0.04 * Math.max(0, -p.getY(i) - 0.05));
+      g.computeVertexNormals();
+      return g;
+    })(),
   };
 }
 
@@ -223,7 +231,7 @@ export class Rig {
 
   // Bakes one part into a squad mesh. `bone` is the bone it rides on;
   // `blend` lists [otherBone, radius] pairs for the joints it bends across.
-  part(target, bone, geometry, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1], color = '#ffffff', surface = SURFACE.cloth, uv = null, blend = [], detail = false } = {}) {
+  part(target, bone, geometry, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1], color = '#ffffff', surface = SURFACE.cloth, uv = null, blend = [], weights = null, detail = false } = {}) {
     const own = this.joints[BONE_INDEX[bone]];
     _local.compose(_t.set(...pos), _q.setFromEuler(_e.set(...rot)), _origin.set(...scale));
     const bind = new THREE.Matrix4().multiplyMatrices(own.matrixWorld, _local);
@@ -234,8 +242,9 @@ export class Rig {
       const pivot = ownIsLower ? own : other;
       return { y: _t.setFromMatrixPosition(pivot.matrixWorld).y, radius, ownIsLower, other: this.boneBase + BONE_INDEX[name] };
     });
+    const jointBlend = jointWeights(this.boneBase + BONE_INDEX[bone], joints);
     this.squad.builders[target].add(geometry, {
-      bind, weights: jointWeights(this.boneBase + BONE_INDEX[bone], joints),
+      bind, weights: weights ? p => weights(p, jointBlend) : jointBlend,
       color: _c.set(color), uv, surface, detail,
     });
   }
@@ -248,13 +257,23 @@ export class Rig {
     const plain = () => white;
 
     // Torso: pants and belt on the pelvis, the jersey over abdomen and chest.
+    // The seat and the sides of the crotch partly follow the thighs, so the
+    // pants stretch over a lifted knee instead of splitting at the hip.
     const hips = [torso * 0.96, d.k, depth * d.belly ** 0.3];
-    body('pelvis', geometry.pelvis, { scale: hips, color: TEAM.silver, surface: SURFACE.pants, uv: plain, blend: [['abdomen', 0.06]] });
+    const hipY = _t.setFromMatrixPosition(this.thighs[0].matrixWorld).y, pelvisBone = this.boneBase + BONE_INDEX.pelvis;
+    const seat = (p, waist) => {
+      const share = 0.55 * smoothstep(-0.03, 0.08, hipY - p.y) * smoothstep(0.01, 0.075, Math.abs(p.x));
+      if (share <= 0) return waist(p);
+      return [pelvisBone, this.boneBase + BONE_INDEX[p.x > 0 ? 'thigh0' : 'thigh1'], 1 - share];
+    };
+    body('pelvis', geometry.pelvis, { scale: hips, color: TEAM.silver, surface: SURFACE.pants, uv: plain, blend: [['abdomen', 0.06]], weights: seat });
     body('pelvis', geometry.belt, { scale: hips, color: TEAM.belt, surface: SURFACE.belt, uv: plain, blend: [['abdomen', 0.06]], detail: true });
     body('abdomen', geometry.abdomen, { scale: [torso, d.k, depth * d.belly ** 0.5], color: jersey, uv: plain, blend: [['pelvis', 0.06], ['chest', 0.08]] });
     body('chest', geometry.chest, { scale: [torso, d.k, depth], uv: chestUV, blend: [['abdomen', 0.08]] });
     body('chest', geometry.neck, { scale: [torso ** 0.5, 1, torso ** 0.5], color: look.skin, surface: SURFACE.skin, uv: plain, blend: [['head', 0.05]] });
-    if (look.towel) body('pelvis', geometry.towel, { pos: [-0.1 * torso, 0.13 * d.k, 0.128 * depth], rot: [-0.12, 0.25, 0.04], color: '#f5f5f2', surface: SURFACE.towel, uv: plain, detail: true });
+    // The towel tucked into the front of the pants hangs over the right thigh
+    // and swings with it.
+    if (look.towel) body('pelvis', geometry.towel, { pos: [-0.1 * torso, 0.12 * d.k, 0.126 * depth], rot: [-0.1, 0.25, 0.04], color: '#f5f5f2', surface: SURFACE.towel, uv: plain, blend: [['thigh1', 0.1]], detail: true });
 
     // Head: face under the helmet; shell, facemask, strap and visor.
     const shell = [0, HELMET_CENTRE, 0], helmetScale = [1.05, 1.05, 1.05];

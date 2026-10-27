@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { Pose, chestMatrix, tiltMatrix } from './pose.js';
+import { Pose, chestMatrix, tiltMatrix, armAngles } from './pose.js';
 import { TAU, SIDES, clamp, lerp, smoothstep, fract, damp, wrapAngle, approachAngle, hashString } from './math.js';
 import { applyStance } from './stances.js';
 import { ACTIONS, startAction } from './actions.js';
@@ -213,32 +213,34 @@ export class Animator {
     const bank = this.lean * smoothstep(1.5, 5, v);
     const accelLean = clamp(this.accel / 9, -0.3, 0.6) * smoothstep(0.5, 3, v);
     // Low and leaning when exploding out of a stance or a cut.
-    const crouch = 0.025 + 0.04 * run + 0.02 * sprint + 0.11 * bp + 0.09 * Math.max(0, accelLean);
+    const crouch = 0.025 + 0.04 * run + 0.02 * sprint + 0.15 * bp + 0.09 * Math.max(0, accelLean);
     const swing = Math.cos(TAU * s) * moving;
     pose.pelvis.set(-bank * 0.1, d.hipY - crouch + bob, 0);
-    pose.hips.set(0.04 + 0.08 * run + 0.06 * sprint + 0.12 * accelLean + 0.12 * bp, -0.1 * run * swing, 0.035 * moving * Math.sin(TAU * s) + bank * 0.26);
+    pose.hips.set(0.04 + 0.08 * run + 0.06 * sprint + 0.12 * accelLean + 0.22 * bp, -0.1 * run * swing, 0.035 * moving * Math.sin(TAU * s) + bank * 0.26);
     const breathe = 0.012 * Math.sin(ctx.time * 2.1 + this.seed * 7) * (1 - moving);
-    pose.spine.set(0.04 + 0.1 * run + 0.08 * sprint + 0.2 * accelLean + 0.2 * bp + breathe, 0.16 * run * swing, bank * 0.1);
+    // Backpedalling: chest over the knees, weight on the balls of the feet.
+    pose.spine.set(0.04 + 0.1 * run + 0.08 * sprint + 0.2 * accelLean + 0.3 * bp + breathe, 0.16 * run * swing * (1 - bp), bank * 0.1);
     pose.head.set(0.04 - 0.05 * run, 0, 0);
 
-    // Arms swing against the legs; elbows near 90 degrees once running.
-    const [sx, sy] = d.shoulder;
+    // Arms swing against the legs, set by joint angles: shoulder flexion
+    // (forward +) and elbow flexion. Sprinters pump hard with the elbows near
+    // 90 degrees, the front hand rising to the chin and the back hand passing
+    // the hip; walkers swing nearly straight arms.
+    const amp = (0.22 * (1 - run) + 0.55 * run + 0.35 * sprint) * moving;
+    const bent = smoothstep(0, 0.55, run) * moving;
     for (let i = 0; i < 2; i++) {
       const side = SIDES[i], w = (i === 0 ? -1 : 1) * Math.cos(TAU * s);
-      const t = 0.5 + 0.5 * w * (0.7 + 0.3 * sprint) * moving;
-      const hang = _v.set(side * (sx + 0.035), sy - 0.66 * d.k, 0.03 + 0.13 * w * moving);
-      pose.hands[i].set(
-        lerp(side * (sx + 0.03), side * (sx - 0.06), t),
-        lerp(sy - 0.46, sy - 0.27 + 0.05 * sprint, t),
-        lerp(-0.22 - 0.06 * sprint, 0.3 + 0.04 * sprint, t),
-      );
-      pose.hands[i].lerp(hang, 1 - run);
-      pose.elbows[i].set(side * 0.35, -0.35, -1);
-      // Backpedalling defensive backs pump bent arms in front of the hips.
+      let flex = 0.05 + amp * w - 0.06 * sprint;
+      let elbow = lerp(0.22, 1.5, bent) + (0.25 * w + 0.05) * run;
+      let abduct = 0.1 + 0.08 * run, inward = 0.28 * run * Math.max(0, w);
+      // Backpedalling defensive backs pump short, bent arms in front of the hips.
       if (bp > 0) {
-        pose.hands[i].lerp(_v.set(side * (sx - 0.02), sy - 0.5, 0.2 + 0.1 * w), bp);
-        pose.elbows[i].lerp(_v.set(side * 0.5, -1, -0.35), bp);
+        flex = lerp(flex, 0.02 + 0.34 * w, bp);
+        elbow = lerp(elbow, 1.4 + 0.15 * w, bp);
+        abduct = lerp(abduct, 0.2, bp);
+        inward = lerp(inward, 0.05, bp);
       }
+      armAngles(pose, i, d, flex, elbow, abduct, inward);
       pose.wrists[i].set(-0.1 * run, 0, 0);
     }
   }

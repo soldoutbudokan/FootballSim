@@ -1,4 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
+import { SIDES } from './math.js';
 
 // A full-body pose, the common currency between the animation layer and the
 // rig. Everything is a number or a vector so two poses can be blended.
@@ -82,4 +83,21 @@ export function tiltMatrix(x, z, yaw, pose, out) {
   _e.set(pose.tiltPitch, 0, pose.tiltRoll, 'XZY');
   _m.compose(_p.set(0, pose.tiltLift, pose.tiltFwd), _q.setFromEuler(_e), _s);
   return out.multiply(_m);
+}
+
+// Places a hand by forward kinematics from shoulder flexion (forward +),
+// elbow flexion, abduction (elbow out) and how far the forearm crosses toward
+// the midline, all in radians, in the chest frame; the elbow pole follows.
+// `weight` blends from the pose's current arm toward the result.
+const _u = new THREE.Vector3(), _f = new THREE.Vector3(), _el = new THREE.Vector3();
+export function armAngles(pose, i, d, flex, elbow, abduct = 0.1, inward = 0, weight = 1) {
+  if (weight <= 0) return;
+  const side = SIDES[i], [sx, sy, sz] = d.shoulder;
+  _u.set(side * Math.sin(abduct), -Math.cos(abduct) * Math.cos(flex), Math.cos(abduct) * Math.sin(flex));
+  _el.set(side * sx, sy, sz).addScaledVector(_u, d.upperArm);
+  const a = flex + elbow;
+  _f.set(side * (0.5 * Math.sin(abduct) - inward), -Math.cos(a), Math.sin(a)).normalize();
+  _el.addScaledVector(_f, d.forearm);
+  pose.hands[i].lerp(_el, weight);
+  pose.elbows[i].lerp(_u, weight);
 }
