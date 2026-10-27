@@ -43,9 +43,9 @@ function diagram(play){const map=([x,z])=>[100+x*3.1,99-z*2.1];let svg='<svg vie
   for(let i=-2;i<=2;i++)svg+=`<rect x="${98+i*5}" y="98" width="3" height="3" fill="#cbdad3"/>`;svg+='<circle cx="100" cy="109" r="3" fill="#f3f5e9"/></svg>';return svg;}
 function renderPlaybook(){const grid=$('play-grid');grid.replaceChildren();PLAYS.filter(p=>playFilter==='all'||(playFilter==='run'?p.type==='run':p.type!=='run')).forEach(play=>{const b=document.createElement('button');b.className='play-card'+(play.id===sim.play.id?' selected':'');b.setAttribute('aria-label',play.name+' — '+play.tag);b.innerHTML=`<span class="play-tag">${play.tag}</span>${play.id===sim.play.id?'<span class="selected-dot">●</span>':''}<h3>${play.name}</h3>${diagram(play)}<small>${play.formation}</small>`;b.onclick=()=>{if(sim.phase==='dead')sim.next();sim.selectPlay(play.id);syncPlay();closeDialog();if(inMenu)start();};grid.append(b);});}
 RECEIVERS.forEach((id,i)=>{
-  const b=document.createElement('button');b.className='target-button';b.style.setProperty('--target-color',ROUTE_COLORS[i]);b.setAttribute('aria-label','Pass to receiver '+id);b.innerHTML=`<strong>${id}</strong><kbd>${i+1}</kbd>`;
+  const key=String(i+1),b=document.createElement('button');b.className='target-button';b.style.setProperty('--target-color',ROUTE_COLORS[i]);b.setAttribute('aria-label','Pass to receiver '+key);b.setAttribute('aria-keyshortcuts',key);b.innerHTML=`<strong>${key}</strong>`;
   b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);beginCharge(i);});b.addEventListener('pointerup',()=>releaseCharge(i));b.addEventListener('pointercancel',clearInput);$('targets').append(b);
-  const label=document.createElement('div');label.className='receiver-marker';label.style.setProperty('--target-color',ROUTE_COLORS[i]);label.textContent=id;label.id='marker-'+id;$('receiver-labels').append(label);
+  const label=document.createElement('div');label.className='receiver-marker';label.style.setProperty('--target-color',ROUTE_COLORS[i]);label.textContent=key;label.id='marker-'+id;$('receiver-labels').append(label);
 });
 function fieldPosition(z){const yard=Math.round(z-10);return yard<50?'OWN '+yard:yard===50?'MIDFIELD':'OPP '+(100-yard);}
 function renderHUD(){
@@ -100,7 +100,7 @@ function frame(now){frameId=requestAnimationFrame(frame);if(document.hidden||!vi
   const renderDelta=Math.min(.15,(now-lastRender)/1000);lastRender=now;
   let state=sim.snapshot();if(replay){state=replay.frames[Math.min(replay.frames.length-1,Math.floor(replay.time/.05))];$('replay-scrub').value=String(replay.time/replay.duration*1000);}
   view.render(state,renderDelta,{menu:inMenu,showArt,replay:!!replay});graphics.sample(renderDelta*1000,!inMenu&&!replay,['presnap','dead'].includes(sim.phase));
-  positionMarkers(state);if(charge){const duration=(now-charge.started)/1000;$('charge-fill').style.width=Math.min(100,duration/.6*100)+'%';$('charge-label').textContent='TO '+charge.id+' · '+(prefs.passStyle==='timing'?(duration<.17?'LOB':duration<.43?'TOUCH':'BULLET'):prefs.passStyle.toUpperCase());}
+  positionMarkers(state);if(charge){const duration=(now-charge.started)/1000;$('charge-fill').style.width=Math.min(100,duration/.6*100)+'%';$('charge-label').textContent='TO '+(charge.index+1)+' · '+(prefs.passStyle==='timing'?(duration<.17?'LOB':duration<.43?'TOUCH':'BULLET'):prefs.passStyle.toUpperCase());}
   uiElapsed+=renderDelta;fpsElapsed+=renderDelta;fpsFrames++;if(uiElapsed>.1){renderHUD();drawMinimap(state);uiElapsed=0;}if(fpsElapsed>1){$('fps').textContent=Math.round(fpsFrames/fpsElapsed)+' FPS';fpsElapsed=0;fpsFrames=0;}
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(frameId);clearInput();audio.suspend();if(started&&!paused)openDialog('pause');}else{last=performance.now();lastRender=last;nextRender=0;accumulator=0;graphics?.reset();frameId=requestAnimationFrame(frame);}});

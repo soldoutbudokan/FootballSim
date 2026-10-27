@@ -29,7 +29,7 @@ The release contains all runtime assets, including Three.js 0.180.0 and its MIT 
 | Space / Enter | Enter field, snap, next rep |
 | WASD / arrow keys | Move current ball carrier |
 | Shift | Sprint |
-| 1 / 2 / 3 / 4 / 5 | Hold and release to pass to X / Y / A / B / R |
+| 1 / 2 / 3 / 4 / 5 | Hold and release to pass to the receiver with the matching number |
 | Tap / medium hold / long hold | Lob / touch / bullet |
 | Arrow keys while holding a receiver | Lead the pass |
 | Q / E | Juke left / right |
