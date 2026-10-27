@@ -49,7 +49,28 @@ export const PRESETS = {
 };
 
 const SHADOW_SIZE = 48;   // yards covered by the sun's shadow map during play
+const POLE_CONE = 27;     // half-angle in degrees of each pole bank's beam
 const UP = new THREE.Vector3(0, 1, 0);
+
+// Spot-light shadow aimed at the action instead of down the cone axis, so the
+// dominant pole bank's shadow map spends its texels on the play (the same
+// ~48 yd area the sun's frustum covers by day). The light itself, its cone and
+// its pool on the grass are unchanged. (three.js does not export
+// SpotLightShadow, so the instance's updateMatrices is wrapped.)
+function aimShadowAtAction(spot) {
+  const shadow = spot.shadow, base = shadow.updateMatrices.bind(shadow);
+  shadow.aim = new THREE.Object3D();
+  shadow.coverRadius = SHADOW_SIZE / 2;   // yards around the aim point
+  shadow.updateMatrices = light => {
+    const distance = light.position.distanceTo(shadow.aim.position);
+    shadow.focus = Math.min(1.5, Math.atan(shadow.coverRadius / Math.max(1, distance)) / light.angle);
+    shadow.aim.updateMatrixWorld();
+    const target = light.target;
+    light.target = shadow.aim;
+    base(light);
+    light.target = target;
+  };
+}
 
 export class Lighting {
   constructor(scene, renderer, sky, assetManager) {
@@ -74,9 +95,10 @@ export class Lighting {
     scene.add(this.sun, this.sun.target);
     this.sunDirection = new THREE.Vector3(0, 1, 0);
     this.focus = new THREE.Vector3(0, 0, -35);
-    this.setShadowSize(SHADOW_SIZE);
-
     this.spots = [];
+    this.dominant = null;          // the pole light that casts shadows at night
+    this.shadowsEnabled = true;
+    this.setShadowSize(SHADOW_SIZE);
     this.pmrem = new THREE.PMREMGenerator(renderer);
     this.generated = new Map();
     this.hdr = null;
@@ -91,13 +113,39 @@ export class Lighting {
   // Pole lights: `heads` are {position, aim} in scene coordinates.
   addPoleLights(heads) {
     for (const head of heads) {
-      const spot = new THREE.SpotLight('#eef3ff', 0, 0, THREE.MathUtils.degToRad(27), 0.6, 2);
+      const spot = new THREE.SpotLight('#eef3ff', 0, 0, THREE.MathUtils.degToRad(POLE_CONE), 0.65, 2);
       spot.position.copy(head.position);
       spot.target.position.copy(head.aim);
       spot.visible = false;
+      aimShadowAtAction(spot);
+      spot.shadow.camera.near = 6;
+      spot.shadow.camera.far = 160;
+      spot.shadow.bias = -0.0003;
+      spot.shadow.normalBias = 0.03;
+      spot.shadow.radius = 2;
+      spot.shadow.mapSize.copy(this.sun.shadow.mapSize);
       this.scene.add(spot, spot.target);
       this.spots.push(spot);
     }
+  }
+
+  // Exactly one light casts shadows: the sun by day, the pole light nearest
+  // the play at night. None on the performance tier.
+  updateShadowCasters() {
+    const night = this.preset.poles > 0;
+    this.sun.castShadow = this.shadowsEnabled && !night;
+    for (const spot of this.spots) spot.castShadow = this.shadowsEnabled && night && spot === this.dominant;
+  }
+
+  // The pole light nearest a scene-space point (re-chosen only between reps).
+  chooseDominant(point) {
+    let best = null, bestDistance = Infinity;
+    for (const spot of this.spots) {
+      const d = Math.hypot(spot.position.x - point.x, spot.position.z - point.z);
+      if (d < bestDistance) { best = spot; bestDistance = d; }
+    }
+    this.dominant = best;
+    this.updateShadowCasters();
   }
 
   setPreset(mode) {
@@ -163,18 +211,23 @@ export class Lighting {
 
   setQuality(profile) {
     const enabled = profile.shadow > 0;
+    this.shadowsEnabled = enabled;
     this.renderer.shadowMap.enabled = enabled;
-    this.sun.castShadow = enabled;
-    if (enabled && this.sun.shadow.mapSize.x !== profile.shadow) {
-      this.sun.shadow.mapSize.set(profile.shadow, profile.shadow);
-      if (this.sun.shadow.map) {
-        this.sun.shadow.map.dispose();
-        this.sun.shadow.map = null;
+    if (enabled) {
+      for (const light of [this.sun, ...this.spots]) {
+        const shadow = light.shadow;
+        if (shadow.mapSize.x === profile.shadow) continue;
+        shadow.mapSize.set(profile.shadow, profile.shadow);
+        if (shadow.map) {
+          shadow.map.dispose();
+          shadow.map = null;
+        }
       }
     }
+    this.updateShadowCasters();
   }
 
-  // Width in yards of the square area the sun's shadow map covers.
+  // Width in yards of the square area the shadow map covers.
   setShadowSize(size) {
     if (this.shadowSize === size) return;
     this.shadowSize = size;
@@ -182,6 +235,7 @@ export class Lighting {
     camera.left = camera.bottom = -size / 2;
     camera.right = camera.top = size / 2;
     camera.updateProjectionMatrix();
+    for (const spot of this.spots) spot.shadow.coverRadius = size / 2;
   }
 
   // Keeps the tight shadow frustum centred on the action. The centre snaps to
@@ -200,5 +254,7 @@ export class Lighting {
     this.sun.position.copy(snapped).addScaledVector(d, 120);
     this.sun.target.updateMatrixWorld();
     this.sun.updateMatrixWorld();
+    for (const spot of this.spots) spot.shadow.aim.position.copy(point);
+    if (immediate) this.chooseDominant(point);
   }
 }

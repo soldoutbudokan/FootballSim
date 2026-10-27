@@ -11,6 +11,9 @@ export const normalizeCameraMode = mode => (CAMERA_MODES.includes(mode) ? mode :
 const DEG = Math.PI / 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+// The default game camera (plan 4.5), relative to the controlled player.
+export const GAME_RIG = { back: 10.5, height: 5.5, ahead: 12, lookHeight: 0.9, fov: 42, smooth: 0.25 };
+
 // Critically damped spring toward `target` (Unity-style SmoothDamp).
 function damp(current, target, velocity, key, smoothTime, dt) {
   const omega = 2 / Math.max(1e-4, smoothTime);
@@ -112,53 +115,42 @@ export class CameraDirector {
 
   // --- game camera: low, behind the offense --------------------------------
 
+  // The same rig before the snap (behind the quarterback) and during the play
+  // (behind whoever has the ball or is selected): GAME_RIG.back yards behind,
+  // GAME_RIG.height above, looking GAME_RIG.ahead yards downfield.
   gamePose(state, controlled, aspect) {
     // Portrait screens get a wider lens so the play stays readable.
-    const portrait = aspect < 1;
-    const fov = portrait ? clamp(42 / Math.sqrt(aspect), 42, 56) : 42;
-    if (state.phase === 'presnap') return this.formationPose(state, aspect, fov);
-    if (state.phase === 'air') {
-      // Track between the ball and where it will come down, a little wider.
-      const b = state.ball, land = landingPoint(b);
-      const fx = b.x + (land.x - b.x) * 0.55, fz = b.z + (land.z - b.z) * 0.55;
-      return {
-        position: new THREE.Vector3(fx * 0.7, 7.2, Math.min(b.z, fz) - 13),
-        target: new THREE.Vector3(fx, 0.8, fz + 2),
-        fov: fov + 4,
-        smooth: 0.32,
-      };
-    }
-    const vx = controlled.vx || 0, vz = controlled.vz || 0;
-    const back = 10.5, height = 5.5, ahead = 12;
-    const lead = clamp(vz * 0.25, -1.5, 2.5);
+    const fov = aspect < 1 ? clamp(GAME_RIG.fov / Math.sqrt(aspect), GAME_RIG.fov, 56) : GAME_RIG.fov;
+    if (state.phase === 'air') return this.airPose(state, fov);
+    const moving = state.phase !== 'presnap';
+    const vx = moving ? controlled.vx || 0 : 0, vz = moving ? controlled.vz || 0 : 0;
+    // A critically damped follow trails a moving player by velocity x smooth
+    // time; leading by the same amount keeps the rig distance at full speed.
+    const leadX = clamp(vx * GAME_RIG.smooth, -2.5, 2.5), leadZ = clamp(vz * GAME_RIG.smooth, -2.5, 2.5);
+    // Slightly toward the middle of the field so a player near the sideline
+    // still has the field in front of him.
+    const x = controlled.x * 0.88 + leadX;
     return {
-      position: new THREE.Vector3(controlled.x * 0.88 + vx * 0.1, height, controlled.z - back + lead * 0.5),
-      target: new THREE.Vector3(controlled.x * 0.9 + vx * 0.25, 0.9, controlled.z + ahead + lead),
+      position: new THREE.Vector3(x, GAME_RIG.height, controlled.z - GAME_RIG.back + leadZ),
+      target: new THREE.Vector3(controlled.x * 0.92 + leadX, GAME_RIG.lookHeight, controlled.z + GAME_RIG.ahead + leadZ),
       fov,
-      smooth: 0.25,
+      smooth: GAME_RIG.smooth,
     };
   }
 
-  // Pre-snap: behind the quarterback, pulled back just far enough that every
-  // receiver at the line is on screen.
-  formationPose(state, aspect, fov) {
-    const los = state.spot;
-    let spread = 6;
-    for (const p of state.players) if (Math.abs(p.z - los) < 7) spread = Math.max(spread, Math.abs(p.x));
-    spread += 2.2;
-    const tanH = Math.tan(fov * DEG / 2) * aspect;
-    let back = 16;
-    const position = new THREE.Vector3(), target = new THREE.Vector3(), f = new THREE.Vector3();
-    for (let i = 0; i < 6; i++) {
-      position.set(0, 3.2 + back * 0.2, los - back);
-      target.set(0, 0.4, los + (aspect < 1 ? 14 : 8));
-      f.copy(target).sub(position).normalize();
-      const depth = (los - position.z) * f.z + (0 - position.y) * f.y;   // view depth of the LOS at x = 0
-      const needed = spread / (tanH * 0.94);
-      back = clamp(back * Math.pow(needed / Math.max(1, depth), 0.85), 15.5, 36);
-    }
-    position.set(0, 3.2 + back * 0.2, los - back);
-    return { position, target, fov, smooth: 0.45 };
+  // Ball in the air: frame the ball and the spot where it will come down from
+  // behind and a little higher, with a slightly wider lens. As the ball
+  // arrives the framing converges on the receiver, ready to follow him.
+  airPose(state, fov) {
+    const b = state.ball, land = landingPoint(b);
+    const mx = b.x + (land.x - b.x) * 0.5, mz = b.z + (land.z - b.z) * 0.5;
+    const span = Math.hypot(land.x - b.x, land.z - b.z);
+    return {
+      position: new THREE.Vector3(mx * 0.75, GAME_RIG.height + 1 + Math.min(2, span * 0.06), Math.min(b.z, mz) - GAME_RIG.back - 1.5 - Math.min(4, span * 0.12)),
+      target: new THREE.Vector3(mx, clamp(b.y * 0.4, GAME_RIG.lookHeight, 4), mz + 2),
+      fov: fov + 5,
+      smooth: 0.35,
+    };
   }
 
   // Dead ball: hold the last framing and push in slowly.

@@ -50,17 +50,63 @@ cameraTest('camera modes are game, broadcast and all22; old saved values fall ba
   for (const old of ['wide', 'qb', undefined, 'nonsense']) assert.equal(normalizeCameraMode(old), 'game');
 });
 
-cameraTest('pre-snap game camera frames every receiver from behind the offense', () => {
+cameraTest('pre-snap game camera sits 10.5 yd behind and 5.5 yd above the quarterback, looking 12 yd downfield', () => {
   const sim = new Simulation(7, { offense: 'mesh', coverage: 'cover3' });
   const { d, camera } = director('game');
   run(d, sim.snapshot(), 1);
-  assert.ok(-camera.position.z < sim.spot - 10, 'camera is behind the line of scrimmage');
-  assert.ok(camera.position.y < 12, 'camera stays low');
+  const qb = sim.byId.QB;
+  assert.ok(Math.abs(camera.position.y - 5.5) < 0.05, 'about 5.5 yd above');
+  assert.ok(Math.abs((qb.z - -camera.position.z) - 10.5) < 0.05, 'about 10.5 yd behind');
+  assert.ok(Math.abs(d.target.z - (qb.z + 12)) < 0.05, 'looking about 12 yd downfield');
+  assert.equal(camera.fov, 42);
   camera.updateMatrixWorld();
-  for (const p of sim.players.filter(p => ['X', 'B'].includes(p.id))) {
-    const v = new THREE.Vector3(p.x, 1, -p.z).project(camera);
-    assert.ok(Math.abs(v.x) < 1, `${p.id} is on screen`);
+  // The quarterback, the centre and the slot receivers are in the shot.
+  for (const id of ['QB', 'C', 'Y']) {
+    const p = sim.byId[id], v = new THREE.Vector3(p.x, 1, -p.z).project(camera);
+    assert.ok(Math.abs(v.x) < 1 && Math.abs(v.y) < 1, `${id} is on screen`);
   }
+});
+
+// Synthetic snapshots (independent of the movement model): a pass from the
+// pocket to a receiver crossing at x = -6, then the receiver running with it.
+cameraTest('a ball in the air widens the game camera; a catch swings it behind the receiver', () => {
+  const sim = new Simulation(7, { offense: 'mesh', coverage: 'cover3' });
+  const { d, camera } = director('game');
+  const base = sim.snapshot();
+  const qb = base.players.find(p => p.id === 'QB');
+  run(d, { ...base, phase: 'live' }, 1);
+  let widest = 0;
+  const flight = 0.9, from = { x: qb.x, z: qb.z }, to = { x: -6, z: qb.z + 16 };
+  for (let t = 0; t < flight; t += 1 / 60) {
+    const k = t / flight;
+    const ball = { x: from.x + (to.x - from.x) * k, y: 1.8 + 4 * k * (1 - k), z: from.z + (to.z - from.z) * k,
+      vx: (to.x - from.x) / flight, vy: 4 * (1 - 2 * k) / flight, vz: (to.z - from.z) / flight };
+    d.update({ ...base, phase: 'air', carrier: null, selected: 'Y', ball }, 1 / 60, { aspect: 16 / 9 });
+    widest = Math.max(widest, camera.fov);
+  }
+  assert.ok(widest > 43, `wider lens while the ball is in the air (${widest.toFixed(1)} deg)`);
+  let carrier;
+  for (let t = 0; t < 1.5; t += 1 / 60) {
+    carrier = { ...base.players.find(p => p.id === 'Y'), x: to.x, z: to.z + 7 * t, vx: 0, vz: 7, action: 'carry' };
+    const players = base.players.map(p => (p.id === 'Y' ? carrier : p));
+    d.update({ ...base, phase: 'run', carrier: 'Y', selected: 'Y', players, ball: { x: carrier.x, y: 1.2, z: carrier.z, vx: 0, vy: 0, vz: 0 } }, 1 / 60, { aspect: 16 / 9 });
+  }
+  const behind = carrier.z - -camera.position.z;
+  assert.ok(behind > 8 && behind < 13, `camera is behind the new carrier (${behind.toFixed(2)} yd)`);
+  assert.ok(Math.abs(camera.position.x - carrier.x * 0.88) < 1.5, 'and lined up with him');
+  assert.ok(Math.abs(camera.position.y - 5.5) < 0.8, 'back at the game rig height');
+});
+
+cameraTest('a dead ball holds the framing and pushes in slowly', () => {
+  const sim = new Simulation(7, { offense: 'mesh', coverage: 'cover3' });
+  const { d, camera } = director('game');
+  const state = { ...sim.snapshot(), phase: 'dead', deadTime: 0 };
+  run(d, sim.snapshot(), 1);
+  const start = camera.position.clone();
+  for (let t = 0; t < 3; t += 1 / 60) d.update({ ...state, deadTime: t }, 1 / 60, { aspect: 16 / 9 });
+  const moved = camera.position.distanceTo(start);
+  assert.ok(moved > 0.5 && moved < 6, `slow push-in (${moved.toFixed(2)} yd)`);
+  assert.ok(-camera.position.z > -start.z, 'toward the play');
 });
 
 cameraTest('live game camera follows the controlled player low and close with damping', () => {
