@@ -70,7 +70,9 @@ const PLANT_GRIP = 1.2;
 const FACING_RATE = 9;                 // rad/s
 const FLIP_RATE = 13;                  // a defensive back opening his hips
 const FLIP_TIME = 0.25;                // lateral grip is halved while flipping
-const BACKPEDAL_SPEED = 0.75;          // share of top speed, moving away from facing
+const BACKPEDAL_SPEED = 0.65;          // share of top speed, moving away from facing
+const CUSHION = 3;                     // yards a receiver may close before the flip
+const MAX_BACKPEDAL = 7;               // yards of backpedal before a back must open up
 const SHUFFLE_SPEED = 0.88;
 const JUKE = { plant: 0.25, action: 0.45, keep: 0.65, cost: 0.05, minSpeed: 2 };
 const SPRINT_DRAIN = 1 / 9;            // a full tank lasts nine seconds of sprinting
@@ -493,11 +495,19 @@ export class Simulation {
     return true;
   }
 
-  // The carrier as one defender perceives him: `latency` seconds ago.
+  // A player as one defender perceives him: where he was `latency` seconds ago.
   perceive(id, latency) {
     const trail = this.trails.get(id), p = this.byId[id];
     if (!trail || !trail.count) return { t: this.time, x: p.x, z: p.z, vx: p.vx, vz: p.vz };
     return trail.at(this.time - latency);
+  }
+
+  // The defender's estimate of where that player is now: the delayed sample
+  // carried forward at the velocity seen then. Right for steady running,
+  // wrong for `latency` seconds after every cut or break.
+  estimate(id, latency) {
+    const seen = this.perceive(id, latency), lag = this.time - seen.t;
+    return { t: seen.t, x: seen.x + seen.vx * lag, z: seen.z + seen.vz * lag, vx: seen.vx, vz: seen.vz };
   }
 
   // ---------------------------------------------------------------------------
@@ -564,14 +574,13 @@ export class Simulation {
   // takes the nearest free defender, and the pair locks up until the
   // defender's shed time. Locked defenders drive toward the ball slowly.
   planBlocking() {
-    const claimed = new Set(), run = this.play.type === 'run', guard = this.guardPoint();
+    const run = this.play.type === 'run', guard = this.guardPoint();
+    if (this.time < GET_OFF.ol) return;
+    const assigned = this.assignBlocks();
     for (const o of this.line) {
-      if (this.time < GET_OFF.ol) { o.want = ZERO; continue; }
-      let d = null, best = Infinity;
-      for (const q of this.defense) if (!claimed.has(q.id) && dist(o, q) < best) { best = dist(o, q); d = q; }
-      if (!d) { o.want = ZERO; continue; }
-      claimed.add(d.id);
-      if (best < 1.55 && this.time < d.shed + (run ? 0.9 : 0) && d.action !== 'stumble') this.engage(o, d);
+      const d = assigned.get(o.id);
+      if (!d) continue;
+      if (dist(o, d) < 1.55 && this.time < d.shed + (run ? 0.9 : 0) && d.action !== 'stumble') this.engage(o, d);
       let target;
       if (o.engaged) {
         // Stay square between the defender and the ball.
@@ -582,6 +591,23 @@ export class Simulation {
       o.want = seekWant(o, target, speedCap(o, run ? 0.85 : 0.5));
       o.sprinting = false;
     }
+  }
+
+  // Blocking assignments: the closest lineman-defender pairs are matched
+  // first, so two linemen never take the same man and nobody leaves a rusher
+  // to his neighbour. A lineman keeps his man unless another is much closer.
+  assignBlocks() {
+    const pairs = [];
+    for (const o of this.line) for (const d of this.defense) {
+      pairs.push({ o, d, cost: dist(o, d) - (o.assignment === d.id ? 1.5 : 0) });
+    }
+    pairs.sort((a, b) => a.cost - b.cost || a.o.number - b.o.number || a.d.number - b.d.number);
+    const taken = new Set(), result = new Map();
+    for (const { o, d } of pairs) {
+      if (result.has(o.id) || taken.has(d.id)) continue;
+      result.set(o.id, d); taken.add(d.id); o.assignment = d.id;
+    }
+    return result;
   }
 
   engage(a, b) {
@@ -664,7 +690,7 @@ export class Simulation {
         d.want = meetWant(d, this.pass.target, (this.pass.duration || 0) - this.pass.elapsed, speedCap(d));
         return;
       }
-      if (!d.turned) this.readThreat(d, cover.threat, cover.want);
+      if (!d.turned) this.readThreat(d, cover.threat);
       d.want = this.backpedalLimit(d, cover.want);
     });
   }
@@ -706,7 +732,7 @@ export class Simulation {
     const cap = speedCap(d);
     const ids = this.coverage === 'blitz' ? MAN.blitz : MAN.base;
     if (this.coverage === 'blitz' || (this.coverage === 'man' && i < 9)) {
-      const seen = this.perceive(ids[i - 4], d.latency);
+      const seen = this.estimate(ids[i - 4], d.latency);
       const target = { x: seen.x + seen.vx * 0.13, z: seen.z + 1.2 + seen.vz * 0.13 };
       return { want: trackWant(d, target, { x: seen.vx, z: seen.vz }, cap), threat: seen };
     }
@@ -720,10 +746,19 @@ export class Simulation {
     const deep = depth > 20;
     let near = null, best = Infinity;
     for (const id of RECEIVERS) {
-      const r = this.perceive(id, d.latency);
+      const r = this.estimate(id, d.latency);
       if (Math.abs(r.x - zx) < (deep ? 12 : 8) && r.z > this.spot + (deep ? 9 : -2) && dist(r, target) < best) { best = dist(r, target); near = r; }
     }
-    if (near) target = { x: zx * 0.28 + near.x * 0.72, z: deep ? Math.max(this.spot + depth, near.z + 2) : clamp(near.z + 1, this.spot + 2, this.spot + 16) };
+    if (!near) return { want: seekWant(d, target, cap), threat: null };
+    if (deep) {
+      // Stay on top: deeper than the receiver by a cushion that grows with his
+      // speed, matching his vertical speed instead of waiting at the landmark.
+      const z = Math.max(this.spot + depth, near.z + 2 + Math.max(0, near.vz) * 0.35);
+      target = { x: zx * 0.28 + near.x * 0.72, z };
+      const ahead = near.z > d.z - 8 ? Math.max(0, near.vz) : 0;
+      return { want: trackWant(d, target, { x: near.vx * 0.72, z: ahead }, cap, 1.6), threat: near };
+    }
+    target = { x: zx * 0.28 + near.x * 0.72, z: clamp(near.z + 1, this.spot + 2, this.spot + 16) };
     return { want: seekWant(d, target, cap), threat: near };
   }
 
@@ -739,13 +774,11 @@ export class Simulation {
     return speed > cap ? scaled(want.x, want.z, cap) : want;
   }
 
-  // Flip and run when a receiver threatens to get past (or the defender must
-  // sprint deep); flipping out of a backpedal costs a quarter second of grip.
-  readThreat(d, threat, want) {
-    const vertical = threat && threat.z > d.z - 2 && threat.vz > 4;
-    const speed = Math.hypot(want.x, want.z);
-    const behind = speed > 0.8 * speedCap(d) && (want.x * Math.sin(d.facing) + want.z * Math.cos(d.facing)) / speed < -0.34;
-    if (vertical || behind) this.turnHips(d);
+  // Flip and run once a receiver eats the cushion going vertical; flipping
+  // out of a backpedal costs a quarter second of grip.
+  readThreat(d, threat) {
+    const threatened = threat && threat.vz > 4 && threat.z > d.z - CUSHION;
+    if (threatened || d.z - d.start.z > MAX_BACKPEDAL) this.turnHips(d);
   }
 
   turnHips(d) {
