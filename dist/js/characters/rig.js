@@ -4,6 +4,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { GLTFLoader } from '../../vendor/GLTFLoader.js';
 import { FBXLoader } from '../../vendor/FBXLoader.js';
+import { MeshoptDecoder } from '../../vendor/meshopt_decoder.module.js';
 import { mapSkeleton, CANONICAL_BONES } from './bones.js';
 
 export const STANDARD_HEIGHT = 2.06; // yards: a 6 ft 2 in athlete
@@ -17,7 +18,9 @@ export async function loadCharacterFile(url, manager) {
     mergeDuplicateBones(group);
     return { scene: group, animations: group.animations || [], url };
   }
-  const gltf = await new GLTFLoader(manager).loadAsync(url);
+  // Meshopt-compressed glTF (gltfpack, gltf-transform) decodes too; Draco
+  // does not (its decoder is not MIT/CC0 licensed): export uncompressed.
+  const gltf = await new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder).loadAsync(url);
   return { scene: gltf.scene || gltf.scenes[0], animations: gltf.animations || [], url };
 }
 
