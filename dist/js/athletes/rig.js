@@ -21,34 +21,81 @@ const BONE_INDEX = Object.fromEntries(BONES.map((b, i) => [b, i]));
 // ---------------------------------------------------------------------------
 // The whole squad's meshes: one skinned body mesh (cloth, skin, rubber) and
 // one skinned helmet mesh (clear-coated shells, facemasks, visors), sharing a
-// bone texture. Parts flagged `detail` (belts, towels, tape, chin straps) are
-// stored last in the index buffer so the lowest tier can drop them with a
-// draw range instead of a separate draw call.
+// bone texture, plus a reduced pair (level of detail 1) for distant athletes
+// on the same bones. Parts flagged `detail` (belts, towels, tape, chin
+// straps) are stored after every athlete's base parts; the lowest tier drops
+// them and the reduced meshes never have them.
+//
+// Each athlete's triangles are a contiguous range of his mesh's index, so a
+// mesh draws exactly the athletes at its level: one draw range per run of
+// neighbouring athletes at the same level (geometry groups), usually a
+// handful of draw calls instead of one, and no vertex work for the others.
 
 export class Squad {
-  constructor(scene, count, materials) {
+  constructor(scene, count, materials, { lod = true } = {}) {
     this.scene = scene;
+    this.count = count;
     this.materials = materials;
     this.bones = new BoneTexture(count * BONES.length);
     this.builders = { body: new SkinnedGeometryBuilder(), helmet: new SkinnedGeometryBuilder() };
+    if (lod) Object.assign(this.builders, { bodyLow: new SkinnedGeometryBuilder(), helmetLow: new SkinnedGeometryBuilder() });
     this.group = new THREE.Group();
     this.group.name = 'athletes';
     scene.add(this.group);
     this.meshes = {};
+    this.detail = true;
+    this.levels = new Uint8Array(count);   // per athlete: 0 full, 1 reduced
+    this.groupsKey = null;
   }
 
   finish() {
     const t = this.bones.texture;
-    this.meshes.body = skinnedMesh(this.builders.body.build(), this.materials.body, t, 'athletes:bodies');
-    this.meshes.helmet = skinnedMesh(this.builders.helmet.build(), this.materials.helmet, t, 'athletes:helmets');
-    for (const mesh of Object.values(this.meshes)) this.group.add(mesh);
+    const names = { body: 'athletes:bodies', helmet: 'athletes:helmets', bodyLow: 'athletes:bodies-lod1', helmetLow: 'athletes:helmets-lod1' };
+    for (const [key, builder] of Object.entries(this.builders)) {
+      const material = key.startsWith('body') ? this.materials.body : this.materials.helmet;
+      const mesh = skinnedMesh(builder.build(), material, t, names[key]);
+      // A material array makes the renderer (and the shadow pass) draw the
+      // geometry groups, i.e. only the athletes at this mesh's level.
+      mesh.material = [mesh.material];
+      mesh.userData.level = key.endsWith('Low') ? 1 : 0;
+      this.meshes[key] = mesh;
+      this.group.add(mesh);
+    }
     this.builders = null;
+    this.updateGroups();
   }
 
   setDetail(visible) {
+    this.detail = visible;
+    this.updateGroups();
+  }
+
+  // levels: per athlete 0 (full) or 1 (reduced); ignored without the
+  // reduced meshes.
+  setLevels(levels) {
+    if (!this.meshes.bodyLow) return;
+    let changed = false;
+    for (let i = 0; i < this.count; i++) if (this.levels[i] !== levels[i]) { this.levels[i] = levels[i]; changed = true; }
+    if (changed) this.updateGroups();
+  }
+
+  updateGroups() {
+    const key = this.levels.join('') + (this.detail ? 'd' : '');
+    if (key === this.groupsKey) return;
+    this.groupsKey = key;
     for (const mesh of Object.values(this.meshes)) {
-      const g = mesh.geometry;
-      g.setDrawRange(0, visible ? g.userData.totalCount : g.userData.baseCount);
+      const g = mesh.geometry, level = mesh.userData.level, ranges = g.userData.ranges;
+      g.clearGroups();
+      const runs = [];
+      const push = ([start, count]) => {
+        if (!count) return;
+        const last = runs[runs.length - 1];
+        if (last && last[0] + last[1] === start) last[1] += count;
+        else runs.push([start, count]);
+      };
+      for (let i = 0; i < this.count; i++) if (ranges[i] && this.levels[i] === level) push(ranges[i].base);
+      if (this.detail && level === 0) for (let i = 0; i < this.count; i++) if (ranges[i] && this.levels[i] === 0) push(ranges[i].detail);
+      for (const [start, count] of runs) g.addGroup(start, count, 0);
     }
   }
 
@@ -110,25 +157,30 @@ const AO = {
   forearm: v => 0.92 + 0.08 * smoothstep(0, 0.8, v),
 };
 
-export function createGeometries() {
+// `low`: the distant-athlete set (level of detail 1): about half the
+// segments around and no in-between rings on the lofted parts, a coarser
+// helmet shell, a simpler facemask. Detail-only parts are never drawn at that
+// distance, so their low versions are not used.
+export function createGeometries({ low = false } = {}) {
+  const L = (radial, subdiv) => (low ? { radial: Math.max(6, Math.round(radial / 2)), subdiv: 1 } : { radial, subdiv });
   return {
     pelvis: loft([
       { y: -0.094, w: 0.04, d: 0.045, z: -0.01 }, { y: -0.074, w: 0.13, d: 0.09, z: -0.016 }, { y: -0.03, w: 0.178, d: 0.11, z: -0.02 },
       { y: 0.03, w: 0.186, d: 0.117, z: -0.012 }, { y: 0.1, w: 0.181, d: 0.12, z: -0.004 }, { y: 0.17, w: 0.176, d: 0.124 },
-    ], { radial: 24, subdiv: 3, ao: AO.pelvis }),
+    ], { ...L(24, 3), ao: AO.pelvis }),
     // The jersey is tucked in: its hem stays well inside the pants, whose top
     // edge and belt sit clearly outside it, so the two never intersect.
-    belt: loft([{ y: 0.126, w: 0.184, d: 0.127 }, { y: 0.152, w: 0.18, d: 0.128 }], { radial: 24, subdiv: 1, capTop: false, capBottom: false }),
+    belt: loft([{ y: 0.126, w: 0.184, d: 0.127 }, { y: 0.152, w: 0.18, d: 0.128 }], { ...L(24, 1), capTop: false, capBottom: false }),
     abdomen: loft([
       { y: -0.035, w: 0.15, d: 0.103 }, { y: 0.04, w: 0.16, d: 0.113 }, { y: 0.14, w: 0.186, d: 0.132 }, { y: 0.27, w: 0.206, d: 0.142 },
-    ], { radial: 16, subdiv: 2, capTop: false, capBottom: false, ao: AO.abdomen }),
+    ], { ...L(16, 2), capTop: false, capBottom: false, ao: AO.abdomen }),
     chest: loft([
       { y: -0.06, w: 0.212, d: 0.146, n: 2.2 }, { y: 0.04, w: 0.224, d: 0.153, n: 2.3 }, { y: 0.14, w: 0.244, d: 0.16, n: 2.45 },
       { y: 0.205, w: 0.26, d: 0.165, n: 2.6 }, { y: 0.255, w: 0.268, d: 0.166, n: 2.7 }, { y: 0.3, w: 0.254, d: 0.158, n: 2.6 },
       { y: 0.335, w: 0.22, d: 0.14, n: 2.4 }, { y: 0.36, w: 0.165, d: 0.115, n: 2.2 }, { y: 0.377, w: 0.105, d: 0.088 },
       { y: 0.383, w: 0.072, d: 0.068 },
-    ], { radial: 22, subdiv: 2, capBottom: false, flipU: true, ao: AO.chest }),
-    neck: loft([{ y: 0.3, w: 0.063, d: 0.064 }, { y: 0.47, w: 0.056, d: 0.058 }], { radial: 12, subdiv: 2, capBottom: false, ao: AO.neck }),
+    ], { ...L(22, 2), capBottom: false, flipU: true, ao: AO.chest }),
+    neck: loft([{ y: 0.3, w: 0.063, d: 0.064 }, { y: 0.47, w: 0.056, d: 0.058 }], { ...L(12, 2), capBottom: false, ao: AO.neck }),
     // One pant leg from inside the pelvis, over the knee pad, to the cuff
     // below the knee; it is skinned across the knee so it bends as one piece.
     leg: loft([
@@ -136,31 +188,31 @@ export function createGeometries() {
       { y: -0.3, w: 0.077, d: 0.082 }, { y: -0.38, w: 0.066, d: 0.07 }, { y: -0.44, w: 0.059, d: 0.066, z: 0.006 },
       { y: -0.49, w: 0.057, d: 0.066, z: 0.01 }, { y: -0.54, w: 0.054, d: 0.058, z: 0.004 }, { y: -0.585, w: 0.053, d: 0.056 },
       { y: -0.59, w: 0.04, d: 0.043 },
-    ], { radial: 16, subdiv: 2, ao: AO.leg }),
+    ], { ...L(16, 2), ao: AO.leg }),
     sock: loft([
       { y: -0.07, w: 0.046, d: 0.048 }, { y: -0.115, w: 0.05, d: 0.053, z: -0.003 }, { y: -0.17, w: 0.054, d: 0.06, z: -0.008 },
       { y: -0.28, w: 0.05, d: 0.054, z: -0.005 }, { y: -0.4, w: 0.037, d: 0.041 }, { y: -0.5, w: 0.035, d: 0.042 },
-    ], { radial: 12, subdiv: 2, capTop: false, capBottom: false, ao: AO.sock }),
+    ], { ...L(12, 2), capTop: false, capBottom: false, ao: AO.sock }),
     upperArm: loft([
       { y: 0.05, w: 0.055, d: 0.058 }, { y: -0.02, w: 0.066, d: 0.068 }, { y: -0.14, w: 0.064, d: 0.066 },
       { y: -0.28, w: 0.053, d: 0.054 }, { y: -0.37, w: 0.045, d: 0.046 }, { y: -0.4, w: 0.034, d: 0.036 },
-    ], { radial: 12, subdiv: 2, capTop: false, capBottom: false, ao: AO.upperArm }),
+    ], { ...L(12, 2), capTop: false, capBottom: false, ao: AO.upperArm }),
     sleeve: loft([
       { y: 0.065, w: 0.068, d: 0.07 }, { y: -0.04, w: 0.077, d: 0.079 }, { y: -0.15, w: 0.075, d: 0.077 }, { y: -0.178, w: 0.074, d: 0.076 },
-    ], { radial: 12, subdiv: 2, capBottom: false, ao: AO.sleeve }),
+    ], { ...L(12, 2), capBottom: false, ao: AO.sleeve }),
     forearm: loft([
       { y: 0.035, w: 0.04, d: 0.042 }, { y: -0.01, w: 0.046, d: 0.046 }, { y: -0.06, w: 0.05, d: 0.048 }, { y: -0.2, w: 0.04, d: 0.037 },
       { y: -0.33, w: 0.031, d: 0.026 }, { y: -0.36, w: 0.029, d: 0.024 },
-    ], { radial: 10, subdiv: 2, capTop: false, capBottom: false, ao: AO.forearm }),
-    tape: loft([{ y: -0.255, w: 0.039, d: 0.034 }, { y: -0.335, w: 0.034, d: 0.029 }], { radial: 10, subdiv: 1, capTop: false, capBottom: false }),
-    gloveL: glove(),
-    gloveR: mirrorX(glove()),
-    cleat: cleat(),
-    helmet: helmetShell(),
-    hardware: helmetHardware(),
+    ], { ...L(10, 2), capTop: false, capBottom: false, ao: AO.forearm }),
+    tape: loft([{ y: -0.255, w: 0.039, d: 0.034 }, { y: -0.335, w: 0.034, d: 0.029 }], { ...L(10, 1), capTop: false, capBottom: false }),
+    gloveL: glove({ low }),
+    gloveR: mirrorX(glove({ low })),
+    cleat: cleat({ low }),
+    helmet: low ? helmetShell({ columns: 16, rows: 7 }) : helmetShell(),
+    hardware: helmetHardware({ low }),
     strap: chinStrap(),
-    visor: helmetVisor(),
-    face: (() => { const g = new THREE.SphereGeometry(1, 12, 8); g.scale(0.078, 0.1, 0.09); return tint(g, '#ffffff'); })(),
+    visor: helmetVisor({ low }),
+    face: (() => { const g = low ? new THREE.SphereGeometry(1, 8, 6) : new THREE.SphereGeometry(1, 12, 8); g.scale(0.078, 0.1, 0.09); return tint(g, '#ffffff'); })(),
     // A hand towel, curved around the front of the thigh.
     towel: (() => {
       const g = new THREE.BoxGeometry(0.085, 0.2, 0.006, 3, 6, 1);
@@ -185,10 +237,14 @@ const _e = new THREE.Euler(), X_AXIS = new THREE.Vector3(1, 0, 0);
 const _m = new THREE.Matrix4(), _local = new THREE.Matrix4(), _c = new THREE.Color();
 
 export class Rig {
-  constructor(squad, spec, index, geometry, atlas) {
+  // lowGeometry: createGeometries({ low: true }), baked into the squad's
+  // reduced meshes when it has them.
+  constructor(squad, spec, index, geometry, atlas, lowGeometry = null) {
     this.id = spec.id;
     this.spec = spec;
     this.squad = squad;
+    this.index = index;
+    this.level = '';   // '' while baking the full meshes, 'Low' for the reduced ones
     this.boneBase = index * BONES.length;
     const d = this.dims = dimensionsFor(spec);
     const look = this.look = accessoriesFor(spec, index);
@@ -227,6 +283,11 @@ export class Rig {
     this.root.updateMatrixWorld(true);
     this.bindInverse = this.joints.map(j => j.matrixWorld.clone().invert());
     this.buildParts(geometry, atlas, jersey, look);
+    if (lowGeometry && squad.builders.bodyLow) {
+      this.level = 'Low';
+      this.buildParts(lowGeometry, atlas, jersey, look);
+      this.level = '';
+    }
 
     // Resolved joint positions in world space, refreshed after every apply().
     this.world = {
@@ -240,6 +301,8 @@ export class Rig {
   // Bakes one part into a squad mesh. `bone` is the bone it rides on;
   // `blend` lists [otherBone, radius] pairs for the joints it bends across.
   part(target, bone, geometry, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1], color = '#ffffff', surface = SURFACE.cloth, uv = null, blend = [], weights = null, detail = false } = {}) {
+    // Small details are not drawn on distant athletes.
+    if (detail && this.level) return;
     const own = this.joints[BONE_INDEX[bone]];
     _local.compose(_t.set(...pos), _q.setFromEuler(_e.set(...rot)), _origin.set(...scale));
     const bind = new THREE.Matrix4().multiplyMatrices(own.matrixWorld, _local);
@@ -258,9 +321,9 @@ export class Rig {
       return j;
     });
     const jointBlend = jointWeights(this.boneBase + BONE_INDEX[bone], joints);
-    this.squad.builders[target].add(geometry, {
+    this.squad.builders[target + this.level].add(geometry, {
       bind, weights: weights ? p => weights(p, jointBlend) : jointBlend,
-      color: _c.set(color), uv, surface, detail,
+      color: _c.set(color), uv, surface, detail, owner: this.index,
     });
   }
 

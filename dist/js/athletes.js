@@ -10,16 +10,25 @@ import { Markers } from './athletes/markers.js';
 // the contact shadows. Scene units are yards; simulation +z maps to scene -z.
 //
 // Interface (plan section 3.5):
-//   new Athletes(scene, players)  players = sim.players (id, team, role, number, speed)
+//   new Athletes(scene, players, {camera})  players = sim.players (id, team, role, number, speed)
 //   setQuality(profile)
 //   update(state, dt, {menu}) -> the controlled player's snapshot
 // update() poses every rig, the ball, the indicator and the shadows, and leaves
 // their world matrices and instance buffers ready for renderer.render().
+// Distance from the camera (yards) beyond which an athlete is drawn with the
+// reduced meshes, per graphics tier; High and Ultra always draw full detail.
+// An athlete switches back inside the distance minus LOD_HYSTERESIS.
+export const LOD_DISTANCE = { performance: 20, balanced: 30 };
+const LOD_HYSTERESIS = 2;
+
 export class Athletes {
-  constructor(scene, players) {
+  // options.camera: the scene camera, for the distance level of detail
+  // (without it the controlled player stands in for the camera).
+  constructor(scene, players, options = {}) {
     this.scene = scene;
+    this.camera = options.camera || null;
     this.materials = createMaterials(players);
-    const geometry = createGeometries();
+    const geometry = createGeometries(), low = createGeometries({ low: true });
     this.squad = new Squad(scene, players.length, this.materials);
     this.group = this.squad.group;
     this.rigs = new Map();
@@ -27,12 +36,15 @@ export class Athletes {
     const atlas = this.materials.atlas;
     players.forEach((spec, i) => {
       const cell = { offset: atlas.offsets.get(spec.id), scale: atlas.scale, white: atlas.white };
-      const rig = new Rig(this.squad, spec, i, geometry, cell);
+      const rig = new Rig(this.squad, spec, i, geometry, cell, low);
       this.rigs.set(spec.id, rig);
       this.animators.set(spec.id, new Animator(rig, spec));
     });
     this.squad.finish();
-    for (const g of Object.values(geometry)) g.dispose();
+    for (const g of [...Object.values(geometry), ...Object.values(low)]) g.dispose();
+    this.index = new Map(players.map((spec, i) => [spec.id, i]));
+    this.levels = new Uint8Array(players.length);
+    this.lodDistance = Infinity;
     this.ball = new Football(this.group, this.materials);
     this.markers = new Markers(this.group, players.length);
     this.qbId = players.find(p => p.role === 'qb')?.id ?? 'QB';
@@ -46,6 +58,22 @@ export class Athletes {
     // Small parts (towels, tape, belts, chin straps) are skipped on the lowest tier.
     this.squad.setDetail(profile.detail !== false);
     this.markers.setQuality(profile);
+    this.lodDistance = LOD_DISTANCE[profile.id] ?? Infinity;
+  }
+
+  // Full or reduced meshes per athlete, by distance from the camera.
+  chooseLevels(state, controlled) {
+    const eye = this.camera?.position;
+    const far = this.lodDistance;
+    for (const p of state.players) {
+      const i = this.index.get(p.id);
+      if (i === undefined) continue;
+      let d = 0;
+      if (Number.isFinite(far)) d = eye ? Math.hypot(p.x - eye.x, 1.1 - eye.y, -p.z - eye.z) : Math.hypot(p.x - controlled.x, p.z - controlled.z) + 11;
+      const limit = this.levels[i] ? far - LOD_HYSTERESIS : far;
+      this.levels[i] = d > limit ? 1 : 0;
+    }
+    this.squad.setLevels(this.levels);
   }
 
   update(state, dt, { menu = false } = {}) {
@@ -58,6 +86,7 @@ export class Athletes {
     this.squad.commit();
     this.ball.update(ctx, this);
     const controlled = state.players.find(p => p.id === (state.carrier || state.selected)) || state.players[0];
+    this.chooseLevels(state, controlled);
     this.markers.update(ctx, this, controlled, this.ball, menu);
     // Everything this module draws lives under one group; its world matrices
     // are current when update() returns, whatever the scene's auto-update.

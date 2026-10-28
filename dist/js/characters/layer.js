@@ -48,7 +48,7 @@ export class AthletesLayer {
   makeFallback() {
     const { Athletes } = this.options;
     if (typeof Athletes !== 'function') return null;
-    try { return new Athletes(this.scene, this.players); } catch (error) { console.warn('Procedural athletes unavailable: ' + (error?.message || error)); return null; }
+    try { return new Athletes(this.scene, this.players, { camera: this.options.camera }); } catch (error) { console.warn('Procedural athletes unavailable: ' + (error?.message || error)); return null; }
   }
 
   async choose() {

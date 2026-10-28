@@ -47,6 +47,9 @@ export class SkinnedGeometryBuilder {
     this.bones = []; this.mix = []; this.surface = [];
     this.indices = []; this.detailIndices = [];
     this.vertexCount = 0;
+    // Per owner (athlete index): where his triangles sit in the base and the
+    // detail index lists. Each athlete's parts are added in one go.
+    this.ranges = [];
   }
 
   // geometry: indexed BufferGeometry with position/normal (uv, color optional)
@@ -55,7 +58,8 @@ export class SkinnedGeometryBuilder {
   // color: linear THREE.Color multiplied into the vertex colour (baked AO)
   // uv: function(u, v) -> [u, v] remapping the part's own uv
   // surface: [roughness, metalness]
-  add(geometry, { bind, weights, color, uv = null, surface = [0.8, 0], detail = false }) {
+  // owner: the athlete index (per-athlete draw ranges, level of detail)
+  add(geometry, { bind, weights, color, uv = null, surface = [0.8, 0], detail = false, owner = 0 }) {
     const pos = geometry.attributes.position, nor = geometry.attributes.normal;
     const uvs = geometry.attributes.uv, col = geometry.attributes.color;
     _n.getNormalMatrix(bind);
@@ -76,9 +80,11 @@ export class SkinnedGeometryBuilder {
       this.surface.push(surface[0], surface[1]);
     }
     const target = detail ? this.detailIndices : this.indices;
+    const range = this.ranges[owner] ||= { base: [this.indices.length, this.indices.length], detail: [this.detailIndices.length, this.detailIndices.length] };
     const index = geometry.index;
     if (index) for (let i = 0; i < index.count; i++) target.push(base + index.getX(i));
     else for (let i = 0; i < pos.count; i++) target.push(base + i);
+    range[detail ? 'detail' : 'base'][1] = target.length;
     this.vertexCount += pos.count;
   }
 
@@ -95,6 +101,11 @@ export class SkinnedGeometryBuilder {
     g.setIndex(this.vertexCount > 65535 ? new THREE.Uint32BufferAttribute(all, 1) : new THREE.Uint16BufferAttribute(all, 1));
     g.userData.baseCount = this.indices.length;
     g.userData.totalCount = all.length;
+    // [start, count] of each athlete's base and detail triangles in the index.
+    g.userData.ranges = this.ranges.map(r => r && {
+      base: [r.base[0], r.base[1] - r.base[0]],
+      detail: [this.indices.length + r.detail[0], r.detail[1] - r.detail[0]],
+    });
     // Bodies move anywhere on the field; the mesh is never frustum culled.
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
     return g;

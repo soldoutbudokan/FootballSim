@@ -219,15 +219,18 @@ export function helmetShell({ columns = 30, rows = 12, inner = 0.925 } = {}) {
 }
 
 // Facemask, clips and ear holes in one vertex-coloured mesh (shell-local).
-export function helmetHardware() {
+// `low`: the distant-athlete version, thinner tubes with fewer segments and
+// no clips or ear holes.
+export function helmetHardware({ low = false } = {}) {
   const parts = [];
-  const bar = (points, r = 0.0072, segments = 14) => parts.push(tint(tube(points, r, 4, segments), '#8e949b'));
+  const bar = (points, r = 0.0072, segments = 14) => parts.push(tint(low ? tube(points, r * 1.15, 3, Math.min(segments, 6)) : tube(points, r, 4, segments), '#8e949b'));
   bar([[-0.083, -0.022, 0.112], [-0.072, -0.034, 0.163], [0, -0.041, 0.19], [0.072, -0.034, 0.163], [0.083, -0.022, 0.112]]);
   bar([[-0.088, -0.074, 0.072], [-0.068, -0.086, 0.152], [0, -0.092, 0.18], [0.068, -0.086, 0.152], [0.088, -0.074, 0.072]]);
   bar([[-0.074, -0.102, 0.048], [-0.052, -0.133, 0.122], [0, -0.146, 0.147], [0.052, -0.133, 0.122], [0.074, -0.102, 0.048]]);
   for (const s of [-1, 1]) {
     bar([[s * 0.031, -0.041, 0.188], [s * 0.032, -0.092, 0.178], [s * 0.03, -0.145, 0.146]], 0.0065, 6);
     bar([[s * 0.083, -0.022, 0.112], [s * 0.089, -0.05, 0.095], [s * 0.088, -0.074, 0.072], [s * 0.074, -0.102, 0.048]], 0.0068, 6);
+    if (low) continue;
     bar([[s * 0.052, -0.004, 0.148], [s * 0.058, -0.022, 0.163], [s * 0.062, -0.036, 0.168]], 0.0062, 4);
     parts.push(tint(ellipsoid(s * 0.052, -0.002, 0.146, 0.014, 0.01, 0.01, 6, 4), '#7d838a'));
     parts.push(tint(ellipsoid(s * 0.084, -0.036, 0.104, 0.011, 0.016, 0.012, 6, 4), '#7d838a'));
@@ -245,8 +248,8 @@ export function chinStrap() {
   return mergeGeometries(parts);
 }
 
-export function helmetVisor() {
-  const positions = [], indices = [], cols = 13, rows = 4;
+export function helmetVisor({ low = false } = {}) {
+  const positions = [], indices = [], cols = low ? 7 : 13, rows = low ? 2 : 4;
   for (let i = 0; i <= rows; i++) {
     for (let j = 0; j <= cols; j++) {
       const theta = (-46 + 92 * j / cols) * DEG, phi = (94 + 22 * i / rows) * DEG;
@@ -267,7 +270,8 @@ export function helmetVisor() {
 // Hands and feet
 
 // Left glove: palm faces +X, thumb on the -Z side, fingers along -Y.
-export function glove() {
+export function glove({ low = false } = {}) {
+  const detail = low ? { radial: 6, subdiv: 1 } : { radial: 8, subdiv: 2 };
   const hand = loft([
     { y: 0.012, w: 0.02, d: 0.03 },
     { y: -0.02, w: 0.024, d: 0.039 },
@@ -275,10 +279,10 @@ export function glove() {
     { y: -0.115, w: 0.02, d: 0.043, n: 2.6 },
     { y: -0.165, w: 0.016, d: 0.037, n: 2.4 },
     { y: -0.188, w: 0.009, d: 0.024 },
-  ], { radial: 8, subdiv: 2 });
+  ], detail);
   const thumb = loft([
     { y: 0, w: 0.014, d: 0.016 }, { y: -0.04, w: 0.012, d: 0.013 }, { y: -0.068, w: 0.006, d: 0.007 },
-  ], { radial: 8, subdiv: 2 });
+  ], detail);
   thumb.rotateX(-0.55); thumb.rotateZ(-0.25); thumb.translate(0.01, -0.035, -0.035);
   const g = mergeGeometries([hand, thumb]);
   g.computeVertexNormals();
@@ -286,7 +290,7 @@ export function glove() {
 }
 
 // Cleat around the ankle joint: heel at -Z, toe at +Z, sole at y = -0.092.
-export function cleat() {
+export function cleat({ low = false } = {}) {
   const g = loft([
     { y: -0.078, w: 0.028, d: 0.03, z: 0.052, n: 2.6 },
     { y: -0.06, w: 0.038, d: 0.043, z: 0.048, n: 2.6 },
@@ -295,7 +299,7 @@ export function cleat() {
     { y: 0.13, w: 0.047, d: 0.022, z: 0.07, n: 2.6 },
     { y: 0.19, w: 0.036, d: 0.016, z: 0.075, n: 2.4 },
     { y: 0.218, w: 0.014, d: 0.009, z: 0.078 },
-  ], { radial: 10, subdiv: 2 });
+  ], low ? { radial: 6, subdiv: 1 } : { radial: 10, subdiv: 2 });
   g.rotateX(Math.PI / 2);
   const p = g.attributes.position, colors = new Float32Array(p.count * 3);
   for (let i = 0; i < p.count; i++) {
