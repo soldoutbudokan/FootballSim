@@ -14,10 +14,9 @@ keeps its built-in procedural athletes.
 | `dist/models/index.json` | Already committed. Names the model file and lists separate clip files: `{"model": "player.glb", "clips": ["clips/run.fbx", "clips/throw.fbx"]}`. Edit it only to use `player.fbx` or to list separate clips. |
 
 When the scene is built the game sends a `HEAD` request for the model named
-in `index.json`;
-if it exists the skinned athletes load in the background and replace the
-procedural ones (a failed load keeps the procedural ones, with the reason in
-the browser console). URL switches: `?athletes=skinned` forces the model,
+in `index.json`. If it exists, the skinned athletes load in the background
+and replace the procedural ones; a failed load keeps the procedural ones and
+logs the reason in the browser console. URL switches: `?athletes=skinned` forces the model,
 `?athletes=procedural` forces the built-in athletes, `?athletes=dev` loads the
 development stand-in `dist/dev/Xbot.glb` (development checkouts only; it is
 never published).
