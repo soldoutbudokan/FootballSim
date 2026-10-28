@@ -107,6 +107,15 @@ export class Athletes {
     return ctx;
   }
 
+  // Scene-space point at the crown of player `id`'s helmet, wherever his
+  // pose puts it (a crouched stance, a dive). Used for the receiver badges.
+  helmetTop(id, out) {
+    const rig = this.rigs.get(id);
+    if (!rig) return null;
+    // Head joint -> shell centre (0.115) -> crown (0.135, flattened), helmet scale 1.05.
+    return out.copy(rig.world.head).setY(rig.world.head.y + 0.255);
+  }
+
   // After the whistle with no carrier (an interception) the simulation keeps
   // the ball, motionless, in a player's hands. A dropped or incomplete ball
   // is moving or on the turf, so nobody holds it.

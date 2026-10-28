@@ -33,6 +33,7 @@ export class FieldScene {
     this.athletes = new Athletes(this.scene, players);
     this.projectVector = new THREE.Vector3();
     this.groundFocus = new THREE.Vector3();
+    this.helmetPoint = new THREE.Vector3();
     this.resize();
   }
 
@@ -76,6 +77,13 @@ export class FieldScene {
       y: (-0.5 * this.projectVector.y + 0.5) * this.canvas.clientHeight,
       visible: this.projectVector.z < 1 && this.projectVector.z > -1 && Math.abs(this.projectVector.x) < 1.05 && Math.abs(this.projectVector.y) < 1.05,
     };
+  }
+
+  // Simulation-space point at the top of a player's helmet as last rendered
+  // (receiver badges), or null before the first frame.
+  helmetTop(id) {
+    const top = this.athletes.helmetTop(id, this.helmetPoint);
+    return top ? { x: top.x, y: top.y, z: -top.z } : null;
   }
 
   render(state, dt, { menu = false, showArt = false, replay = false } = {}) {

@@ -647,7 +647,9 @@ function positionMarkers(state) {
   for (const id of RECEIVERS) {
     const el = markers[id];
     const p = visible && state.players.find(q => q.id === id);
-    const s = p && view.project(p.x, 2.55, p.z);
+    // Just above the rendered helmet, so badges sit on crouched receivers too.
+    const top = p && view.helmetTop?.(id);
+    const s = p && (top ? view.project(top.x, top.y + 0.12, top.z) : view.project(p.x, 2.55, p.z));
     const hidden = !s || !s.visible;
     if (el.hidden !== hidden) el.hidden = hidden;
     if (hidden) continue;
