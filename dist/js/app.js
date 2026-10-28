@@ -864,9 +864,23 @@ $('touch-juke-left').onclick = () => sim.juke(-1);
 $('touch-juke-right').onclick = () => sim.juke(1);
 
 // ---------- Gamepad ----------
+// D-pad focus movement inside dialogs, so menus work without a mouse.
+function moveDialogFocus(step) {
+  const items = [...activeDialog.querySelectorAll('button:not(:disabled), select, input')].filter(el => el.offsetParent !== null);
+  if (!items.length) return;
+  const index = items.indexOf(document.activeElement);
+  items[(index + step + items.length) % items.length].focus();
+}
+
 function onPadPress(i) {
   if (i === 9) { togglePause(); return; }
-  if (activeDialog) { if (i === 1) closeDialog(); return; }
+  if (activeDialog) {
+    if (i === 1) closeDialog();
+    else if (i === 12 || i === 14) moveDialogFocus(-1);
+    else if (i === 13 || i === 15) moveDialogFocus(1);
+    else if (i === 0 && activeDialog.contains(document.activeElement)) document.activeElement.click();
+    return;
+  }
   if (paused) return;
   if (inMenu) {
     if (i === 12) moveMenu(-1);
