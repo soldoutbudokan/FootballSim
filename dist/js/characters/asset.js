@@ -9,6 +9,7 @@ import { assignSlots, slotForClipName, LOOPING_SLOTS, UPPER_BODY_SLOTS, CLIP_SLO
 import { analyseGait } from './gait.js';
 import { loadCharacterFile, describeRig, restVertices, normalise, legMetrics, captureRest, jointPositions } from './rig.js';
 import { convertClip, stripRootMotion, maskClip } from './retarget.js';
+import { clusterVertices, remapTriangles, gather } from './lod.js';
 
 const GAIT_SLOTS = new Set(['walk', 'jog', 'run', 'sprint', 'backpedal', 'shuffle-left', 'shuffle-right']);
 
@@ -89,9 +90,52 @@ export async function loadCharacterAsset({ modelUrl, clipUrls, manager, clipAlia
   probe.dispose();
   return {
     url: modelUrl, rig, fit, scale, legs, vertices, clips,
+    lods: buildLods(rig, vertices),
     joints: Object.fromEntries(Object.entries(jointPositions(rig)).map(([k, p]) => [k, p.toArray()])),
     available: new Set(Object.keys(clips)),
   };
+}
+
+// A reduced copy of every skinned mesh for distant players (see lod.js).
+// Map: source geometry uuid -> {geometry, source (new vertex -> old)}.
+export const LOD_CELL = 0.034; // yards (~1.2 in) on a 2.06 yd athlete
+function buildLods(rig, vertices) {
+  const out = new Map();
+  for (const mesh of rig.meshes) {
+    const g = mesh.geometry;
+    const positions = vertices.get(mesh);
+    const index = g.index ? g.index.array : Uint32Array.from({ length: g.attributes.position.count }, (_, i) => i);
+    const groups = g.groups.length ? g.groups : [{ start: 0, count: index.length, materialIndex: 0 }];
+    // Small parts (a face, a hand) collapse quickly: refine the grid until
+    // at least a fifth of the triangles survive.
+    let cell = LOD_CELL, rep, source, triangles, ranges;
+    for (let attempt = 0; attempt < 4; attempt++, cell *= 0.65) {
+      ({ rep, source } = clusterVertices(positions, cell));
+      triangles = []; ranges = [];
+      for (const group of groups) {
+        const tris = remapTriangles(index, rep, group.start, group.count);
+        ranges.push([triangles.length, tris.length, group.materialIndex]);
+        for (const t of tris) triangles.push(t);
+      }
+      if (triangles.length >= index.length * 0.2 || index.length < 900) break;
+    }
+    const lod = new THREE.BufferGeometry();
+    for (const [name, attribute] of Object.entries(g.attributes)) lod.setAttribute(name, copyAttribute(attribute, source));
+    if (g.groups.length) for (const [start, count, materialIndex] of ranges) lod.addGroup(start, count, materialIndex);
+    lod.setIndex(triangles);
+    lod.computeBoundingSphere();
+    lod.name = (g.name || mesh.name) + ':lod1';
+    out.set(g.uuid, { geometry: lod, source, triangles: triangles.length / 3, original: index.length / 3 });
+  }
+  return out;
+}
+
+function copyAttribute(attribute, source) {
+  const n = attribute.itemSize;
+  const array = attribute.isInterleavedBufferAttribute
+    ? gather(attribute.data.array, n, source, attribute.data.stride, attribute.offset)
+    : gather(attribute.array, n, source);
+  return new THREE.BufferAttribute(array, n, attribute.normalized);
 }
 
 function subtreeNames(root) {

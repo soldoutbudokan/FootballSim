@@ -288,9 +288,12 @@ function inferShoulders(list, found) {
 
 // Drops guesses that contradict the hierarchy (a forearm must hang below the
 // upper arm, a foot below the shin, ...). Exact names are always trusted.
+// Only limb chains are checked: some rigs hang the legs off a "Body" bone
+// next to the hips, which is fine for animation.
+const CHAIN_CHECKED = new Set(['LeftForeArm', 'LeftHand', 'RightForeArm', 'RightHand', 'LeftLeg', 'LeftFoot', 'LeftToeBase', 'RightLeg', 'RightFoot', 'RightToeBase']);
 function validateHierarchy(list, found) {
   for (const [canonical, hit] of [...found]) {
-    if (hit.method === 'exact') continue;
+    if (hit.method === 'exact' || !CHAIN_CHECKED.has(canonical)) continue;
     const parentCanonical = CANONICAL_PARENT[canonical];
     const parentHit = parentCanonical && (found.get(parentCanonical) || found.get(CANONICAL_PARENT[parentCanonical]));
     if (!parentHit) continue;

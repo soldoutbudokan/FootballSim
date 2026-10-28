@@ -97,7 +97,7 @@ export function planAnimation(p, spec, state, elapsed, ctx) {
   const d = derive(p, spec, state);
   const available = ctx.available;
   const plan = {
-    action: d.action, speed: d.speed, lean: d.lean ?? 0, backpedal: d.backpedal,
+    action: d.action, speed: d.speed, lean: d.lean ?? 0, backpedal: d.backpedal, lateral: d.lateral, forward: d.forward,
     locomotion: [], mode: 'forward', reverse: false, stretch: 1, cycleRate: 0,
     overlay: null,
     procedural: { action: null, stance: null, progress: 0, strafe: 0, backpedal: false },
@@ -177,20 +177,29 @@ export function smoothstep(a, b, x) {
 // Replay-safe: elapsed comes from actionTime when the action is timed. A
 // throw whose timer restarts after the release (the sim re-arms it) keeps
 // going into the follow-through instead of winding up again.
+// A timer that stops changing (the simulation freezes everyone when the
+// play is dead, mid-tackle) falls back to real time after a short stall.
 export class ActionClock {
-  constructor() { this.action = null; this.elapsed = 0; this.lastTime = 0; this.offset = 0; }
+  constructor() { this.action = null; this.elapsed = 0; this.lastTime = 0; this.offset = 0; this.stall = 0; }
   update(action, actionTime, dt, { released = false } = {}) {
     const duration = ACTION_DURATION[action];
     const time = Number(actionTime) || 0;
+    dt = Math.max(0, dt || 0);
     if (action !== this.action) {
-      this.action = action; this.offset = 0;
+      this.action = action; this.offset = 0; this.stall = 0;
       this.elapsed = duration && time > 0 ? Math.max(0, duration - time) : 0;
-    } else if (duration && time > 0) {
+    } else if (duration && time > 0 && time !== this.lastTime) {
+      this.stall = 0;
       if (time > this.lastTime + 0.05 && action === 'throw' && released) this.offset = Math.max(this.offset, this.elapsed);
       const fromTimer = Math.max(0, duration - time);
-      this.elapsed = this.offset ? Math.max(this.elapsed, THROW_RELEASE + fromTimer * ((duration - THROW_RELEASE) / duration)) : fromTimer;
+      this.elapsed = this.offset
+        ? Math.max(this.elapsed, THROW_RELEASE + fromTimer * ((duration - THROW_RELEASE) / duration))
+        : fromTimer;
+    } else if (duration && time > 0) {
+      this.stall += dt;
+      if (this.stall > 0.12) this.elapsed += dt;
     } else {
-      this.elapsed += Math.max(0, dt);
+      this.elapsed += dt;
     }
     this.lastTime = time;
     return this.elapsed;
