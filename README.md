@@ -50,7 +50,7 @@ Interface type is Barlow Condensed and Barlow (OFL, vendored), with a system-fon
 
 | Camera | View |
 | --- | --- |
-| Game camera (default) | Low behind the offense: about 10.5 yd behind and 5.5 yd above the controlled player, looking 12 yd downfield, 42° lens. It frames the ball and the catch point while a pass is in the air and swings behind the new carrier after a catch or handoff. |
+| Game camera (default) | Behind the offense. Before the snap it sits 15–22 yd behind and 8–10 yd above the quarterback with a 58° lens, far enough back for all five receivers and their badges at 16:9 and 16:10, then eases into the play camera at the snap: 12 yd behind and 7.5 yd above the controlled player, looking 14 yd downfield, 46° lens. It frames the ball and the catch point while a pass is in the air, swings behind the new carrier after a catch or handoff, swings aside and up while the carrier is wrapped so the tackler does not hide him, and holds on the downed carrier after the whistle. |
 | Broadcast | Sideline press-box position, following the ball with a long lens that keeps the players a similar size. |
 | All-22 | High end-zone view behind the offense showing all 22 players. |
 
