@@ -131,7 +131,7 @@ kbd {
 }
 .bug-cell + .bug-cell { border-left: 1px solid var(--line); }
 .bug-cell small { font: 600 13px/1 var(--display); letter-spacing: .08em; color: var(--silver-dim); }
-.bug-label { color: var(--silver); font-size: 17px; letter-spacing: .14em; }
+.bug-label { color: var(--silver); font-size: 18px; letter-spacing: .08em; }
 .bug-down { background: var(--accent); color: var(--navy-deep); font-weight: 800; }
 .bug-down + .bug-cell { border-left: 0; }
 .bug-sub {
@@ -172,7 +172,7 @@ kbd {
   background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--silver);
   box-shadow: 0 10px 30px rgba(5, 14, 25, .35);
 }
-.call-formation { padding: 10px 16px 0; font: 600 13px/1 var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--silver-dim); }
+.call-formation { padding: 10px 16px 0; font: 600 14px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--silver-dim); }
 .call-name { padding: 6px 16px 0; font: 800 30px/1 var(--display); letter-spacing: .01em; text-transform: uppercase; color: var(--paper); }
 .call-read { padding: 8px 16px 0; font-size: 13px; line-height: 1.45; color: var(--silver); }
 .call-actions { display: flex; gap: 6px 16px; flex-wrap: wrap; padding: 10px 16px 0; }
@@ -211,7 +211,7 @@ kbd {
 .snap-button:hover { background: #fff; }
 .ghost-button { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; font: 700 16px/1 var(--display); letter-spacing: .05em; text-transform: uppercase; color: var(--paper); background: var(--panel); border: 1px solid var(--line); }
 .ghost-button:hover { background: var(--navy-raised); }
-.field-strip { width: 240px; height: 42px; background: var(--panel); border: 1px solid var(--line); }
+.field-strip { width: 300px; height: 53px; background: var(--panel); border: 1px solid var(--line); }
 
 .button-legend {
   position: absolute; z-index: 3; left: 50%; bottom: calc(22px + var(--safe-bottom)); transform: translateX(-50%);
@@ -232,7 +232,7 @@ kbd {
 .result-banner.good .result-yards { background: var(--accent); }
 .result-banner.bad .result-yards { background: var(--alert); color: var(--paper); }
 .result-body { flex: 1; min-width: 0; padding: 14px 22px 15px; background: linear-gradient(180deg, #143052 0%, var(--navy) 60%, #0c2038 100%); border: 1px solid rgba(201, 204, 209, .28); border-left: 0; }
-.result-tag { display: block; font: 700 14px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--silver); }
+.result-tag { display: block; font: 700 15px/1 var(--display); letter-spacing: .07em; text-transform: uppercase; color: var(--silver); }
 .result-banner.good .result-tag { color: var(--accent); }
 .result-body h2 { margin-top: 6px; font: 800 44px/.95 var(--display); text-transform: uppercase; letter-spacing: .01em; color: var(--paper); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-body p { margin-top: 7px; font: 600 15px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--silver); }
@@ -282,7 +282,7 @@ dialog { color: var(--paper); }
 .close-button { display: grid; place-items: center; flex: 0 0 auto; width: 38px; height: 38px; color: var(--silver); border: 1px solid var(--line); }
 .close-button:hover { color: var(--paper); background: var(--navy-raised); }
 .close-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.section-label { margin: 0 0 10px; font: 700 15px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--silver-dim); }
+.section-label { margin: 0 0 10px; font: 700 16px/1 var(--display); letter-spacing: .07em; text-transform: uppercase; color: var(--silver-dim); }
 .modal-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
 .foot-note { margin-right: auto; font: 600 14px/1.2 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--silver-dim); }
 
@@ -315,7 +315,7 @@ dialog { color: var(--paper); }
 .play-card { position: relative; display: flex; flex-direction: column; text-align: left; background: var(--panel-solid); border: 1px solid var(--line); transition: border-color .12s, background .12s; }
 .play-card:hover { border-color: var(--line-strong); background: #10294a; }
 .play-card.selected { border-color: var(--paper); box-shadow: inset 0 3px 0 var(--paper); }
-.play-card-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 0; font: 700 13px/1 var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--silver-dim); }
+.play-card-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 0; font: 700 14px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--silver-dim); }
 .play-card-head .play-current { color: var(--navy-deep); background: var(--paper); padding: 3px 6px; letter-spacing: .08em; }
 .play-card h3 { padding: 5px 12px 10px; font: 800 23px/1 var(--display); text-transform: uppercase; letter-spacing: .01em; color: var(--paper); }
 .play-card svg { display: block; width: 100%; height: auto; }
@@ -340,7 +340,7 @@ dialog { color: var(--paper); }
 /* Settings */
 .settings-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 0 34px; }
 .settings-columns fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
-.settings-columns legend { padding: 0; margin-bottom: 8px; font: 700 15px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--silver-dim); }
+.settings-columns legend { padding: 0; margin-bottom: 8px; font: 700 16px/1 var(--display); letter-spacing: .07em; text-transform: uppercase; color: var(--silver-dim); }
 .field { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid rgba(201, 204, 209, .1); }
 .field > span { font: 700 16px/1.1 var(--display); letter-spacing: .05em; text-transform: uppercase; color: var(--silver); }
 .field select {

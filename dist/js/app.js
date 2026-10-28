@@ -610,19 +610,19 @@ function drawFieldStrip(state) {
   c.fillStyle = '#163a33';
   c.fillRect(0, 0, toX(10), h);
   c.fillRect(toX(110), 0, toX(10), h);
-  c.strokeStyle = 'rgba(244,242,236,.16)';
-  c.lineWidth = 1;
+  c.strokeStyle = 'rgba(244,242,236,.18)';
+  c.lineWidth = 1.5;
   for (let z = 10; z <= 110; z += 10) {
     c.beginPath(); c.moveTo(toX(z), 0); c.lineTo(toX(z), h); c.stroke();
   }
   const line = (z, color, width) => { c.strokeStyle = color; c.lineWidth = width; c.beginPath(); c.moveTo(toX(z), 0); c.lineTo(toX(z), h); c.stroke(); };
-  line(state.spot, '#c9ccd1', 2);
-  if (sim.config.mode === 'drive') line(Math.min(GOAL, state.spot + sim.toGo), '#e3b23c', 2);
+  line(state.spot, '#c9ccd1', 3);
+  if (sim.config.mode === 'drive') line(Math.min(GOAL, state.spot + sim.toGo), '#e3b23c', 3);
   for (const p of state.players) {
     const offense = sim.byId[p.id]?.team === 'offense';
     c.fillStyle = p.id === state.carrier ? '#e3b23c' : offense ? '#f4f2ec' : '#7f93ad';
     c.beginPath();
-    c.arc(toX(p.z), toY(p.x), p.id === state.carrier ? 4 : 2.6, 0, Math.PI * 2);
+    c.arc(toX(p.z), toY(p.x), p.id === state.carrier ? 6 : 4, 0, Math.PI * 2);
     c.fill();
   }
 }
