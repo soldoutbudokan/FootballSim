@@ -52,14 +52,14 @@ function weldSeam(geometry, rows, cols) {
 // loft (0 = +X). Keys may run up or down (limbs are authored from the joint
 // downwards); `capTop` and `capBottom` always mean the upper and lower end,
 // and faces always point outwards.
-export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom = true, flipU = false, ao = null } = {}) {
+export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom = true, flipU = false, ao = null, arcStart = 0, arcLength = TAU } = {}) {
   const rings = interpolateRings(keys, subdiv);
   const positions = [], uvs = [], indices = [], colors = [];
   const cols = radial + 1, y0 = rings[0].y, y1 = rings[rings.length - 1].y, span = (y1 - y0) || 1;
   const shade = (v, t) => { const k = ao ? ao(v, t) : 1; colors.push(k, k, k); };
   for (const r of rings) {
     for (let j = 0; j <= radial; j++) {
-      const t = j / radial * TAU, [px, pz] = superellipse(t, r.w, r.d, r.n), v = (r.y - y0) / span;
+      const t = arcStart + j / radial * arcLength, [px, pz] = superellipse(t, r.w, r.d, r.n), v = (r.y - y0) / span;
       positions.push(r.x + px, r.y, r.z + pz);
       uvs.push(flipU ? 1 - j / radial : j / radial, v);
       shade(v, t);
@@ -95,7 +95,7 @@ export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom =
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
-  weldSeam(geometry, rings.length, cols);
+  if (Math.abs(arcLength - TAU) < 1e-6) weldSeam(geometry, rings.length, cols);
   return geometry;
 }
 
@@ -264,6 +264,35 @@ export function helmetVisor({ low = false } = {}) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   g.setIndex(indices); g.computeVertexNormals();
   return g;
+}
+
+// A compact head with a jaw, cheekbones and brow. The face stays behind the
+// facemask; its profile is visible through the open cage on unvisored players.
+export function athleteFace({ low = false } = {}) {
+  const head = loft([
+    { y: -0.105, w: 0.035, d: 0.04, z: 0.018, n: 2.5 },
+    { y: -0.084, w: 0.057, d: 0.057, z: 0.013, n: 2.8 },
+    { y: -0.04, w: 0.069, d: 0.07, z: 0.005, n: 2.5 },
+    { y: 0.005, w: 0.078, d: 0.079, n: 2.1 },
+    { y: 0.054, w: 0.074, d: 0.083, z: -0.005 },
+    { y: 0.093, w: 0.061, d: 0.069, z: -0.011 },
+    { y: 0.113, w: 0.028, d: 0.037, z: -0.011 },
+  ], { radial: low ? 8 : 14, subdiv: low ? 1 : 2 });
+  if (low) return head;
+  const nose = ellipsoid(0, -0.004, 0.079, 0.015, 0.029, 0.025, 8, 6);
+  const ears = [-1, 1].map(s => ellipsoid(s * 0.075, -0.002, -0.002, 0.011, 0.024, 0.017, 8, 6));
+  return mergeGeometries([head, nose, ...ears]);
+}
+
+export function faceDetails() {
+  const parts = [];
+  for (const s of [-1, 1]) {
+    parts.push(tint(ellipsoid(s * 0.032, 0.021, 0.075, 0.016, 0.006, 0.004, 8, 4), '#30251f'));
+    // Eye-black strips are subdued and sit on the cheek, below the eye.
+    parts.push(tint(ellipsoid(s * 0.035, 0.004, 0.077, 0.019, 0.005, 0.003, 8, 4), '#302f2b'));
+  }
+  parts.push(tint(ellipsoid(0, -0.051, 0.074, 0.022, 0.003, 0.003, 8, 4), '#60453b'));
+  return mergeGeometries(parts);
 }
 
 // ---------------------------------------------------------------------------

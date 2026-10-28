@@ -160,6 +160,11 @@
         <button id="random-play" class="chip-button" type="button" aria-pressed="true">Random every rep</button>
       </div>
     </div>
+    <div class="playbook-filters">
+      <label for="play-search">Find a play<input id="play-search" type="search" placeholder="Concept, route or read" autocomplete="off"></label>
+      <label for="play-formation-filter">Formation<select id="play-formation-filter"><option value="">All formations</option></select></label>
+    </div>
+    <p id="playbook-results" class="playbook-results" role="status" aria-live="polite"></p>
     <div id="play-grid" class="play-grid"></div>
   </dialog>
 
@@ -184,6 +189,11 @@
       <button class="close-button" type="button" data-close aria-label="Close audibles"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </header>
     <div id="audible-grid" class="option-grid audible-grid"></div>
+    <footer class="audible-pagination">
+      <button id="audible-prev" class="chip-button" type="button" aria-label="Previous audible page">[ Previous</button>
+      <span id="audible-page" role="status" aria-live="polite"></span>
+      <button id="audible-next" class="chip-button" type="button" aria-label="Next audible page">Next ]</button>
+    </footer>
   </dialog>
 
   <dialog id="settings" class="modal modal-mid" aria-labelledby="settings-title">
@@ -197,6 +207,7 @@
         <label class="field"><span>Offensive play</span><select id="offense"><option value="random">Random every rep</option></select></label>
         <label class="field"><span>Defense</span><select id="coverage"><option value="random">Random every rep</option><option value="cover3">Cover 3 sky</option><option value="cover2">Cover 2</option><option value="man">2-man</option><option value="blitz">Cover 0 blitz</option></select></label>
         <label class="field"><span>Difficulty</span><select id="difficulty"><option value="rookie">Rookie</option><option value="pro" selected>Pro</option><option value="allpro">All-pro</option></select></label>
+        <p class="difficulty-note">Higher levels read routes sooner, hold coverage leverage and take better pursuit angles. Ball reach and catching rules stay the same.</p>
         <label class="field"><span>Format</span><select id="practice-mode"><option value="reps">Repeat the spot</option><option value="drive">Move the chains</option></select></label>
         <label class="field"><span>Starting spot</span><select id="spot"><option value="35">Own 25</option><option value="60">Midfield</option><option value="90">Opponent 20</option><option value="100">Opponent 10</option></select></label>
       </fieldset>

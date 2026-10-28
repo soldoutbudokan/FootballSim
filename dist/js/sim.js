@@ -1,4 +1,4 @@
-import { FORMATION, PLAYS, RECEIVERS, routeFor, hotRouteFor, COVERAGES } from './plays.js';
+import { FORMATION, PLAYS, RECEIVERS, routeFor, hotRouteFor, formationFor, COVERAGES } from './plays.js';
 
 // Units are yards and seconds. +z points downfield (own end line z = 0, goal
 // lines at z = 10 and z = 110) and +x is the offense's right. A heading is
@@ -101,9 +101,10 @@ const CATCH_GRACE = 0.35;
 const MESH_REACH = 1.25;               // QB to back, body centres, at the exchange              // a new carrier runs on through the catch
 const GET_OFF = { ol: 0.06, qb: 0, rb: 0.1, wr: 0.18, te: 0.18, dl: 0.2, lb: 0.28, cb: 0.28, s: 0.28 };
 const DIFFICULTY = {
-  rookie: { latency: 0.40, speed: 0.97, ballReaction: 0.58 },
-  pro: { latency: 0.28, speed: 1.0, ballReaction: 0.32 },
-  allpro: { latency: 0.18, speed: 1.04, ballReaction: 0.18 },
+  // Difficulty changes reads and anticipation, never bodies or catching odds.
+  rookie: { latency: 0.40, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06 },
+  pro: { latency: 0.28, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13 },
+  allpro: { latency: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20 },
 };
 
 const DEFENSE = [
@@ -174,7 +175,7 @@ function createPlayer(spec, team, spot, flip, speedScale = 1) {
     cutting: false, sinceCut: 9, lastMoveAt: -9, juke: null,
     // Coverage: `turned` is false while a defender still faces the quarterback.
     turned: team === 'offense', flip: 0,
-    latency: 0, seen: null, aim: null,
+    latency: 0, seen: null, aim: null, ballRead: 0, ballAware: false, ballSightAt: -9,
   };
 }
 
@@ -418,8 +419,19 @@ export class Simulation {
     }
     this.skill = DIFFICULTY[this.config.difficulty] || DIFFICULTY.pro;
     const flip = this.config.flip;
-    this.players = FORMATION.map(p => createPlayer(p, 'offense', this.spot, flip));
-    this.players.push(...this.alignment.map(p => createPlayer({ ...p, z: Math.min(p.z, 118 - this.spot) }, 'defense', this.spot, flip, this.skill.speed)));
+    const formation = formationFor(this.play);
+    this.players = formation.map(p => createPlayer(p, 'offense', this.spot, flip));
+    this.players.push(...this.alignment.map((p, i) => {
+      let x = p.x, z = p.z;
+      // Man defenders travel with their assignments when the offense changes
+      // formation, including an audible. Keep the called front/safety shell.
+      const ids = this.coverage === 'blitz' ? MAN.blitz : MAN.base;
+      if (i >= COVERAGES[this.coverage].rushers && (this.coverage === 'blitz' || (this.coverage === 'man' && i < 9))) {
+        const id = ids[i - 4], base = FORMATION.find(o => o.id === id), aligned = formation.find(o => o.id === id);
+        if (base && aligned) { x += aligned.x - base.x; z = Math.max(1.2, z + aligned.z - base.z); }
+      }
+      return createPlayer({ ...p, x, z: Math.min(z, 118 - this.spot) }, 'defense', this.spot, flip);
+    }));
     this.players.forEach(p => {
       p.shed = 2.5 + this.random() * 2.8;
       p.route = routeFor(this.effectivePlay, p.id, this.spot, flip);
@@ -437,12 +449,12 @@ export class Simulation {
   }
 
   get effectivePlay() {
-    const hot = Object.fromEntries(Object.entries(this.hotRoutes).map(([id, kind]) => [id, hotRouteFor(id, kind)]));
+    const hot = Object.fromEntries(Object.entries(this.hotRoutes).map(([id, kind]) => [id, hotRouteFor(id, kind, this.play)]));
     return { ...this.play, routes: { ...this.play.routes, ...hot } };
   }
 
   setHotRoute(id, kind) {
-    if (this.phase !== 'presnap' || this.play.type === 'run' || !RECEIVERS.includes(id) || (kind !== 'default' && !hotRouteFor(id, kind))) return false;
+    if (this.phase !== 'presnap' || this.play.type === 'run' || !RECEIVERS.includes(id) || (kind !== 'default' && !hotRouteFor(id, kind, this.play))) return false;
     if (kind === 'default') delete this.hotRoutes[id]; else this.hotRoutes[id] = kind;
     this.byId[id].route = routeFor(this.effectivePlay, id, this.spot, this.config.flip);
     this.byId[id].routeIndex = 0;
@@ -516,7 +528,7 @@ export class Simulation {
     const from = { x: qb.x + fz * 0.25 + fx * 0.35, y: 1.85, z: qb.z - fx * 0.25 + fz * 0.35 };
     const to = { ...target, y: 1.6 }, v = flightVelocity(from, to, duration);
     this.ball = { ...from, vx: v.x, vy: v.y, vz: v.z };
-    this.pass = { target: to, receiver: p.id, duration, elapsed: 0, style: intent.style, pressure, distance: Math.hypot(to.x - from.x, to.z - from.z) };
+    this.pass = { target: to, receiver: p.id, duration, elapsed: 0, style: intent.style, pressure, distance: Math.hypot(to.x - from.x, to.z - from.z), attempted: new Set() };
     this.threw = true; this.stats.attempts++; this.phase = 'air'; this.carrier = null; this.throwIntent = null;
     this.events.push('throw');
   }
@@ -569,7 +581,7 @@ export class Simulation {
     this.planBlocking();
     this.planReceivers();
     this.planHandoff();
-    this.planDefense();
+    this.planDefense(dt);
     this.moveAll(dt);
     if (this.phase === 'tackle') this.dragTackle(dt);
     this.separate();
@@ -627,6 +639,7 @@ export class Simulation {
     this.readTheBall();
     const assigned = this.assignBlocks();
     for (const o of this.line) {
+      if (run && o.id === this.play.pullingGuard && this.pullBlock(o)) continue;
       const d = assigned.get(o.id);
       if (!d) continue;
       if (dist(o, d) < 1.55 && this.time < d.shed + (run ? 0.9 : 0) && d.action !== 'stumble') this.engage(o, d);
@@ -635,11 +648,27 @@ export class Simulation {
         // Stay square between the defender and the ball.
         const away = scaled(guard.x - d.x, guard.z - d.z, 0.95);
         target = { x: d.x + away.x, z: d.z + away.z };
-      } else if (run) target = { x: d.x + (this.config.flip ? -1 : 1) * 0.2, z: d.z - 0.7 };
+      } else if (run) {
+        const side = Math.sign(this.play.lane || 1) * (this.config.flip ? -1 : 1);
+        const stretch = this.play.blocking === 'stretch';
+        target = { x: d.x + side * (stretch ? 0.85 : 0.2), z: d.z - (stretch ? 0.4 : 0.7) };
+      }
       else target = { x: d.x, z: Math.min(this.spot - 0.7, d.z - 0.8) };
       o.want = seekWant(o, target, speedCap(o, run ? 0.85 : 0.5));
       o.sprinting = false;
     }
+  }
+
+  // A gap scheme pulls its backside guard behind the line before he leads
+  // through the called gap. The other four linemen cover his vacated matchup.
+  pullBlock(o) {
+    const side = this.config.flip ? -1 : 1, lane = this.play.lane * side;
+    o.pullStage ||= 0;
+    const target = o.pullStage === 0 ? { x: o.start.x, z: this.spot - 1.9 } : { x: lane, z: this.spot - 1.9 };
+    if (dist(o, target) < 0.65 || this.time > (o.pullStage === 0 ? 0.65 : 1.9)) o.pullStage++;
+    if (o.pullStage >= 2) return false;
+    o.want = seekWant(o, target, speedCap(o, 0.9));
+    return true;
   }
 
   // A blocked defender comes off his block when the ball carrier gets close:
@@ -660,6 +689,7 @@ export class Simulation {
   assignBlocks() {
     const pairs = [];
     for (const o of this.line) for (const d of this.defense) {
+      if (this.play.type === 'run' && o.id === this.play.pullingGuard && (o.pullStage || 0) < 2) continue;
       pairs.push({ o, d, cost: dist(o, d) - (o.assignment === d.id ? 1.5 : 0) });
     }
     pairs.sort((a, b) => a.cost - b.cost || a.o.number - b.o.number || a.d.number - b.d.number);
@@ -719,7 +749,7 @@ export class Simulation {
     // Step to where the back will be in a moment, an arm's length short of him.
     const ahead = { x: rb.x + rb.vx * 0.25, z: rb.z + rb.vz * 0.25 }, reach = scaled(qb.x - ahead.x, qb.z - ahead.z, 0.8);
     qb.want = seekWant(qb, { x: ahead.x + reach.x, z: ahead.z + reach.z }, 0.7 * qb.top);
-    if ((this.time > 0.4 && dist(qb, rb) < MESH_REACH) || this.time > 0.75) {
+    if (this.time > 0.4 && dist(qb, rb) < MESH_REACH) {
       this.handoff = true; this.carrier = 'R'; this.selected = 'R'; this.phase = 'run';
       this.possessionAt = this.time;
       rb.action = 'carry'; rb.actionTime = 0.3;
@@ -727,11 +757,12 @@ export class Simulation {
     }
   }
 
-  planDefense() {
+  planDefense(dt = STEP) {
     const pursuit = this.phase === 'run' || this.phase === 'tackle' || this.crossedLine || (this.play.type === 'run' && this.time > 0.8);
     const rushers = COVERAGES[this.coverage].rushers;
     this.defense.forEach((d, i) => {
       d.sprinting = true;
+      if (this.phase === 'air') this.readPass(d, dt);
       if (this.phase === 'tackle' && d.id === this.tackle.tackler) return;
       if (this.phase === 'tackle' && this.tackle.helpers.has(d.id)) {
         const c = this.byId[this.carrier];
@@ -749,10 +780,15 @@ export class Simulation {
         return;
       }
       const cover = this.cover(d, i);
-      if (this.phase === 'air' && this.pass.elapsed > this.skill.ballReaction && dist(d, this.pass.target) < 15) {
-        this.turnHips(d);
-        d.want = meetWant(d, this.pass.target, (this.pass.duration || 0) - this.pass.elapsed, speedCap(d));
-        return;
+      if (this.phase === 'air' && d.ballAware) {
+        const flight = this.readFlight(d);
+        // Stay in coverage when the pass is elsewhere. The read is an estimate
+        // from the visible ball, not access to the quarterback's chosen target.
+        if (dist(d, flight.target) < Math.min(15, d.top * flight.remaining + 3)) {
+          this.turnHips(d);
+          d.want = meetWant(d, flight.target, flight.remaining, speedCap(d));
+          return;
+        }
       }
       if (!d.turned) this.readThreat(d, cover.threat);
       d.want = this.backpedalLimit(d, cover.want);
@@ -836,7 +872,7 @@ export class Simulation {
     const ids = this.coverage === 'blitz' ? MAN.blitz : MAN.base;
     if (this.coverage === 'blitz' || (this.coverage === 'man' && i < 9)) {
       const seen = this.estimate(ids[i - 4], d.latency);
-      const target = { x: seen.x + seen.vx * 0.13, z: seen.z + 1.2 + seen.vz * 0.13 };
+      const target = { x: seen.x + seen.vx * this.skill.routeLead, z: seen.z + 1.2 + seen.vz * this.skill.routeLead };
       return { want: trackWant(d, target, { x: seen.vx, z: seen.vz }, cap), threat: seen };
     }
     let zx, depth;
@@ -957,6 +993,7 @@ export class Simulation {
       const intent = this.throwIntent ? this.byId[this.throwIntent.id] : p.action === 'throw' && this.pass ? this.pass.target : null;
       return intent ? toward(intent) : 0;
     }
+    if (this.phase === 'air' && p.ballAware && dist(p, this.ball) < 4) return toward(this.ball);
     if (p.team === 'defense' && !p.turned && live) return toward(qb);
     return speed > 0.5 ? Math.atan2(p.vx, p.vz) : p.facing;
   }
@@ -965,24 +1002,94 @@ export class Simulation {
     for (const p of this.offense) this.trails.get(p.id).push(this.time, p);
   }
 
+  // Track a pass only after actually seeing it. A trailing man defender can
+  // notice his receiver looking back, but needs extra time to locate the ball.
+  // Turning away from the quarterback is therefore a real coverage tradeoff.
+  readPass(d, dt) {
+    if (d.engaged || ['stumble', 'tackle', 'down'].includes(d.action)) return;
+    const dx = this.ball.x - d.x, dz = this.ball.z - d.z, gap = Math.hypot(dx, dz);
+    const visible = gap < 0.1 || (dx * Math.sin(d.facing) + dz * Math.cos(d.facing)) / gap > -0.34;
+    const receiver = this.byId[this.pass.receiver];
+    const receiverCue = this.pass.elapsed > 0.16 && receiver && dist(d, receiver) < 2.8;
+    if (visible || receiverCue || d.ballAware) {
+      d.ballRead += dt;
+      if (d.ballRead >= this.skill.ballReaction + (visible ? 0 : 0.16)) d.ballAware = true;
+      if (d.ballAware && visible) d.ballSightAt = this.time;
+    } else d.ballRead = Math.max(0, d.ballRead - dt);
+  }
+
+  readFlight(d) {
+    const b = this.ball;
+    const remaining = clamp((b.vy + Math.sqrt(Math.max(0, b.vy * b.vy + 2 * GRAVITY * (b.y - 1.6)))) / GRAVITY, 0.05, 3);
+    // Early reads have some depth/width error; watching the flight refines it.
+    // The fixed per-player bias consumes no random draws and cannot reveal a
+    // route or the throw's intended receiver/landing coordinate.
+    const error = this.skill.judgment * Math.min(1, remaining) / (1 + d.ballRead * 2);
+    const angle = d.number * 2.399963;
+    return { remaining, target: { x: b.x + b.vx * remaining + Math.sin(angle) * error, z: b.z + b.vz * remaining + Math.cos(angle) * error } };
+  }
+
   // ---------------------------------------------------------------------------
-  // The ball.
+  // The ball. Every player gets one play on a pass, not another lottery ticket
+  // every 1/120 second that the ball remains inside his reach.
   flyBall(dt) {
     this.lastBall = { ...this.ball };
     const b = this.ball;
     b.x += b.vx * dt; b.z += b.vz * dt; b.y += b.vy * dt - 0.5 * GRAVITY * dt * dt; b.vy -= GRAVITY * dt;
     this.pass.elapsed += dt;
+    this.pass.attempted ||= new Set();
     const candidates = [];
-    if (this.pass.elapsed > 0.18) for (const p of this.players) {
-      if (p.role === 'ol' || p.id === 'QB' || (p.team === 'defense' && p.role === 'dl' && b.y > 2)) continue;
+    if (this.pass.elapsed > 0.12) for (const p of this.players) {
+      if (p.role === 'ol' || p.id === 'QB' || this.pass.attempted.has(p.id) || p.engaged || ['stumble', 'tackle', 'down'].includes(p.action)) continue;
+      if (p.team === 'defense') {
+        if (!p.ballAware) continue;
+        // Acquiring the flight once does not grant eyes in the back of the
+        // helmet. Use the incoming side when the ball is right on his body.
+        let dx = this.lastBall.x - p.x, dz = this.lastBall.z - p.z;
+        if (Math.hypot(dx, dz) < 0.15) { dx = -b.vx; dz = -b.vz; }
+        const incoming = Math.hypot(dx, dz);
+        if (incoming > 0.01 && (dx * Math.sin(p.facing) + dz * Math.cos(p.facing)) / incoming < -0.42) continue;
+      }
       const near = nearestOnSegment(this.lastBall, b, p), gap = Math.hypot(near.x - p.x, near.z - p.z);
-      if (gap < 0.84 && near.y > 0.55 && near.y < 2.55 && Math.abs(p.x) < WIDTH / 2 && p.z < 120) candidates.push({ p, gap });
+      // A high/low ball needs more extension and less horizontal reach.
+      const reach = near.y > 2.15 ? 0.60 : near.y < 0.9 ? 0.55 : 0.78;
+      if (gap < reach && near.y > 0.55 && near.y < (p.role === 'dl' ? 2.15 : 2.55) && Math.abs(p.x) < WIDTH / 2 && p.z > 0 && p.z < 120) candidates.push({ p, gap, near, reach });
     }
-    candidates.sort((x, y) => x.gap - y.gap);
-    if (candidates.length) this.catchBall(candidates[0].p);
-    else if (b.y <= 0.15 || Math.abs(b.x) > WIDTH / 2 + 0.7 || b.z > 120 || b.z < 0) {
+    // Resolve the first physical contact along the swept flight, then the
+    // nearest hands for simultaneous contacts. Offense and defense share it.
+    candidates.sort((a, b) => a.near.t - b.near.t || a.gap - b.gap || a.p.number - b.p.number);
+    for (const contact of candidates) {
+      this.pass.attempted.add(contact.p.id);
+      if (contact.p.team === 'defense') this.playBall(contact);
+      else this.catchBall(contact.p);
+      if (this.phase !== 'air') return;
+    }
+    if (b.y <= 0.15 || Math.abs(b.x) > WIDTH / 2 + 0.7 || b.z > 120 || b.z < 0) {
       if (b.y <= 0.15) this.restBall(b.x, b.z);
       this.finish('Incomplete', 0, 'incomplete');
+    }
+  }
+
+  // Being in reach earns a chance to make a play, not possession. Catching a
+  // moving football takes two hands and clean position; a reaching defender
+  // is more likely to break up the pass. These odds are difficulty-independent.
+  playBall({ p, gap, near, reach }) {
+    const b = this.ball;
+    const reachQuality = clamp(1 - 0.65 * gap / reach, 0.25, 1);
+    const heightQuality = clamp(1 - Math.abs(near.y - 1.5) * 0.32, 0.55, 1);
+    const relative = Math.hypot(b.vx - p.vx, b.vy, b.vz - p.vz);
+    const speedQuality = clamp(1 - Math.max(0, relative - 16) * 0.015, 0.55, 1);
+    const receiver = this.offense.find(o => RECEIVERS.includes(o.id) && dist(o, p) < 1.0);
+    const hands = { cb: 0.52, s: 0.56, lb: 0.40, dl: 0.18 }[p.role] || 0.4;
+    const possession = hands * reachQuality * heightQuality * speedQuality * (receiver ? 0.68 : 1);
+    const breakup = clamp(0.60 + 0.25 * reachQuality, 0, 0.86);
+    const roll = this.random();
+    p.action = 'catch'; p.actionTime = 0.35;
+    if (roll < possession) { this.catchBall(p); return; }
+    if (roll < possession + (1 - possession) * breakup) {
+      this.ball = { x: near.x, y: Math.max(0.6, near.y), z: near.z, vx: b.vx * 0.18, vy: 1.3, vz: b.vz * 0.18 };
+      this.events.push('deflection');
+      this.finish('Pass broken up', 0, 'incomplete');
     }
   }
 

@@ -4,6 +4,8 @@
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import { PLAYS, formationFor } from '../dist/js/plays.js';
+import { captureModels } from './model-screenshots.mjs';
 
 const url = process.env.TEST_URL || 'http://127.0.0.1:8000';
 await mkdir('test-results', { recursive: true });
@@ -73,7 +75,30 @@ try {
 
   // Playbook: choose a play, then switch to the light graphics tier for the interaction checks.
   await page.getByRole('button', { name: 'Playbook', exact: true }).click();
-  assert.equal(await page.locator('.play-card').count(), 8);
+  assert.equal(await page.locator('.play-card').count(), PLAYS.length);
+  // The expanded book remains searchable, and diagrams/lineups share the formation data.
+  const newPlay = PLAYS.find(p => p.formationId && p.formationId !== 'doubles');
+  assert.ok(newPlay, 'includes another formation');
+  await page.locator('#play-formation-filter').selectOption({ label: newPlay.formation });
+  assert.equal(await page.locator('.play-card').count(), PLAYS.filter(p => p.formation === newPlay.formation).length);
+  await page.locator('#play-search').fill(newPlay.name);
+  assert.equal(await page.locator('.play-card').count(), 1);
+  await page.getByRole('button', { name: newPlay.name + ' — ' + newPlay.tag, exact: true }).click();
+  assert.equal(await sim('play.id'), newPlay.id);
+  const alignment = formationFor(newPlay);
+  for (const id of ['QB', 'X', 'Y', 'A', 'B', 'R']) {
+    const spec = alignment.find(p => p.id === id);
+    const actual = await page.evaluate(id => {
+      const s = window.footballsim.sim, p = s.byId[id]; return [p.x, p.z - s.spot];
+    }, id);
+    assert.ok(Math.abs(actual[0] - spec.x) < 1e-8 && Math.abs(actual[1] - spec.z) < 1e-8, id + ' uses the called alignment');
+  }
+  await page.locator('#playbook-open').click();
+  await page.locator('#play-formation-filter').selectOption('');
+  await page.locator('#play-search').fill('no such concept');
+  assert.equal(await page.locator('.play-card').count(), 0);
+  assert.match(await page.locator('#playbook-results').innerText(), /No matching plays/);
+  await page.locator('#play-search').fill('');
   await shot('03-playbook');
   await page.getByRole('button', { name: 'Mesh concept — SHORT', exact: true }).click();
   // Capture the default visual tier above, then use the low GPU budget for
@@ -114,7 +139,7 @@ try {
 
   // Run play with sprint.
   await page.getByRole('button', { name: 'Call play', exact: true }).click();
-  await page.getByRole('button', { name: 'Inside zone — RUN', exact: true }).click();
+  await page.getByRole('button', { name: 'Inside zone — ' + PLAYS.find(p => p.id === 'zone').tag, exact: true }).click();
   await page.getByRole('button', { name: 'Snap ball' }).click();
   await waitFor(() => window.footballsim.sim.handoff);
   await page.keyboard.down('w');
@@ -175,6 +200,14 @@ try {
   assert.equal(await page.locator('#down-distance').innerText(), '2ND & 10');
   assert.deepEqual(await defense(), defenseBeforeAudible);
 
+  // All new concepts are reachable by keyboard; digit shortcuts address the visible page.
+  await page.keyboard.press('z');
+  await page.getByRole('button', { name: 'Next audible page', exact: true }).click();
+  assert.match(await page.locator('#audible-page').innerText(), /Page 2/);
+  await page.keyboard.press('1');
+  assert.equal(await sim('play.id'), PLAYS[8].id);
+  assert.equal(await page.locator('#down-distance').innerText(), '2ND & 10');
+
   await page.locator('#playbook-open').click();
   await page.getByRole('button', { name: 'Random every rep', exact: true }).click();
   assert.equal(await page.locator('#offense').inputValue(), 'random');
@@ -185,6 +218,11 @@ try {
   await page.waitForTimeout(500);
   await shot('06-mobile');
   assert.equal(await game(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.locator('#playbook-open').click();
+  assert.equal(await game(() => {
+    const d = document.getElementById('playbook'); return d.scrollWidth <= d.clientWidth;
+  }), true);
+  await page.getByRole('button', { name: 'Close playbook', exact: true }).click();
 
   // Back to practice reps: drive information and the first-down line disappear.
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -205,6 +243,7 @@ try {
   assert.equal(await visible('#welcome'), false);
   assert.equal(await sim('phase'), 'presnap');
 
+  await captureModels(page);
   assert.deepEqual(errors, []);
   console.log('Browser checks passed: render, title menu, camera fallback and cycling, random defaults, play selection, passing, handoff, replay, pause, Move the chains, hot routes, audibles, fullscreen, settings, mobile layout, return to menu.');
 } catch (error) {

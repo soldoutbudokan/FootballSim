@@ -62,7 +62,7 @@ const glyphWidth = d => (d === '1' ? 3.0 : 4);
 
 // Draws `text` centred at (cx, cy) with glyph height h (px). `squeeze` scales
 // horizontally to compensate for the texture's unequal u/v densities.
-export function drawNumber(ctx, text, cx, cy, h, color, squeeze = 1) {
+export function drawNumber(ctx, text, cx, cy, h, color, squeeze = 1, strokeWidth = 1.06) {
   const unit = h / 6, gap = 0.55;
   const total = [...text].reduce((w, d, i) => w + glyphWidth(d) + (i ? gap : 0), 0);
   ctx.save();
@@ -70,7 +70,7 @@ export function drawNumber(ctx, text, cx, cy, h, color, squeeze = 1) {
   ctx.scale(squeeze * unit, unit);
   ctx.translate(-total / 2, -3);
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.06;
+  ctx.lineWidth = strokeWidth;
   ctx.lineJoin = 'miter';
   ctx.miterLimit = 4;
   let x = 0;
@@ -132,15 +132,39 @@ export function buildJerseyAtlas(players) {
     ctx.fillStyle = jersey;
     ctx.fillRect(x0, y0, cellW, cellH);
     fabricNoise(ctx, x0, y0, cellW, cellH, hashString(spec.id), spec.team === 'defense' && spec.role !== 'qb' ? 0.03 : 0.05);
+    // Cut-and-sew panels: a shoulder yoke, ventilated side panels and fine
+    // seams give the jersey structure at replay distance without extra meshes.
+    const lightJersey = spec.team === 'defense' && spec.role !== 'qb';
+    ctx.fillStyle = lightJersey ? 'rgba(30,43,56,0.06)' : 'rgba(255,255,255,0.045)';
+    ctx.fillRect(x0, y0 + cellH * 0.08, cellW, cellH * 0.15);
+    for (const u of [0, 0.5, 1]) {
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(x0 + u * cellW - 12, y0 + cellH * 0.25, 24, cellH * 0.75);
+    }
+    ctx.strokeStyle = lightJersey ? 'rgba(30,43,56,0.17)' : 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0 + cellH * 0.23); ctx.lineTo(x0 + cellW, y0 + cellH * 0.23);
+    ctx.stroke();
     // Side seams and a slightly darker collar band.
     ctx.fillStyle = 'rgba(0,0,0,0.10)';
     for (const u of [0, 0.5]) ctx.fillRect(x0 + u * cellW - 1, y0, 3, cellH);
     ctx.fillRect(x0 + cellW - 2, y0, 2, cellH);
     ctx.fillStyle = 'rgba(0,0,0,0.16)';
     ctx.fillRect(x0, y0, cellW, cellH * 0.035);
-    const text = String(spec.number);
-    drawNumber(ctx, text, x0 + cellW * 0.75, y0 + cellH * 0.5, pxPerYdV * 0.2, number, squeeze);
-    drawNumber(ctx, text, x0 + cellW * 0.25, y0 + cellH * 0.55, pxPerYdV * 0.25, number, squeeze);
+    // The collar's V sits on the front, with a contrasting ribbed edge.
+    ctx.strokeStyle = lightJersey ? TEAM.navy : TEAM.silver;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x0 + cellW * 0.705, y0 + 1);
+    ctx.lineTo(x0 + cellW * 0.75, y0 + cellH * 0.13);
+    ctx.lineTo(x0 + cellW * 0.795, y0 + 1);
+    ctx.stroke();
+    const text = String(spec.number), keyline = lightJersey ? '#b2b9c3' : '#0b1522';
+    for (const [u, v, height] of [[0.75, 0.52, 0.21], [0.25, 0.56, 0.25]]) {
+      drawNumber(ctx, text, x0 + cellW * u, y0 + cellH * v, pxPerYdV * height, keyline, squeeze, 1.3);
+      drawNumber(ctx, text, x0 + cellW * u, y0 + cellH * v, pxPerYdV * height, number, squeeze);
+    }
     offsets.set(spec.id, [(x0 + pad) / c.width, 1 - (y0 + cellH - pad) / c.height]);
   });
   const last = cols * rows - 1, wx = (last % cols) * cellW, wy = Math.floor(last / cols) * cellH;
@@ -194,9 +218,9 @@ function leatherTexture() {
 // Roughness and metalness per kind of surface; baked per vertex because the
 // squad's cloth, skin, rubber and metal share one material.
 export const SURFACE = {
-  cloth: [0.86, 0], pants: [0.46, 0.22], belt: [0.6, 0], sock: [0.92, 0], skin: [0.55, 0],
+  cloth: [0.9, 0], pants: [0.78, 0], belt: [0.6, 0], sock: [0.92, 0], skin: [0.7, 0],
   sleeve: [0.7, 0], glove: [0.62, 0], cleat: [0.42, 0], tape: [0.85, 0], towel: [1, 0],
-  shell: [0.32, 0.25], facemask: [0.45, 0.35], strap: [0.35, 0], visor: [0.06, 0.7],
+  shell: [0.27, 0.04], facemask: [0.42, 0.18], strap: [0.35, 0], visor: [0.06, 0.7],
 };
 
 // The squad's materials: one for every body (vertex colours carry the

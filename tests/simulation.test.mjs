@@ -13,7 +13,7 @@ test('play action prevents release until the fake is finished',()=>{const s=prac
 test('a pass completes through flight and transfers control to the receiver',()=>{const s=practice(42);s.snap();advance(s,1.8);assert.equal(s.requestThrow('X','touch'),true);let caught=false;for(let i=0;i<800&&s.phase!=='dead';i++){s.step(STEP,{z:s.phase==='run'?1:0});if(s.phase==='run'){caught=true;assert.equal(s.carrier,'X');}}assert.equal(caught,true);assert.equal(s.stats.attempts,1);assert.equal(s.stats.completions,1);assert.equal(s.phase,'dead');assert.ok(s.recording.length>20);});
 for(const id of ['zone','stretch'])test(id+' hands off to the user-controlled running back',()=>{const s=practice(42);s.selectPlay(id);s.snap();advance(s,.8);assert.equal(s.handoff,true);assert.equal(s.carrier,'R');assert.equal(s.phase,'run');assert.equal(s.stats.attempts,0);assert.equal(s.requestThrow('X'),false);});
 test('idle quarterback can be sacked by the pass rush',()=>{const s=practice(7);s.snap();advance(s,12);assert.equal(s.phase,'dead');assert.equal(s.result.kind,'sack');assert.equal(s.stats.sacks,1);});
-test('a defender in the ball path intercepts; control never becomes defensive',()=>{const s=practice(4);s.snap();advance(s,.5);s.phase='air';s.carrier=null;s.threw=true;s.stats.attempts=1;const d=s.byId.FS;s.ball={x:d.x,y:1.4,z:d.z,vx:0,vy:0,vz:0};s.pass={receiver:'X',target:{x:d.x,z:d.z,y:1.4},elapsed:.5,duration:1};s.step(STEP);assert.equal(s.result.kind,'interception');assert.equal(s.stats.ints,1);assert.notEqual(s.selected,'FS');});
+test('a prepared defender can secure a pass in the ball path; control never becomes defensive',()=>{const s=practice(4);s.snap();advance(s,.5);s.phase='air';s.carrier=null;s.threw=true;s.stats.attempts=1;const d=s.byId.FS;d.ballAware=true;s.random=()=>0;s.ball={x:d.x,y:1.4,z:d.z,vx:0,vy:0,vz:0};s.pass={receiver:'X',target:{x:d.x,z:d.z,y:1.4},elapsed:.5,duration:1};s.step(STEP);assert.equal(s.result.kind,'interception');assert.equal(s.stats.ints,1);assert.notEqual(s.selected,'FS');});
 test('incomplete passes preserve field position and advance the down in drive mode',()=>{const s=practice(1);s.configure({mode:'drive'});s.snap();advance(s,.5);s.throwAway();s.next();assert.equal(s.spot,35);assert.equal(s.down,2);assert.equal(s.toGo,10);});
 test('first downs reset the series and fourth-down failure starts another drive',()=>{const s=practice(1);s.configure({mode:'drive'});s.snap();s.finish('Tackled',14,'tackle');s.next();assert.equal(s.spot,49);assert.equal(s.down,1);assert.equal(s.toGo,10);for(let i=0;i<4;i++){s.snap();s.finish('Incomplete',0,'incomplete');s.next();}assert.equal(s.spot,35);assert.equal(s.down,1);});
 test('repeat-spot practice retains the configured location after a gain',()=>{const s=practice(1);s.configure({spot:90,mode:'reps'});s.snap();s.finish('Tackled',8,'tackle');s.next();assert.equal(s.spot,90);assert.equal(s.down,1);});
@@ -29,7 +29,7 @@ test('juke cooldown and stamina prevent unlimited moves',()=>{
 test('default practice draws offense and defense again for each new rep',()=>{
   const s=new Simulation(2026),offenses=new Set(),defenses=new Set();
   assert.equal(s.config.offense,'random');assert.equal(s.config.coverage,'random');assert.equal(s.config.mode,'reps');
-  for(let i=0;i<80;i++){offenses.add(s.play.id);defenses.add(s.coverage);s.snap();s.finish('Incomplete',0,'incomplete');assert.equal(s.next(),true);}
+  for(let i=0;i<PLAYS.length*15;i++){offenses.add(s.play.id);defenses.add(s.coverage);s.snap();s.finish('Incomplete',0,'incomplete');assert.equal(s.next(),true);}
   assert.equal(offenses.size,PLAYS.length);assert.equal(defenses.size,4);assert.equal(s.spot,35);assert.equal(s.down,1);
 });
 test('fixed calls repeat until random offense is restored',()=>{
@@ -282,7 +282,7 @@ test('a safety needs the carrier downed in his own end zone; lining up there is 
 });
 
 test('an interceptor keeps the ball after the whistle',()=>{
-  const s=practice(4);s.snap();advance(s,.5);s.phase='air';s.carrier=null;s.threw=true;const d=s.byId.FS;
+  const s=practice(4);s.snap();advance(s,.5);s.phase='air';s.carrier=null;s.threw=true;const d=s.byId.FS;d.ballAware=true;s.random=()=>0;
   s.ball={x:d.x,y:1.4,z:d.z,vx:0,vy:0,vz:0};s.pass={receiver:'X',target:{x:d.x,z:d.z,y:1.4},elapsed:.5,duration:1};s.step(STEP);
   assert.equal(s.result.kind,'interception');advance(s,1);assert.ok(s.ball.y>1&&Math.hypot(s.ball.x-d.x,s.ball.z-d.z)<.5);
 });
