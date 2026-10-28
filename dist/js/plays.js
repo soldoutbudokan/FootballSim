@@ -2,7 +2,10 @@
 // `speed` is each player's top speed in yards/s (sim.js adds the rest of the
 // physical model by role).
 export const RECEIVERS = ['X', 'Y', 'A', 'B', 'R'];
-export const ROUTE_COLORS = ['#6ee7ff', '#ffd16b', '#b6f46c', '#e4a4ff', '#ff9e83'];
+// Receivers 1-5: sky, gold, pink, lavender, coral. Five hues well apart and
+// none of them green, so route art reads on the turf (contrast 2.7-4.4 against
+// #3f6b3a-#4a7a42 grass) and badges read on navy.
+export const ROUTE_COLORS = ['#7ad7ff', '#ffd45e', '#ffa3da', '#cdb8ff', '#ffab85'];
 export const FORMATION = [
   { id:'QB', number:12, role:'qb', x:0, z:-5, speed:7.6 },
   { id:'LT', number:72, role:'ol', x:-3.2, z:-.35, speed:7.0 },
