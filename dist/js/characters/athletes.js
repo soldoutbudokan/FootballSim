@@ -6,6 +6,7 @@ import { Character, bodyScale } from './character.js';
 import { UniformMaterials } from './materials.js';
 import { NumberAtlas, numberPlacement, makeBall, makeRing, makeContactShadows } from './props.js';
 import { uniformFor } from './palette.js';
+import { STANDARD_HEIGHT } from './rig.js';
 
 const ELIGIBLE_LOOK = new Set(['wr', 'te', 'rb', 'cb', 's', 'lb']);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vector3();
@@ -46,6 +47,10 @@ export class SkinnedAthletes {
     const base = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion(), scale: 1 };
     rig.canon.Hips.parent.matrixWorld.decompose(base.position, base.quaternion, _s);
     base.scale = _s.x;
+    // Head joint -> crown of the head in character space (the model is
+    // normalised to STANDARD_HEIGHT from soles to crown), plus the helmet.
+    const headY = rig.canon.Head ? rig.canon.Head.getWorldPosition(new THREE.Vector3()).y : STANDARD_HEIGHT - 0.25;
+    this.crown = Math.min(0.45, Math.max(0.12, STANDARD_HEIGHT - headY)) + 0.04;
     const rest = {};
     for (const [c, bone] of Object.entries(rig.canon)) rest[c] = { quaternion: bone.quaternion.clone(), charQuaternion: bone.getWorldQuaternion(new THREE.Quaternion()) };
     const gaits = Object.fromEntries(Object.entries(asset.clips).filter(([, i]) => i.gait).map(([s, i]) => [s, i.gait]));
@@ -103,6 +108,16 @@ export class SkinnedAthletes {
     this.placeBall(state, dt);
     this.scene.updateMatrixWorld(true);
     return controlled;
+  }
+
+  // Scene-space point at the crown of player `id`'s helmet as last posed
+  // (receiver badges), or null when the rig has no head joint.
+  helmetTop(id, out) {
+    const c = this.rigs.get(id);
+    const head = c?.bones?.Head;
+    if (!head) return null;
+    head.getWorldPosition(out);
+    return out.setY(out.y + this.crown * c.root.scale.y);
   }
 
   // The receiver the ball is heading to: nearest offensive eligible to it.

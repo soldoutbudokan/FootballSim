@@ -25,6 +25,8 @@ The team is a fictional navy-and-silver club: navy helmets with a silver stripe,
 
 Animation is procedural and driven by the simulation: stride length and cadence follow speed, the body leans with acceleration and banks into turns, defensive backs backpedal and flip their hips, linemen and backs set in their stances, the quarterback drops, sets and throws through a full motion (the ball leaves the hand 0.23 s into the 0.4 s throw), receivers reach for the ball where it will arrive, carriers tuck it high and tight, and cuts, jukes, blocks, wrap tackles, stumbles and falls each have their own pose. The practice ball is a prolate spheroid with laces and stripes that spirals nose-first along its flight.
 
+Player models: drop a rigged character at dist/models/player.glb (and optional clips at dist/models/clips/<slot>.glb|.fbx) to replace the procedural athletes. See MODELS.md. ?athletes=procedural|skinned|dev overrides the choice.
+
 ## Movement and play
 
 The simulation runs at a fixed 120 Hz, in yards and seconds, on a seeded random number generator.
@@ -122,6 +124,6 @@ node tests/browser.mjs
 
 The browser test drives the real UI: title menu, camera fallback and cycling, play selection, hot routes, passing, handoff, replay, pause, settings and the performance tier, Move the chains, audibles, fullscreen, the 390 px phone layout and the return to the menu. It fails on any console error or failed request, and its screenshots are uploaded by the verification workflow. Add `?debug=1` for a developer-only `window.footballsim` handle (`sim`, `view`, `graphics`, `start()`, `snap()`).
 
-Code layout: `dist/js/sim.js` and `plays.js` (simulation and playbook), `scene.js` with `environment.js` and `env/` (field, facility, sky, lighting, cameras, grass), `athletes.js` with `athletes/` (rigs, skinning, poses, ball), `app.js`, `audio.js`, `index.html` and `style.css` (front end), and `graphics.js` (quality tiers).
+Code layout: `dist/js/sim.js` and `plays.js` (simulation and playbook), `scene.js` with `environment.js` and `env/` (field, facility, sky, lighting, cameras, grass), `athletes.js` with `athletes/` (rigs, skinning, poses, ball), `characters/` (the optional skinned-model layer, see `MODELS.md`), `app.js`, `audio.js`, `index.html` and `style.css` (front end), and `graphics.js` (quality tiers).
 
 All game-specific code and procedural assets were created for this repository. Third-party credits: `ASSETS.md`.

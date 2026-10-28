@@ -116,6 +116,22 @@ export class Athletes {
     return out.copy(rig.world.head).setY(rig.world.head.y + 0.255);
   }
 
+  // Removes this layer from the scene and frees its GPU resources (when the
+  // skinned athletes replace it). Every geometry, material and texture under
+  // the group belongs to this instance.
+  dispose() {
+    this.group.removeFromParent();
+    const textures = new Set();
+    this.group.traverse(o => {
+      o.geometry?.dispose?.();
+      for (const m of [].concat(o.material || [])) {
+        for (const value of Object.values(m)) if (value?.isTexture) textures.add(value);
+        m.dispose();
+      }
+    });
+    for (const t of textures) t.dispose();
+  }
+
   // After the whistle with no carrier (an interception) the simulation keeps
   // the ball, motionless, in a player's hands. A dropped or incomplete ball
   // is moving or on the turf, so nobody holds it.

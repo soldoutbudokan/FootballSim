@@ -15,9 +15,13 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.setDefaultTimeout(60000);
+// Without a published character model the game's HEAD probe for
+// ./models/player.glb answers 404 by design (it then keeps the procedural
+// athletes); that one request is not an error.
+const modelProbe = u => /\/models\/player\.(glb|fbx)$/.test(new URL(u || 'http://x/').pathname);
 page.on('pageerror', e => errors.push(e.message));
-page.on('response', r => { if (r.status() >= 400) errors.push(r.status() + ' ' + r.url()); });
-page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('response', r => { if (r.status() >= 400 && !(r.request().method() === 'HEAD' && modelProbe(r.url()))) errors.push(r.status() + ' ' + r.url()); });
+page.on('console', m => { if (m.type() === 'error' && !modelProbe(m.location()?.url)) errors.push(m.text()); });
 
 const game = fn => page.evaluate(fn);
 const sim = expression => page.evaluate(`window.footballsim.sim.${expression}`);

@@ -18,6 +18,10 @@ import { athletesChoice, athletesParam, needsProbe, modelPublished, readModelInd
 const VERSION = (() => { try { return new URL(import.meta.url).search; } catch { return ''; } })();
 const loadPipeline = () => import('./index.js' + VERSION);
 
+// Helmet crown of a standing 6 ft 2 in player (scene yards), for layers that
+// cannot say where a posed helmet is.
+const STANDING_HELMET_TOP = 2.2;
+
 export class AthletesLayer {
   // options:
   //   Athletes   the procedural layer's class (interim and fallback)
@@ -93,6 +97,7 @@ export class AthletesLayer {
   }
 
   // Pass-throughs used by debugging and the dev harness.
+  get group() { return this.active.group; }
   get ball() { return this.active.ball; }
   get ring() { return this.active.ring; }
   get contactShadows() { return this.active.contactShadows; }
@@ -103,9 +108,24 @@ export class AthletesLayer {
     this.active.setQuality(profile);
   }
 
+  // Scene-space point at the crown of player `id`'s helmet as last rendered
+  // (receiver badges, FieldScene.helmetTop). The active layer answers when it
+  // can; otherwise a standing player's helmet height over his last position.
+  helmetTop(id, out) {
+    if (typeof this.active.helmetTop === 'function') {
+      try {
+        const top = this.active.helmetTop(id, out);
+        if (top) return top;
+      } catch { /* fall through to the fixed height */ }
+    }
+    const p = this.lastState?.players?.find(q => q.id === id);
+    return p ? out.set(p.x || 0, STANDING_HELMET_TOP, -(p.z || 0)) : null;
+  }
+
   // Never throws: a broken frame still returns the controlled player and
   // leaves world matrices consistent for the render that follows.
   update(state, dt, options) {
+    this.lastState = state;
     try {
       return this.active.update(state, dt, options);
     } catch (error) {

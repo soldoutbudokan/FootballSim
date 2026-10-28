@@ -1,11 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
 import { Environment } from './environment.js';
 import { Athletes } from './athletes.js';
+import { AthletesLayer } from './characters/layer.js';
 import { pixelRatio, PROFILES } from './graphics.js';
 import { CameraDirector, normalizeCameraMode } from './env/camera.js';
 
 // Orchestrates the renderer, the camera and the two visual layers
-// (Environment: field, facility, sky and light; Athletes: players and ball).
+// (Environment: field, facility, sky and light; AthletesLayer: players and
+// ball, procedural or skinned).
 // Simulation space is yards with +z toward the opponent's goal; scene space
 // negates z.
 export class FieldScene {
@@ -30,7 +32,9 @@ export class FieldScene {
     this.assetManager = new THREE.LoadingManager(() => { this.assetsReady = true; });
     this.assetManager.onError = url => console.error('Environment asset failed: ' + url);
     this.environment = new Environment(this.scene, this.renderer, this.assetManager);
-    this.athletes = new Athletes(this.scene, players);
+    // The procedural athletes, swapped for skinned characters when a model is
+    // published (dist/models/player.glb) or ?athletes= asks for them.
+    this.athletes = new AthletesLayer(this.scene, players, { Athletes, camera: this.camera, quality: this.profile });
     this.projectVector = new THREE.Vector3();
     this.groundFocus = new THREE.Vector3();
     this.helmetPoint = new THREE.Vector3();
