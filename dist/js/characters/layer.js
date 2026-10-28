@@ -8,8 +8,8 @@
 // request for ./models/player.glb whether a skinned model is wanted (see
 // choose.js), loads it in the background and swaps it in. A failed load keeps
 // (or falls back to) the procedural athletes. The skinned pipeline and its
-// loaders are imported only when a model is actually loaded, so the
-// procedural game downloads nothing extra.
+// glTF/FBX loaders (about 300 KB) are imported only when a model is actually
+// loaded; without a model the game fetches models/index.json and one HEAD.
 import { PlaceholderAthletes, controlledPlayer, removeLayer } from './placeholders.js';
 import { athletesChoice, athletesParam, needsProbe, modelPublished, readModelIndex } from './choose.js';
 
