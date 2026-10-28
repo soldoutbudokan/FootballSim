@@ -49,6 +49,10 @@ export class Football {
     } else if (s.phase === 'air') {
       anchor = 'air';
       this.inFlight(b, ctx.dt);
+    } else if ((b.y || 0) > 0.2) {
+      // A dropped or deflected ball still falling after the whistle.
+      anchor = 'loose';
+      this.tumbling(b, ctx.dt);
     } else {
       anchor = 'loose';
       this.onGround(b.x, b.z, this.flightYaw, true);
@@ -93,6 +97,14 @@ export class Football {
     this.flightYaw = Math.atan2(_v.x, _v.z);
     this.spin += dt * SPIN_RATE;
     this.targetQuat.setFromUnitVectors(Z_AXIS, _v).multiply(_q.setFromAxisAngle(Z_AXIS, this.spin));
+  }
+
+  // Loose and airborne: the simulation's position, turning end over end.
+  tumbling(b, dt) {
+    this.target.set(b.x, b.y, -b.z);
+    this.spin += dt * 9;
+    _e.set(this.spin, this.flightYaw, 0, 'YXZ');
+    this.targetQuat.setFromEuler(_e);
   }
 
   // Shotgun snap: a low spiral from the centre's hand back to the quarterback.
