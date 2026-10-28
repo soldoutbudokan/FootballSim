@@ -63,12 +63,13 @@ export function locomotionPoints(available, gaits = {}) {
     const measured = gaits[slot]?.speed;
     // Trust a measured speed only near the nominal one: clips are often
     // authored slower or faster than their names say, but not wildly.
-    const s = slot === 'idle' ? 0 : measured > speed * 0.5 && measured < speed * 1.8 ? measured : speed;
+    let s = slot === 'idle' ? 0 : measured > speed * 0.5 && measured < speed * 1.8 ? measured : speed;
+    // The names keep their order (a "run" measured slower than the "jog"
+    // still sits above it): speeds stay strictly increasing.
+    const previous = points[points.length - 1];
+    if (previous && s <= previous.speed) s = Math.max(previous.speed + 0.3, speed);
     points.push({ slot, speed: s });
   }
-  points.sort((a, b) => a.speed - b.speed);
-  // Keep speeds strictly increasing so the blend space is well formed.
-  for (let i = 1; i < points.length; i++) if (points[i].speed <= points[i - 1].speed) points[i].speed = points[i - 1].speed + 0.3;
   return points;
 }
 

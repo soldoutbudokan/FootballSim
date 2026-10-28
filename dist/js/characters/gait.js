@@ -87,6 +87,9 @@ export function targetCadence(speed) {
   return table[table.length - 1][1];
 }
 
+// How far a clip's cadence may stray from the human curve (fractions).
+export const CADENCE_RANGE = [0.85, 1.12];
+
 // Playback for one locomotion clip at a ground speed.
 //   gait: analyseGait result (or {cadence, speed, steps, duration} nominal)
 // Returns {timeScale, cycleRate (cycles/s), stretch}. The clip's cadence is
@@ -96,9 +99,11 @@ export function targetCadence(speed) {
 export function strideRate(gait, speed) {
   if (!gait || !(gait.cadence > 0)) return { timeScale: 1, cycleRate: 0, stretch: 1 };
   const human = targetCadence(speed);
-  // Cadence that keeps the planted foot still: speed / natural stride.
+  // Cadence that keeps the planted foot still: speed / natural stride. It is
+  // held close to the human curve (a short-strided jog clip played at sprint
+  // speed would otherwise blur its legs); `stretch` makes up the difference.
   const matched = gait.stride > 0 ? speed / gait.stride : human;
-  const cadence = Math.min(human * 1.25, Math.max(human * 0.8, matched));
+  const cadence = Math.min(human * CADENCE_RANGE[1], Math.max(human * CADENCE_RANGE[0], matched));
   const timeScale = cadence / gait.cadence;
   const stretch = gait.stride > 0 && speed > 0 ? Math.min(1.6, Math.max(1, speed / (cadence * gait.stride))) : 1;
   return { timeScale, cycleRate: cadence / gait.steps, stretch };

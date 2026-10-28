@@ -36,8 +36,8 @@ export function uniformFor(spec = {}, overrides = {}) {
     facemask: COLORS.facemask,
     socks: COLORS.navy,
     shoes: h % 3 === 0 ? COLORS.black : COLORS.white,
-    gloves: (h >> 3) % 2 ? COLORS.white : COLORS.navy,
-    skin: SKIN_TONES[(h >> 5) % SKIN_TONES.length],
+    gloves: (h >>> 3) % 2 ? COLORS.white : COLORS.navy,
+    skin: SKIN_TONES[(h >>> 5) % SKIN_TONES.length],
   };
   const team = offense ? overrides.offense : overrides.defense;
   return { ...base, ...(team || {}), ...(qb ? overrides.qb || {} : {}) };
