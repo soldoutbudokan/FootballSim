@@ -83,6 +83,19 @@ const SHED_RANGE = 1.6, SHED_TIME = 0.3;  // a blocked man reads the ball carrie
 const WRAP_KEEP = 0.8;
 const TACKLE_DECEL = 12, GANG_DECEL = 6, TACKLE_HOLD = 0.9;
 const STUMBLE_TIME = 0.7, STUMBLE_SPEED = 0.3, BROKEN_KEEP = 0.8;
+// Pursuit leverage: each pursuer aims min..min+spread yards to his own side
+// of the carrier's path (the side he lined up on), fading out between `far`
+// and `near` yards from the carrier so he still closes to make the tackle;
+// a defender in front of the runner takes only `front` of it. Pursuers
+// arrive side by side instead of in single file.
+const LEVERAGE = { min: 1.0, spread: 0.5, near: 2.5, far: 7, front: 0.25 };
+// Once the carrier is wrapped up, pursuers who are not in on the tackle pull
+// up: those within `reach` yards of their spot steer to it, radius..radius+
+// spread yards from the carrier and fanned out to their own side; the rest
+// ease off where they are, braking at brake..brake+brakeSpread of full, so
+// they stop at varied spots. A defender already within `pileOn` yards keeps
+// coming and can join the tackle.
+const PULL_UP = { radius: 1.8, spread: 2.7, fan: 28 * DEG, flank: 55 * DEG, effort: 0.7, pileOn: 1.6, reach: 6, brake: 0.5, brakeSpread: 0.4 };
 const BALL_REST = 0.1;                 // centre height of a ball lying on the turf
 const CATCH_GRACE = 0.35;
 const MESH_REACH = 1.25;               // QB to back, body centres, at the exchange              // a new carrier runs on through the catch
@@ -133,6 +146,19 @@ function defensiveAlignment(coverage, front, random) {
   });
 }
 
+// Each defender's pursuit leverage and pull-up spot, varied by his index
+// with low-discrepancy fractions (no random draws, so the seeded stream is
+// unchanged). The side is the one he lined up on; the middle men alternate.
+function assignPursuitAngles(d, k) {
+  const f = (k * 0.618034) % 1, g = (k * 0.381966 + 0.2) % 1;
+  const side = Math.abs(d.start.x) > 0.5 ? Math.sign(d.start.x) : (k % 2 ? 1 : -1);
+  d.leverage = side * (LEVERAGE.min + LEVERAGE.spread * f);
+  d.pullUp = {
+    radius: PULL_UP.radius + PULL_UP.spread * g, fan: side * PULL_UP.fan * (0.4 + 0.6 * f),
+    brake: PULL_UP.brake + PULL_UP.brakeSpread * f, mode: null, bearing: 0,
+  };
+}
+
 function createPlayer(spec, team, spot, flip, speedScale = 1) {
   const body = BODY[spec.role];
   const x = flip ? -spec.x : spec.x, z = spot + spec.z, top = spec.speed * speedScale;
@@ -141,7 +167,7 @@ function createPlayer(spec, team, spot, flip, speedScale = 1) {
     facing: team === 'offense' ? 0 : Math.PI,
     lean: 0, backpedal: false,
     route: [], routeIndex: 0, start: { x, z },
-    stamina: 1, action: 'ready', actionTime: 0, engaged: null, shed: 0, phase: 0,
+    stamina: 1, action: 'ready', actionTime: 0, engaged: null, shed: 0, phase: 0, ease: 1,
     // Physical model
     top, a0: TOP_REACH * top / body.zeroToTop, brake: body.brake, agility: body.agility, mass: body.mass,
     want: ZERO, sprinting: false, latAccel: 0,
@@ -280,6 +306,24 @@ function meetWant(p, target, timeLeft, cap) {
   return scaled(dx, dz, Math.min(cap, d / Math.max(0.15, timeLeft)));
 }
 
+// Lateral shade of a pursuit aim point: `leverage` yards along the normal of
+// the carrier's path (as the defender saw it), oriented so + is toward +x,
+// fading to nothing as the defender closes in.
+function leverageOffset(seen, d, leverage) {
+  if (!leverage) return ZERO;
+  const speed = Math.hypot(seen.vx, seen.vz);
+  let nx = 1, nz = 0, ux = 0, uz = 1;
+  if (speed > 1) { ux = seen.vx / speed; uz = seen.vz / speed; nx = uz; nz = -ux; }
+  if (nx < 0) { nx = -nx; nz = -nz; }
+  const gap = Math.hypot(seen.x - d.x, seen.z - d.z);
+  // Trailing pursuers take the full angle; a man in front of the runner only
+  // shades it, so he still squares up to make the tackle.
+  const ahead = gap > 1e-6 ? ((d.x - seen.x) * ux + (d.z - seen.z) * uz) / gap : 0;
+  const share = ahead > 0 ? 1 - (1 - LEVERAGE.front) * Math.min(1, ahead * 2) : 1;
+  const k = leverage * share * clamp((gap - LEVERAGE.near) / (LEVERAGE.far - LEVERAGE.near), 0, 1);
+  return { x: nx * k, z: nz * k };
+}
+
 function project(a, b, p) {
   const dx = b.x - a.x, dz = b.z - a.z, len = Math.hypot(dx, dz);
   if (len < 1e-6) return { x: b.x, z: b.z, along: 0, len: 0, ux: 0, uz: 0 };
@@ -384,6 +428,7 @@ export class Simulation {
     this.byId = Object.fromEntries(this.players.map(p => [p.id, p]));
     this.offense = this.players.filter(p => p.team === 'offense');
     this.defense = this.players.filter(p => p.team === 'defense');
+    this.defense.forEach(assignPursuitAngles);
     this.line = this.offense.filter(p => p.role === 'ol');
     this.trails = new Map(this.offense.map(p => [p.id, new Trail()]));
     this.ball = { x: 0, y: BALL_REST, z: this.spot, vx: 0, vy: 0, vz: 0 };
@@ -544,7 +589,7 @@ export class Simulation {
       p.actionTime = Math.max(0, p.actionTime - dt);
       if (!p.actionTime && p.action !== 'wrapped') p.action = this.restingAction(p);
       p.engaged = null;
-      p.want = ZERO; p.sprinting = false;
+      p.want = ZERO; p.sprinting = false; p.ease = 1;
     }
   }
 
@@ -695,7 +740,8 @@ export class Simulation {
       }
       if (this.time < GET_OFF[d.role]) { d.want = ZERO; return; }
       if (d.engaged) { this.drivePast(d); return; }
-      if (pursuit) { this.turnHips(d); d.want = this.pursue(d, this.carrier || 'R', speedCap(d)); return; }
+      if (this.phase === 'tackle' && dist(d, this.byId[this.carrier]) >= PULL_UP.pileOn) { d.want = this.pullUpWant(d); return; }
+      if (pursuit) { this.turnHips(d); d.want = this.pursue(d, this.carrier || 'R', speedCap(d), 0, d.leverage); return; }
       if (i < rushers) {
         d.turned = true;
         const edge = i === 0 || i === 3 ? Math.sign(d.start.x) * 1.5 * Math.max(0, 1 - this.time * 0.35) : 0;
@@ -724,7 +770,9 @@ export class Simulation {
   // `latency` seconds ago, led along the velocity seen then toward an intercept,
   // with the total lookahead capped at 0.6 s. A cut is invisible to the
   // defender for `latency` seconds and his own momentum does the rest.
-  pursue(d, id, cap, edge = 0) {
+  // `leverage` (yards, signed: + toward +x) shades the aim to the defender's
+  // side of the carrier's path while he is still far away (LEVERAGE).
+  pursue(d, id, cap, edge = 0, leverage = 0) {
     const seen = this.perceive(id, d.latency);
     d.seen = seen;
     const qx = seen.x + seen.vx * d.latency - d.x, qz = seen.z + seen.vz * d.latency - d.z;
@@ -739,10 +787,47 @@ export class Simulation {
       }
     }
     const lead = Math.min(d.latency + s, 0.6);
-    d.aim = { x: seen.x + seen.vx * lead + edge, z: seen.z + seen.vz * lead };
+    const shade = leverageOffset(seen, d, leverage);
+    d.aim = { x: seen.x + seen.vx * lead + edge + shade.x, z: seen.z + seen.vz * lead + shade.z };
     const dx = d.aim.x - d.x, dz = d.aim.z - d.z;
     if (Math.hypot(dx, dz) < 0.4) return trackWant(d, d.aim, { x: seen.vx, z: seen.vz }, cap);
     return scaled(dx, dz, cap);
+  }
+
+  // The carrier is wrapped up: a pursuer who is not in on the tackle pulls up
+  // (PULL_UP) instead of running into the pile: near it, at his own spot
+  // beside it (the bearing fixed the first time, from where he is, fanned to
+  // his side); farther away, easing off where he is. Sets d.ease, the share
+  // of full braking his movement uses this step.
+  pullUpWant(d) {
+    const c = this.byId[this.carrier], pu = d.pullUp;
+    d.ease = 1;
+    if (!c || !pu) return ZERO;
+    // Decided once, the first time: far from the pile he eases off where he
+    // is; closing on it, he steers to his spot beside it; otherwise (already
+    // at the pile, shed from a block, standing) he stops.
+    if (!pu.mode) {
+      const gap = dist(d, c);
+      pu.mode = gap > pu.radius + PULL_UP.reach ? 'ease' : gap > PULL_UP.pileOn && this.closingSpeed(d, c) > 1 ? 'spot' : 'stop';
+      if (pu.mode === 'spot') pu.bearing = this.pullUpBearing(d, c);
+    }
+    if (pu.mode === 'ease') d.ease = pu.brake;
+    if (pu.mode !== 'spot') return ZERO;
+    const target = { x: c.x + Math.sin(pu.bearing) * pu.radius, z: c.z + Math.cos(pu.bearing) * pu.radius };
+    return seekWant(d, target, speedCap(d, PULL_UP.effort));
+  }
+
+  // Heading from the carrier to a pursuer's pull-up spot: from where the
+  // pursuer is, fanned to his side, and never straight behind the carrier
+  // (the trailers spread to the flanks instead of lining up behind him).
+  pullUpBearing(d, c) {
+    const speed = Math.hypot(c.vx, c.vz);
+    const behind = speed > 0.5 ? Math.atan2(-c.vx, -c.vz) : Math.PI;
+    let rel = wrapAngle(Math.atan2(d.x - c.x, d.z - c.z) - behind + d.pullUp.fan);
+    // Stay on the flank he is already on; dead behind, take his own side.
+    const side = Math.abs(rel) > 10 * DEG ? Math.sign(rel) : Math.sign(d.pullUp.fan) || 1;
+    if (Math.abs(rel) < PULL_UP.flank) rel = side * (PULL_UP.flank + Math.abs(d.pullUp.fan));
+    return behind + rel;
   }
 
   // Zone and man coverage on the receivers as this defender perceives them.
@@ -810,7 +895,7 @@ export class Simulation {
     const controlled = this.carrier || this.selected;
     for (const p of this.players) {
       if (this.phase === 'tackle' && (p.id === this.carrier || p.id === this.tackle.tackler)) continue;
-      const started = moveBody(p, p.want.x, p.want.z, dt);
+      const started = moveBody(p, p.want.x, p.want.z, dt, { brakeScale: p.ease });
       if (!started) continue;
       p.lastMoveAt = this.time;
       if (['run', 'carry', 'block'].includes(p.action)) { p.action = 'cut'; p.actionTime = CUT_TIME; }
@@ -1069,7 +1154,11 @@ export class Simulation {
       if (!p.actionTime && p.action !== 'down' && p.action !== 'tackle') p.action = this.restingAction(p);
       if (this.deadTime > 0.4) p.engaged = null;
       const grounded = p.action === 'down' || p.action === 'tackle';
-      moveBody(p, 0, 0, dt, { brakeScale: grounded ? 1.6 : 0.6 });
+      // After a tackle the other defenders pull up beside the pile.
+      if (this.tackle && p.team === 'defense' && !grounded) {
+        const want = this.pullUpWant(p);
+        moveBody(p, want.x, want.z, dt, { brakeScale: p.ease });
+      } else moveBody(p, 0, 0, dt, { brakeScale: grounded ? 1.6 : 0.6 });
       p.cutting = false;
       this.turnBody(p, dt);
     }

@@ -313,3 +313,49 @@ test('a blocked defender comes off his block when the ball carrier runs at him',
   for(let i=0;i<48;i++)s.step(STEP);
   assert.equal(d.engaged,null,'shed the block');
 });
+
+test('trailing pursuers shade to their own side of the carrier while they are still far away', () => {
+  const s = openField(1), r = s.byId.R;
+  advance(s, 0.8, { z: 1, sprint: true });
+  const left = s.byId.LB1, right = s.byId.LB3;
+  // Both trail the runner by 9 yd, one lined up on each side.
+  for (const [d, dx] of [[left, -0.5], [right, 0.5]]) { d.x = r.x + dx; d.z = r.z - 9; d.vx = 0; d.vz = 6; d.turned = true; }
+  advance(s, 0.1, { z: 1, sprint: true });
+  assert.ok(left.leverage < -0.9 && right.leverage > 0.9, 'each takes his own side');
+  assert.ok(left.aim.x < left.seen.x - 0.6, 'left pursuer aims left of the runner: ' + (left.aim.x - left.seen.x));
+  assert.ok(right.aim.x > right.seen.x + 0.6, 'right pursuer aims right of the runner: ' + (right.aim.x - right.seen.x));
+});
+
+test('after a tackle the other defenders pull up beside the pile instead of lining up behind it', () => {
+  let reps = 0;
+  for (let seed = 1; seed <= 40; seed++) for (const play of ['zone', 'stretch']) {
+    const s = new Simulation(seed, { offense: play, coverage: 'random' });
+    s.snap();
+    // Who was still coming when the carrier was wrapped up (not blocked, not
+    // already at arm's length).
+    let coming = null;
+    for (let i = 0; i < 3600 && s.phase !== 'dead'; i++) {
+      s.step(STEP, { z: s.phase === 'run' ? 1 : 0, sprint: true });
+      if (!coming && s.phase === 'tackle') {
+        const c = s.byId[s.carrier];
+        coming = new Set(s.defense.filter(d => !d.engaged && d.id !== s.tackler && Math.hypot(d.x - c.x, d.z - c.z) > 2.5).map(d => d.id));
+      }
+    }
+    if (s.result.kind !== 'tackle') continue;
+    reps++;
+    advance(s, 2);
+    const c = s.byId[s.carrier];
+    const others = s.defense.filter(d => d.action !== 'tackle' && Math.hypot(d.x - c.x, d.z - c.z) < 7);
+    for (const d of others) if (coming.has(d.id)) assert.ok(Math.hypot(d.x - c.x, d.z - c.z) > 1.2, `${play}/${seed}: ${d.id} pulled up short of the pile`);
+    // Around the pile none of them stands in a file directly behind another,
+    // in line with the carrier.
+    const pile = others.filter(d => coming.has(d.id) && Math.hypot(d.x - c.x, d.z - c.z) < 4.5);
+    for (const a of pile) for (const b of pile) {
+      if (a === b) continue;
+      const file = Math.abs(a.x - b.x) < 0.9 && Math.abs(a.z - b.z) > 0.6 && Math.abs(a.x - c.x) < 1.2 && Math.abs(b.x - c.x) < 1.2;
+      assert.ok(!file, `${play}/${seed}: ${a.id} and ${b.id} in single file behind the carrier`);
+    }
+    assert.ok(s.players.every(p => Math.hypot(p.vx, p.vz) < 0.05), `${play}/${seed}: everyone has stopped`);
+  }
+  assert.ok(reps > 50, 'enough tackled reps: ' + reps);
+});
