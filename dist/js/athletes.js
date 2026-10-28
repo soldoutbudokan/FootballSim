@@ -159,6 +159,7 @@ export class Athletes {
       }
     });
     for (const t of textures) t.dispose();
+    this.squad.bones.texture.dispose();   // shader uniform, not a material property
   }
 
   // After the whistle with no carrier (an interception) the simulation keeps
