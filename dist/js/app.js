@@ -943,7 +943,8 @@ function frame(now) {
   if (now + .5 < nextRender) return;
   const interval = inMenu ? 50 : 1000 / 60;
   nextRender = now - nextRender > interval ? now + interval : nextRender + interval;
-  const renderDelta = Math.min(.15, (now - lastRender) / 1000);
+  const realDelta = Math.max(0, (now - lastRender) / 1000);
+  const renderDelta = Math.min(.15, realDelta);
   lastRender = now;
 
   let state = sim.snapshot();
@@ -957,8 +958,10 @@ function frame(now) {
   updatePassMeter(state, now);
 
   uiElapsed += renderDelta;
-  fpsElapsed += renderDelta;
+  // Real elapsed time, so a slow renderer reports its true frame rate.
+  fpsElapsed += realDelta;
   fpsFrames++;
+  if (view.assetsReady && !$('load-status').hidden) $('load-status').hidden = true;
   if (uiElapsed > .1) {
     renderHUD();
     drawFieldStrip(state);
@@ -967,7 +970,6 @@ function frame(now) {
   if (fpsElapsed > 1) {
     fps = Math.round(fpsFrames / fpsElapsed);
     $('fps').textContent = fps + ' FPS';
-    $('load-status').hidden = view.assetsReady;
     fpsElapsed = 0;
     fpsFrames = 0;
   }
