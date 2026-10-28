@@ -37,6 +37,17 @@ function legsOut(anim, pose, weight, z = -0.04, lift = 0) {
   }
 }
 
+// A hand flat on the ground `along` yards ahead of the body's pivot and
+// `out` yards to that hand's side (for a body lying face down).
+const _g = new THREE.Vector3(), _gl = { x: 0, z: 0 };
+function palmDown(anim, pose, i, along, out, weight) {
+  anim.rootToWorld(_w.set(SIDES[i] * out, 0, along), _gl);
+  anim.worldToChest(pose, _g.set(_gl.x, 0.06, _gl.z), _w);
+  pose.hands[i].lerp(_w, weight);
+  pose.elbows[i].lerp(_w.set(SIDES[i], 0.3, -0.4), weight);
+  pose.wrists[i].lerp(_w.set(-0.3, 0, 0), weight);
+}
+
 // Helper: point in the scene for a snapshot player's body part.
 function bodyPoint(ctx, id, part, out, height = 1.0) {
   const rig = ctx.rigs.get(id);
@@ -375,16 +386,13 @@ export const ACTIONS = {
     pose.hips.set(lerp(pose.hips.x + 0.3 * buckle, 0.04, f), 0, 0);
     pose.spine.set(lerp(pose.spine.x, 0.08, f), 0.15 * data.roll * f, 0);
     legsOut(anim, pose, f);
+    // Free hands come down flat on the turf beside the helmet.
     if (data.holding) {
-      const i = carryArm(anim, p), j = 1 - i;
+      const i = carryArm(anim, p);
       tuck(pose, i);
-      pose.hands[j].lerp(_c.set(SIDES[j] * 0.32, 0.5, 0.24), f);
-      pose.elbows[j].set(SIDES[j], -0.3, -0.3);
+      palmDown(anim, pose, 1 - i, 1.45, 0.4, f);
     } else {
-      for (let i = 0; i < 2; i++) {
-        pose.hands[i].lerp(_c.set(SIDES[i] * 0.33, 0.45, 0.26), f);
-        pose.elbows[i].set(SIDES[i], -0.3, -0.3);
-      }
+      for (let i = 0; i < 2; i++) palmDown(anim, pose, i, 1.35, 0.36, f);
     }
     pose.head.set(lerp(pose.head.x, -1.15, f), data.roll * 1.6 * f, 0);
   },
