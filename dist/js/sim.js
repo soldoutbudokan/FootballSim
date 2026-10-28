@@ -142,7 +142,7 @@ function createPlayer(spec, team, spot, flip, speedScale = 1) {
     stamina: 1, action: 'ready', actionTime: 0, engaged: null, shed: 0, phase: 0,
     // Physical model
     top, a0: TOP_REACH * top / body.zeroToTop, brake: body.brake, agility: body.agility, mass: body.mass,
-    want: ZERO, sprinting: false, grip: 1, latAccel: 0,
+    want: ZERO, sprinting: false, latAccel: 0,
     cutting: false, sinceCut: 9, lastMoveAt: -9, juke: null,
     // Coverage: `turned` is false while a defender still faces the quarterback.
     turned: team === 'offense', flip: 0,
@@ -179,7 +179,7 @@ class Trail {
 // wide (radius v²/agility) unless he slows first. A sharp change of direction
 // at speed becomes a plant: brake in proportion to the angle, turn while slow,
 // then accelerate out. Returns true when this step starts such a cut.
-function moveBody(p, wx, wz, dt, { grip = 1, brakeScale = 1 } = {}) {
+function moveBody(p, wx, wz, dt, { brakeScale = 1 } = {}) {
   p.sinceCut += dt;
   if (p.juke) return jukeBody(p, dt);
   const fatigue = fatigueOf(p);
@@ -194,7 +194,7 @@ function moveBody(p, wx, wz, dt, { grip = 1, brakeScale = 1 } = {}) {
   let dAlong = wx * fx + wz * fz - vAlong, dAcross = wx * rx + wz * rz - vAcross;
   // Sideways grip is the agility figure at top speed; slower, a player can
   // plant wider and harder, so his grip grows (up to 2.2x from a standstill).
-  let lateral = p.agility * grip * (p.flip > 0 ? 0.5 : 1) * (1 + PLANT_GRIP * Math.max(0, 1 - speed / top));
+  let lateral = p.agility * (p.flip > 0 ? 0.5 : 1) * (1 + PLANT_GRIP * Math.max(0, 1 - speed / top));
   const brake = p.brake * brakeScale;
 
   const angle = want > 1 && speed > 0.3 ? Math.acos(clamp((p.vx * wx + p.vz * wz) / (speed * want), -1, 1)) : 0;
@@ -354,7 +354,7 @@ export class Simulation {
   reset(newCalls = false) {
     this.phase = 'presnap'; this.time = 0; this.deadTime = 0;
     this.pass = null; this.throwIntent = null; this.result = null;
-    this.handoff = false; this.crossedLine = false; this.tackler = null; this.tackle = null;
+    this.handoff = false; this.crossedLine = false; this.tackler = null; this.tackle = null; this.holder = null;
     this.selected = 'QB'; this.carrier = 'QB'; this.jukeCooldown = 0;
     this.recording = []; this.recordClock = 0;
     this.completed = false; this.threw = false; this.events = [];
@@ -532,7 +532,7 @@ export class Simulation {
     if (this.throwIntent && this.time >= this.throwIntent.at) this.release();
     if (this.phase === 'air') this.flyBall(dt);
     this.checkCarrier();
-    if (this.time > 22 && this.phase !== 'dead') this.finish('Rep complete', this.carrier ? this.byId[this.carrier].z - this.spot : 0, 'timeout');
+    if (this.time > 22 && this.phase !== 'dead') this.endRep('Rep complete', 'timeout');
     this.recordClock += dt;
     if (this.recordClock >= 0.05) { this.recordClock -= 0.05; this.saveFrame(); }
   }
@@ -572,7 +572,7 @@ export class Simulation {
   }
 
   // Pass protection and run blocking share one engagement model: each lineman
-  // takes the nearest free defender, and the pair locks up until the
+  // takes a defender (see assignBlocks), and the pair locks up until the
   // defender's shed time. Locked defenders drive toward the ball slowly.
   planBlocking() {
     const run = this.play.type === 'run', guard = this.guardPoint();
@@ -891,6 +891,7 @@ export class Simulation {
     if (p.team === 'defense') {
       this.stats.ints++;
       this.events.push('interception');
+      this.holder = p.id;
       this.holdBall(p);
       this.finish('Intercepted', 0, 'interception');
       return;
@@ -928,8 +929,7 @@ export class Simulation {
     const c = this.byId[this.carrier];
     this.holdBall(c);
     if (c.z >= GOAL) { this.stats.td++; this.finish('Touchdown', Math.max(0, GOAL - this.spot), 'touchdown'); }
-    else if (c.z <= 10) this.finish('Safety', c.z - this.spot, 'safety');
-    else if (Math.abs(c.x) > WIDTH / 2 - 0.18) this.finish('Out of bounds', c.z - this.spot, 'out');
+    else if (Math.abs(c.x) > WIDTH / 2 - 0.18) this.endRep('Out of bounds', 'out');
     else if (this.phase === 'tackle') this.checkTackleEnd(c);
     else if (this.time > 0.85 && (!this.completed || this.time - this.catchAt > 0.18)) this.tryTackles(c);
   }
@@ -1010,7 +1010,15 @@ export class Simulation {
     if (Math.hypot(c.vx, c.vz) >= 0.5 && this.time - t.at < TACKLE_HOLD) return;
     c.action = 'down'; c.actionTime = 0;
     if (t.sack) this.stats.sacks++;
-    this.finish(t.sack ? 'Sacked' : 'Tackled', c.z - this.spot, t.sack ? 'sack' : 'tackle');
+    this.endRep(t.sack ? 'Sacked' : 'Tackled', t.sack ? 'sack' : 'tackle');
+  }
+
+  // A carrier downed, pushed out or still holding the ball in his own end
+  // zone when the rep ends gives up a safety; standing there is legal.
+  endRep(label, kind) {
+    const c = this.byId[this.carrier];
+    if (c && c.z <= 10) this.finish('Safety', c.z - this.spot, 'safety');
+    else this.finish(label, c ? c.z - this.spot : 0, kind);
   }
 
   // After the whistle players pull up instead of freezing; a loose ball falls
@@ -1024,8 +1032,8 @@ export class Simulation {
       p.cutting = false;
       this.turnBody(p, dt);
     }
-    const b = this.ball;
-    if (this.carrier) this.holdBall(this.byId[this.carrier]);
+    const b = this.ball, holder = this.byId[this.carrier || this.holder];
+    if (holder) this.holdBall(holder);
     else if (b.vx || b.vy || b.vz || b.y > BALL_REST) {
       b.x += b.vx * dt; b.z += b.vz * dt; b.y += b.vy * dt - 0.5 * GRAVITY * dt * dt; b.vy -= GRAVITY * dt;
       if (b.y <= BALL_REST) this.restBall(clamp(b.x, -32, 32), clamp(b.z, -2, 122));

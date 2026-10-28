@@ -273,3 +273,16 @@ test('handoffs meet the back at the mesh and both run plays still reach the carr
     assert.ok(s.handoff,id);assert.ok(gap<1.3,id+(flip?' flipped':'')+' exchange gap '+gap);assert.equal(s.byId.R.action,'carry');
   }
 });
+
+test('a safety needs the carrier downed in his own end zone; lining up there is legal',()=>{
+  const s=new Simulation(3,{offense:'mesh',coverage:'cover3',spot:11});s.snap();advance(s,.7);
+  assert.equal(s.phase,'live','quarterback in the end zone after the drop');assert.ok(s.byId.QB.z<=10);
+  const t=new Simulation(3,{offense:'mesh',coverage:'cover3',spot:11});t.snap();advance(t,.5);
+  t.byId.QB.x=27;t.step(STEP);assert.equal(t.result.kind,'safety');
+});
+
+test('an interceptor keeps the ball after the whistle',()=>{
+  const s=practice(4);s.snap();advance(s,.5);s.phase='air';s.carrier=null;s.threw=true;const d=s.byId.FS;
+  s.ball={x:d.x,y:1.4,z:d.z,vx:0,vy:0,vz:0};s.pass={receiver:'X',target:{x:d.x,z:d.z,y:1.4},elapsed:.5,duration:1};s.step(STEP);
+  assert.equal(s.result.kind,'interception');advance(s,1);assert.ok(s.ball.y>1&&Math.hypot(s.ball.x-d.x,s.ball.z-d.z)<.5);
+});
