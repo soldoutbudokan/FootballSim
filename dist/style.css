@@ -203,7 +203,7 @@ kbd {
 
 .snap-area { position: absolute; z-index: 4; right: var(--gutter); bottom: calc(26px + var(--safe-bottom)); display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .snap-button {
-  display: inline-flex; align-items: center; justify-content: space-between; gap: 18px; width: 200px; height: 56px; padding: 0 20px 0 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 14px; width: 200px; height: 56px; padding: 0 18px;
   font: 800 28px/1 var(--display); letter-spacing: .05em; text-transform: uppercase; color: var(--navy-deep);
   background: var(--paper); box-shadow: 0 8px 24px rgba(5, 14, 25, .35);
 }
