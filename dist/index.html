@@ -1,57 +1,302 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#101d25"><meta name="description" content="FootballSim — an offense-only 3D football practice field. Read the defense, work the pocket, and make the throw.">
-  <title>FootballSim — Every rep. Every read.</title>
-  <link rel="icon" href="./icon.svg" type="image/svg+xml"><link rel="stylesheet" href="./style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#091a2d">
+  <meta name="description" content="FootballSim is an offense-only 3D American football practice game for the browser.">
+  <title>FootballSim</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
 </head>
-<body>
-  <canvas id="field" aria-label="3D football practice field"></canvas>
-  <div class="vignette" aria-hidden="true"></div>
-  <header class="topbar">
-    <a class="brand" href="./" aria-label="FootballSim home"><span class="brand-mark">F<span></span></span><span>FOOTBALL<span class="muted-brand">SIM</span><small>THE PRACTICE FIELD</small></span></a>
-    <div id="scoreboard" class="scoreboard" hidden><span id="practice-label" class="practice-label">PRACTICE</span><strong id="down-distance" hidden>1ST & 10</strong><span id="field-position">OWN 25</span><span class="score-divider"></span><span>REP <b id="rep-number">01</b></span></div>
-    <nav aria-label="Game menus"><button id="settings-open" class="nav-button">Settings <span>⚙</span></button><button id="fullscreen" class="icon-button" aria-label="Enter fullscreen (F)" aria-pressed="false" title="Fullscreen · F"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button><button id="help-open" class="icon-button" aria-label="Controls and help">?</button><button id="sound" class="icon-button" aria-label="Enable sound" aria-pressed="false">♪<span class="mute-dot"></span></button><button id="pause-button" class="icon-button" aria-label="Pause practice" hidden>Ⅱ</button></nav>
-  </header>
-  <section id="welcome" class="welcome">
-    <div class="intro-copy"><div class="eyebrow"><span class="live-dot"></span> OFFENSE ONLY · 11 ON 11</div><h1>EVERY REP.<br><span>EVERY READ.</span></h1><p>Your field. Your playbook.<br>Read the coverage. Work the pocket.<br>Put the ball where only your receiver can get it.</p><button id="start" class="primary-button large">ENTER THE FIELD <span>↗</span></button><div id="load-status" class="load-status">Preparing the practice field…</div><div class="intro-meta"><span>8 OFFENSIVE PLAYS</span><i></i><span>4 DEFENSIVE SCHEMES</span><i></i><span>ADAPTIVE 3D</span></div></div>
-    <div class="field-note"><span class="crosshair">+</span><div>THE PRACTICE FACILITY<small>Open field. Unlimited reps.</small></div></div>
-  </section>
-  <main id="hud" hidden>
-    <div class="top-status"><span id="phase-badge" class="badge"><span class="live-dot"></span> PRE-SNAP</span><span id="coverage-label">DEFENSE · DISGUISED</span></div>
-    <div id="drive-status" class="drive-status" role="status" hidden><span>MOVE THE CHAINS</span><strong id="drive-down">1ST &amp; 10</strong><small id="drive-detail">10 YARDS TO FIRST DOWN</small></div>
-    <div id="receiver-labels" aria-hidden="true"></div>
-    <div id="play-hint" class="play-hint"><span>READ THE FIELD</span><p id="read-tip"></p></div>
-    <div id="charge" class="charge" hidden><span id="charge-label">THROW</span><div><i id="charge-fill"></i></div><small>Tap: lob · hold: bullet · arrows: lead</small></div>
-    <div id="targets" class="targets" aria-label="Pass to a receiver"></div>
-    <div class="bottom-hud">
-      <section class="play-panel"><div class="eyebrow" id="formation">GUN · DOUBLES</div><h2 id="play-name">Mesh concept</h2><div class="play-actions"><button id="playbook-open">Choose play <kbd>B</kbd></button><button id="art-button" aria-pressed="true">Play art <kbd>Tab</kbd></button></div><div id="presnap-adjustments" class="play-actions presnap-adjustments"><button id="hot-routes-open">Hot routes <kbd>H</kbd></button><button id="audible-open">Audible <kbd>Z</kbd></button></div><div class="player-status"><span id="player-role">QB 12</span><div class="stamina"><i id="stamina-fill"></i></div><span id="player-state">READY</span></div></section>
-      <div class="control-strip" id="control-strip"><span><kbd>W A S D</kbd> Move</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>1 — 5</kbd> Pass</span><span><kbd>Q / E</kbd> Juke</span><span><kbd>C</kbd> Camera</span></div>
-      <section class="action-panel"><canvas id="minimap" width="180" height="180" aria-label="Live overhead field map"></canvas><button id="snap" class="primary-button">SNAP BALL <kbd>Space</kbd></button><button id="throw-away" class="subtle-button" hidden>Throw away <kbd>X</kbd></button></section>
+<body class="in-menu">
+  <canvas id="field" aria-label="3D practice field"></canvas>
+  <div class="shade" aria-hidden="true"></div>
+
+  <!-- Title screen: wordmark and a vertical menu over the 3D facility. -->
+  <section id="welcome" class="title-screen" aria-label="Main menu">
+    <div class="title-block">
+      <h1 class="wordmark">FootballSim</h1>
+      <p class="wordmark-sub">Practice facility</p>
+      <nav class="main-menu" aria-label="Main menu">
+        <button id="start" class="menu-item is-active" type="button">Practice</button>
+        <button id="menu-playbook" class="menu-item" type="button">Playbook</button>
+        <button id="menu-settings" class="menu-item" type="button">Settings</button>
+        <button id="menu-controls" class="menu-item" type="button">Controls</button>
+      </nav>
     </div>
-    <div id="result" class="result-card" role="status" hidden><div class="eyebrow" id="result-tag">REP COMPLETE</div><h2 id="result-title">Complete</h2><p id="result-detail"></p><div class="result-actions"><button id="next" class="primary-button">NEXT REP <span>↗</span></button><button id="replay-open" class="secondary-button">Replay <kbd>R</kbd></button><button id="result-playbook" class="secondary-button">Call play</button></div></div>
-    <div id="replay-controls" class="replay-controls" hidden><button id="replay-play" aria-label="Pause replay">Ⅱ</button><span>INSTANT REPLAY <b>½×</b></span><input id="replay-scrub" type="range" min="0" max="1000" value="0" aria-label="Replay position"><button id="replay-close">BACK TO FIELD ×</button></div>
-    <div id="touch-controls" hidden><div id="joystick" role="button" aria-label="Move player"><i></i></div><div class="touch-actions"><button id="touch-juke-left" aria-label="Juke left">↶</button><button id="touch-sprint">SPRINT</button><button id="touch-juke-right" aria-label="Juke right">↷</button></div></div>
+  </section>
+
+  <footer class="system-bar">
+    <span id="load-status" class="load-status">Loading facility</span>
+    <span id="quality-label">Auto · Balanced</span>
+    <span id="fps">-- FPS</span>
+    <span id="input-device">Keyboard and mouse</span>
+  </footer>
+
+  <nav class="utility" aria-label="Game menus">
+    <button id="pause-button" class="icon-button" type="button" aria-label="Pause" title="Pause · Esc">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>
+    </button>
+    <button id="settings-open" class="icon-button" type="button" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+    </button>
+    <button id="help-open" class="icon-button" type="button" aria-label="Controls" title="Controls">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 7h9a4.5 4.5 0 0 1 4.4 5.5l-1 4.4a2 2 0 0 1-3.5.8L14.6 16H9.4l-1.8 1.7a2 2 0 0 1-3.5-.8l-1-4.4A4.5 4.5 0 0 1 7.5 7Z"/><path d="M8 10v3M6.5 11.5h3"/><circle cx="15.5" cy="11" r=".6"/><circle cx="17.5" cy="12.8" r=".6"/></svg>
+    </button>
+    <button id="sound" class="icon-button" type="button" aria-label="Enable sound" aria-pressed="false" title="Sound">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path class="sound-on" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/><path class="sound-off" d="M16 9.5l5 5M21 9.5l-5 5"/></svg>
+    </button>
+    <button id="fullscreen" class="icon-button" type="button" aria-label="Enter fullscreen (F)" aria-pressed="false" title="Fullscreen · F">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3.5H3.5V8M16 3.5h4.5V8M3.5 16v4.5H8M20.5 16v4.5H16"/></svg>
+    </button>
+  </nav>
+
+  <!-- In-game broadcast HUD. -->
+  <main id="hud" hidden>
+    <div id="scoreboard" class="score-bug">
+      <div class="bug-main">
+        <span class="bug-mark" aria-hidden="true">FS</span>
+        <span id="practice-label" class="bug-cell bug-label">Practice</span>
+        <strong id="down-distance" class="bug-cell bug-down" hidden>1ST &amp; 10</strong>
+        <span class="bug-cell"><small>Ball on</small><b id="field-position">OWN 25</b></span>
+        <span id="rep-cell" class="bug-cell"><small>Rep</small><b id="rep-number">01</b></span>
+        <span id="to-go-cell" class="bug-cell" hidden><b id="drive-detail">10 YDS TO GO</b></span>
+      </div>
+      <div class="bug-sub"><small>Defense</small><b id="coverage-label">Disguised</b></div>
+    </div>
+
+    <div id="receiver-labels" aria-hidden="true"></div>
+
+    <div id="charge" class="pass-meter" hidden aria-hidden="true">
+      <div class="meter-track"><i id="charge-fill"></i><span class="meter-tick"></span><span class="meter-tick"></span></div>
+      <div class="meter-text"><b id="charge-target">1</b><span id="charge-label">Lob</span></div>
+    </div>
+
+    <section id="call-card" class="call-card" aria-label="Play call">
+      <div id="formation" class="call-formation">GUN · DOUBLES</div>
+      <h2 id="play-name" class="call-name">Mesh concept</h2>
+      <p id="read-tip" class="call-read"></p>
+      <div class="call-actions">
+        <button id="playbook-open" type="button" aria-label="Playbook"><kbd>B</kbd>Playbook</button>
+        <button id="art-button" type="button" aria-label="Play art" aria-pressed="true"><kbd>Tab</kbd>Play art</button>
+      </div>
+      <div id="presnap-adjustments" class="call-actions">
+        <button id="hot-routes-open" type="button" aria-label="Hot routes"><kbd>H</kbd>Hot routes</button>
+        <button id="audible-open" type="button" aria-label="Audible"><kbd>Z</kbd>Audible</button>
+      </div>
+      <div class="player-status">
+        <span id="player-role">QB 12</span>
+        <div class="stamina"><i id="stamina-fill"></i></div>
+        <span id="player-state">READY</span>
+      </div>
+    </section>
+
+    <div id="targets" class="targets" aria-label="Pass to a receiver"></div>
+
+    <div class="snap-area">
+      <canvas id="minimap" class="field-strip" width="480" height="84" aria-label="Field strip" hidden></canvas>
+      <button id="throw-away" class="ghost-button" type="button" aria-label="Throw away" hidden><kbd>X</kbd>Throw away</button>
+      <button id="snap" class="snap-button" type="button" aria-label="Snap ball"><kbd>Space</kbd>Snap</button>
+    </div>
+
+    <div id="control-strip" class="button-legend" aria-hidden="true">
+      <span><kbd>W A S D</kbd>Move</span>
+      <span><kbd>Shift</kbd>Sprint</span>
+      <span><kbd>1-5</kbd>Pass</span>
+      <span><kbd>Q</kbd><kbd>E</kbd>Juke</span>
+      <span><kbd>C</kbd>Camera</span>
+    </div>
+
+    <div id="result" class="result-banner" role="status" hidden>
+      <div class="result-main">
+        <div class="result-yards"><strong id="result-yards">0</strong><span>Yds</span></div>
+        <div class="result-body">
+          <span id="result-tag" class="result-tag">Rep 01</span>
+          <h2 id="result-title">Complete</h2>
+          <p id="result-detail"></p>
+        </div>
+      </div>
+      <div class="result-actions">
+        <button id="next" class="banner-button primary" type="button" aria-label="Next rep"><kbd>Space</kbd>Next rep</button>
+        <button id="replay-open" class="banner-button" type="button" aria-label="Replay"><kbd>R</kbd>Replay</button>
+        <button id="result-playbook" class="banner-button" type="button" aria-label="Call play"><kbd>B</kbd>Call play</button>
+      </div>
+    </div>
+
+    <div id="replay-controls" class="replay-bar" hidden>
+      <span class="replay-tag">Replay</span>
+      <button id="replay-play" class="icon-button" type="button" aria-label="Pause replay">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="icon-pause" d="M8 5v14M16 5v14"/><path class="icon-play" d="M8 5l11 7-11 7z"/></svg>
+      </button>
+      <input id="replay-scrub" type="range" min="0" max="1000" value="0" aria-label="Replay position">
+      <span class="replay-speed">0.5x</span>
+      <button id="replay-close" class="ghost-button" type="button" aria-label="Close replay">Close</button>
+    </div>
+
+    <div id="touch-controls" hidden>
+      <div id="joystick" role="button" aria-label="Move player"><i></i></div>
+      <div class="touch-actions">
+        <button id="touch-juke-left" type="button" aria-label="Juke left">Juke L</button>
+        <button id="touch-sprint" type="button">Sprint</button>
+        <button id="touch-juke-right" type="button" aria-label="Juke right">Juke R</button>
+      </div>
+    </div>
   </main>
-  <footer class="performance"><span class="perf-dot"></span><span id="quality-label">AUTO · BALANCED</span><span class="perf-divider">/</span><span id="fps">— FPS</span><span id="input-device">KEYBOARD + MOUSE</span></footer>
-  <dialog id="playbook" class="modal playbook-modal"><div class="modal-head"><div><div class="eyebrow">OFFENSIVE COORDINATOR</div><h2>Call your next play.</h2></div><button class="close-button" data-close aria-label="Close playbook">×</button></div><div class="playbook-toolbar"><div class="tabs" aria-label="Filter plays"><button class="active" data-filter="all">All plays <b>08</b></button><button data-filter="pass">Pass <b>06</b></button><button data-filter="run">Run <b>02</b></button></div><label class="flip-control"><input id="flip-play" type="checkbox"> Flip play</label></div><div id="play-grid" class="play-grid"></div><div class="modal-foot"><button id="random-play" class="secondary-button" aria-pressed="true">Random every rep</button><span>Select a concept to repeat that play.</span></div></dialog>
-  <dialog id="hot-routes" class="modal adjustment-modal"><div class="modal-head"><div><div class="eyebrow">PRE-SNAP · H</div><h2>Hot routes.</h2></div><button class="close-button" data-close aria-label="Close hot routes">×</button></div><p class="adjustment-help">Choose receiver 1–5, then a route. Changes apply to this rep.</p><div id="hot-route-receivers" class="receiver-picker" aria-label="Choose a receiver"></div><p id="hot-route-current" class="adjustment-help"></p><div id="hot-route-grid" class="adjustment-grid"></div><div class="modal-foot"><button id="hot-route-reset" class="secondary-button">Original route <kbd>0</kbd></button><button class="primary-button" data-close>BACK TO THE FIELD</button></div></dialog>
-  <dialog id="audibles" class="modal adjustment-modal"><div class="modal-head"><div><div class="eyebrow">PRE-SNAP · Z</div><h2>Call an audible.</h2></div><button class="close-button" data-close aria-label="Close audibles">×</button></div><p class="adjustment-help">Press 1–8 or select a play to change this snap. Your drive and defensive call stay in place.</p><div id="audible-grid" class="adjustment-grid audible-grid"></div></dialog>
-  <dialog id="settings" class="modal settings-modal"><div class="modal-head"><div><div class="eyebrow">MAKE THE REP YOURS</div><h2>Practice settings.</h2></div><button class="close-button" data-close aria-label="Close settings">×</button></div><div class="settings-grid">
-    <label>Offensive play<select id="offense"><option value="random">Random every rep</option></select><small>Choose a specific play to repeat it.</small></label>
-    <label>Defensive look<select id="coverage"><option value="random">Random every rep</option><option value="cover3">Cover 3 sky</option><option value="cover2">Cover 2</option><option value="man">2-man</option><option value="blitz">Cover 0 blitz</option></select><small>Random conceals the call before the snap.</small></label>
-    <label>Defensive difficulty<select id="difficulty"><option value="rookie">Rookie</option><option value="pro" selected>Pro</option><option value="allpro">All-pro</option></select><small>Changes defensive speed and ball reaction.</small></label>
-    <label>Practice format<select id="practice-mode"><option value="reps">Repeat the same spot</option><option value="drive">Move the chains</option></select><small>Move the chains enables downs, distance and the first-down line.</small></label>
-    <label>Starting field position<select id="spot"><option value="35">Own 25</option><option value="60">Midfield</option><option value="90">Opponent 20</option><option value="100">Opponent 10</option></select></label>
-    <label>Graphics<select id="graphics"><option value="auto">Auto · adapts to this device</option><option value="performance">Performance</option><option value="balanced">Balanced</option><option value="high">High</option><option value="ultra">Ultra</option></select><small>Auto adjusts resolution, shadows, crowd and grass.</small></label>
-    <label>Lighting<select id="lighting"><option value="day">Clear afternoon</option><option value="sunset">Golden hour</option><option value="night">Under the lights</option></select></label>
-    <label>Camera<select id="camera"><option value="broadcast">Broadcast</option><option value="wide">All-22 wide</option><option value="qb">Behind the quarterback</option></select></label>
-    <label>Passing preference<select id="pass-style"><option value="timing">Tap / hold timing</option><option value="bullet">Always bullet</option><option value="touch">Always touch</option><option value="lob">Always lob</option></select><small>Release a receiver button to throw.</small></label>
-  </div><div class="settings-bottom"><p>Gameplay changes start a fresh rep.<br>Graphics and lighting update immediately.</p><button id="apply-settings" class="primary-button">APPLY & RESET REP <span>↗</span></button></div></dialog>
-  <dialog id="help" class="modal help-modal"><div class="modal-head"><div><div class="eyebrow">THE PLAYBOOK STARTS HERE</div><h2>Own the offense.</h2></div><button class="close-button" data-close aria-label="Close controls">×</button></div><div class="help-intro">Offense and defense are random each rep by default. Choose a specific play to repeat it. Select Move the chains in settings to track downs and distance. Read the defense and snap. You control the quarterback, then the ball carrier after a catch or handoff. Every defender is controlled by the CPU.</div><div class="help-columns"><div><h3>Keyboard & mouse</h3><dl><dt>Space / Enter</dt><dd>Snap · next rep</dd><dt>W A S D / arrows</dt><dd>Move the ball carrier</dd><dt>1 · 2 · 3 · 4 · 5</dt><dd>Pass to the matching number</dd><dt>Tap / hold a receiver</dt><dd>Lob / touch / bullet on release</dd><dt>Arrow keys while charging</dt><dd>Lead the throw</dd><dt>Shift</dt><dd>Sprint; uses stamina</dd><dt>Q / E</dt><dd>Juke left / right</dd><dt>X</dt><dd>Throw the ball away</dd><dt>B / Tab / C</dt><dd>Playbook / play art / camera</dd><dt>H / Z (pre-snap)</dt><dd>Hot routes / audibles</dd><dt>F</dt><dd>Toggle fullscreen</dd><dt>R / Escape</dt><dd>Replay after play / pause</dd></dl></div><div><h3>Controller & touch</h3><p>Standard gamepad: left stick to move, right trigger to sprint. A snaps the ball. After the snap, A / X / Y / B / RB pass to receivers 1–5. D-pad left/right jukes; Back changes camera; Start pauses.</p><p>On touch devices, use the left movement pad, receiver buttons and the sprint button. Landscape gives you a wider view.</p><h3>Pre-snap adjustments</h3><p>Press H on a passing play, choose receiver 1–5, then select a route. Press Z to change the entire play for this snap. The route art updates to match.</p><h3>Make the read</h3><p>Set your feet for accuracy. Pressure and throwing on the move widen the pass error. Lead into space. Crossing the line of scrimmage commits you to a run.</p><p>On run plays, the handoff is automatic. On play action, the fake takes about one second before you can release.</p></div></div></dialog>
-  <dialog id="pause" class="modal pause-modal"><div class="eyebrow">TAKE A BREATHER</div><h2>Practice paused.</h2><p>The field will be right here.</p><button id="resume" class="primary-button">BACK TO THE FIELD <span>↗</span></button><button id="restart" class="secondary-button">Reset this rep</button><div id="session-stats" class="session-stats"></div></dialog>
+
+  <dialog id="playbook" class="modal modal-wide" aria-labelledby="playbook-title">
+    <header class="modal-head">
+      <h2 id="playbook-title">Playbook</h2>
+      <button class="close-button" type="button" data-close aria-label="Close playbook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </header>
+    <div class="playbook-toolbar">
+      <div class="tabs" role="group" aria-label="Filter plays">
+        <button class="active" type="button" data-filter="all">All <b id="count-all">8</b></button>
+        <button type="button" data-filter="pass">Pass <b id="count-pass">6</b></button>
+        <button type="button" data-filter="run">Run <b id="count-run">2</b></button>
+      </div>
+      <div class="toolbar-actions">
+        <label class="toggle"><input id="flip-play" type="checkbox"><span>Flip</span></label>
+        <button id="random-play" class="chip-button" type="button" aria-pressed="true">Random every rep</button>
+      </div>
+    </div>
+    <div id="play-grid" class="play-grid"></div>
+  </dialog>
+
+  <dialog id="hot-routes" class="modal modal-mid" aria-labelledby="hot-routes-title">
+    <header class="modal-head">
+      <h2 id="hot-routes-title">Hot routes</h2>
+      <button class="close-button" type="button" data-close aria-label="Close hot routes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </header>
+    <h3 class="section-label">Receiver</h3>
+    <div id="hot-route-receivers" class="receiver-picker" role="group" aria-label="Choose a receiver"></div>
+    <h3 id="hot-route-current" class="section-label"></h3>
+    <div id="hot-route-grid" class="option-grid"></div>
+    <footer class="modal-foot">
+      <button id="hot-route-reset" class="secondary-button" type="button"><kbd>0</kbd>Original route</button>
+      <button class="primary-button" type="button" data-close>Done</button>
+    </footer>
+  </dialog>
+
+  <dialog id="audibles" class="modal modal-mid" aria-labelledby="audibles-title">
+    <header class="modal-head">
+      <h2 id="audibles-title">Audible</h2>
+      <button class="close-button" type="button" data-close aria-label="Close audibles"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </header>
+    <div id="audible-grid" class="option-grid audible-grid"></div>
+  </dialog>
+
+  <dialog id="settings" class="modal modal-mid" aria-labelledby="settings-title">
+    <header class="modal-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="close-button" type="button" data-close aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </header>
+    <div class="settings-columns">
+      <fieldset>
+        <legend>Practice</legend>
+        <label class="field"><span>Offensive play</span><select id="offense"><option value="random">Random every rep</option></select></label>
+        <label class="field"><span>Defense</span><select id="coverage"><option value="random">Random every rep</option><option value="cover3">Cover 3 sky</option><option value="cover2">Cover 2</option><option value="man">2-man</option><option value="blitz">Cover 0 blitz</option></select></label>
+        <label class="field"><span>Difficulty</span><select id="difficulty"><option value="rookie">Rookie</option><option value="pro" selected>Pro</option><option value="allpro">All-pro</option></select></label>
+        <label class="field"><span>Format</span><select id="practice-mode"><option value="reps">Repeat the spot</option><option value="drive">Move the chains</option></select></label>
+        <label class="field"><span>Starting spot</span><select id="spot"><option value="35">Own 25</option><option value="60">Midfield</option><option value="90">Opponent 20</option><option value="100">Opponent 10</option></select></label>
+      </fieldset>
+      <fieldset>
+        <legend>Display and controls</legend>
+        <label class="field"><span>Graphics</span><select id="graphics"><option value="auto">Auto</option><option value="performance">Performance</option><option value="balanced">Balanced</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
+        <label class="field"><span>Lighting</span><select id="lighting"></select></label>
+        <label class="field"><span>Camera</span><select id="camera"></select></label>
+        <label class="field"><span>Passing</span><select id="pass-style"><option value="timing">Tap or hold</option><option value="bullet">Always bullet</option><option value="touch">Always touch</option><option value="lob">Always lob</option></select></label>
+        <label class="field"><span>Field strip</span><select id="field-strip"><option value="off">Off</option><option value="on">On</option></select></label>
+      </fieldset>
+    </div>
+    <footer class="modal-foot">
+      <span class="foot-note">Practice changes reset the rep</span>
+      <button id="apply-settings" class="primary-button" type="button">Apply</button>
+    </footer>
+  </dialog>
+
+  <dialog id="help" class="modal modal-wide" aria-labelledby="help-title">
+    <header class="modal-head">
+      <h2 id="help-title">Controls</h2>
+      <button class="close-button" type="button" data-close aria-label="Close controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </header>
+    <div class="controls-columns">
+      <section>
+        <h3 class="section-label">Keyboard</h3>
+        <dl class="bindings">
+          <div><dt><kbd>Space</kbd><kbd>Enter</kbd></dt><dd>Snap, next rep</dd></div>
+          <div><dt><kbd>W A S D</kbd><kbd>Arrows</kbd></dt><dd>Move</dd></div>
+          <div><dt><kbd>Shift</kbd></dt><dd>Sprint</dd></div>
+          <div><dt><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd><kbd>5</kbd></dt><dd>Pass to receiver</dd></div>
+          <div><dt><kbd>Q</kbd><kbd>E</kbd></dt><dd>Juke left, right</dd></div>
+          <div><dt><kbd>X</kbd></dt><dd>Throw away</dd></div>
+          <div><dt><kbd>H</kbd></dt><dd>Hot routes, pre-snap</dd></div>
+          <div><dt><kbd>Z</kbd></dt><dd>Audible, pre-snap</dd></div>
+          <div><dt><kbd>B</kbd></dt><dd>Playbook</dd></div>
+          <div><dt><kbd>Tab</kbd></dt><dd>Play art</dd></div>
+          <div><dt><kbd>C</kbd></dt><dd>Camera</dd></div>
+          <div><dt><kbd>R</kbd></dt><dd>Replay</dd></div>
+          <div><dt><kbd>F</kbd></dt><dd>Fullscreen</dd></div>
+          <div><dt><kbd>Esc</kbd><kbd>P</kbd></dt><dd>Pause</dd></div>
+        </dl>
+      </section>
+      <section>
+        <h3 class="section-label">Controller</h3>
+        <dl class="bindings">
+          <div><dt><kbd>Left stick</kbd></dt><dd>Move</dd></div>
+          <div><dt><kbd>RT</kbd></dt><dd>Sprint</dd></div>
+          <div><dt><kbd>A</kbd></dt><dd>Snap, next rep</dd></div>
+          <div><dt><kbd>A</kbd><kbd>X</kbd><kbd>Y</kbd><kbd>B</kbd><kbd>RB</kbd></dt><dd>Pass to 1 to 5</dd></div>
+          <div><dt><kbd>D-pad</kbd></dt><dd>Juke left, right</dd></div>
+          <div><dt><kbd>Back</kbd></dt><dd>Camera</dd></div>
+          <div><dt><kbd>Start</kbd></dt><dd>Pause</dd></div>
+        </dl>
+        <h3 class="section-label">Touch</h3>
+        <dl class="bindings">
+          <div><dt><kbd>Left pad</kbd></dt><dd>Move</dd></div>
+          <div><dt><kbd>1-5</kbd></dt><dd>Hold and release to pass</dd></div>
+          <div><dt><kbd>Sprint</kbd><kbd>Juke</kbd></dt><dd>Sprint, juke</dd></div>
+        </dl>
+      </section>
+      <section>
+        <h3 class="section-label">Passing</h3>
+        <dl class="bindings">
+          <div><dt><kbd>Tap</kbd></dt><dd>Lob</dd></div>
+          <div><dt><kbd>Hold</kbd></dt><dd>Touch</dd></div>
+          <div><dt><kbd>Hold longer</kbd></dt><dd>Bullet</dd></div>
+          <div><dt><kbd>Arrows</kbd></dt><dd>Lead the receiver while holding</dd></div>
+        </dl>
+        <h3 class="section-label">Rules of the rep</h3>
+        <ul class="plain-list">
+          <li>Set your feet for accuracy; pressure widens the throw</li>
+          <li>Crossing the line of scrimmage makes the quarterback a runner</li>
+          <li>Run plays hand off automatically</li>
+          <li>Play action needs about one second before the throw</li>
+        </ul>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="pause" class="modal modal-narrow" aria-labelledby="pause-title">
+    <header class="modal-head"><h2 id="pause-title">Paused</h2></header>
+    <div class="list-menu">
+      <button id="resume" class="list-item" type="button">Resume</button>
+      <button id="restart" class="list-item" type="button">Reset rep</button>
+      <button id="pause-settings" class="list-item" type="button">Settings</button>
+      <button id="pause-controls" class="list-item" type="button">Controls</button>
+      <button id="quit-menu" class="list-item" type="button">Main menu</button>
+    </div>
+    <h3 class="section-label">Session</h3>
+    <div id="session-stats" class="session-stats"></div>
+    <p id="pause-system" class="pause-system"></p>
+  </dialog>
+
   <div id="toast" class="toast" role="status" hidden></div>
-  <div id="error" class="error-panel" role="alert" hidden><h2>The field couldn’t load.</h2><p id="error-message">This game needs a browser with WebGL 2 enabled.</p><button onclick="location.reload()" class="primary-button">TRY AGAIN</button></div>
+  <div id="error" class="error-panel" role="alert" hidden>
+    <h2>WebGL 2 required</h2>
+    <p id="error-message">This game needs a browser with WebGL 2 enabled.</p>
+    <button class="primary-button" type="button" onclick="location.reload()">Reload</button>
+  </div>
   <script type="module" src="./js/app.js"></script>
-</body></html>
+</body>
+</html>
