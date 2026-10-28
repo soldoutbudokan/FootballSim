@@ -50,7 +50,8 @@ export class Character {
 
     this.bones = {};
     for (const [c, bone] of Object.entries(asset.rig.canon)) this.bones[c] = this.body.getObjectByName(bone.name);
-    this.restLocal = Object.entries(this.bones).map(([c, b]) => ({ b, q: b.quaternion.clone(), p: b.position.clone() }));
+    // Per canonical bone: the bind pose (q, p) and the last clip pose (cq, cp).
+    this.restLocal = Object.entries(this.bones).map(([c, b]) => ({ b, q: b.quaternion.clone(), p: b.position.clone(), cq: b.quaternion.clone(), cp: b.position.clone() }));
     this.pose = new PoseRig(this.bones, shared.base, shared.rest);
 
     if (shared.atlas && this.bones.Spine2 && !shared.materials.numberSlot) {
@@ -144,6 +145,7 @@ export class Character {
     this.resetBones();
     this.applyClips(plan, dt);
     this.mixer.update(0);
+    this.keepClipPose();
     this.pose.invalidate();
     this.applyProcedural(plan, env, dt);
   }
@@ -162,8 +164,18 @@ export class Character {
     this.phase = frac(this.phase);
   }
 
+  // Undo last frame's procedural layer before the clips are applied again.
+  // Bones go back to the last CLIP pose, not to the bind pose: three.js's
+  // mixer only writes a bone whose blended value changed since its previous
+  // update, so a repeated frame (a replay holding a snapshot, a frozen dead
+  // ball, two renders of one state) would otherwise be left in the T-pose.
   resetBones() {
-    for (const r of this.restLocal) { r.b.quaternion.copy(r.q); r.b.position.copy(r.p); }
+    for (const r of this.restLocal) { r.b.quaternion.copy(r.cq); r.b.position.copy(r.cp); }
+  }
+
+  // The pose the clips produced this frame (before the procedural layer).
+  keepClipPose() {
+    for (const r of this.restLocal) { r.cq.copy(r.b.quaternion); r.cp.copy(r.b.position); }
   }
 
   // Target weights from the plan, cross-faded, then clip times.
