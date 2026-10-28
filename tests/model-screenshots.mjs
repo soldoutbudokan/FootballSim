@@ -5,7 +5,7 @@ export async function captureModels(page) {
   // Stop the game loop before constructing a small, deterministic studio scene.
   const studio = new URL('__model-studio__.html', base).href;
   await page.route(studio, route => route.fulfill({
-    contentType: 'text/html',
+    contentType: 'text/html; charset=utf-8',
     body: '<!doctype html><html><head><link rel="icon" href="./icon.svg"><style>body{margin:0;background:#d5dce0;font:14px system-ui;color:#172c40}canvas{display:block}#label{position:fixed;left:36px;top:26px;font-size:18px;font-weight:600;letter-spacing:.08em}</style></head><body><div id="label">PLAYER MODELS · FULL DETAIL</div></body></html>',
   }));
   await page.goto(studio);
