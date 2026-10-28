@@ -20,7 +20,11 @@ test('repeat-spot practice retains the configured location after a gain',()=>{co
 test('touchdowns and out-of-bounds terminate a rep exactly once',()=>{const s=practice(1);s.snap();s.phase='run';s.carrier='R';s.byId.R.z=110.1;s.step(STEP);assert.equal(s.result.kind,'touchdown');assert.equal(s.stats.td,1);const yards=s.stats.yards;s.finish('Tackled',99,'tackle');assert.equal(s.stats.yards,yards);const out=practice(1);out.snap();out.byId.QB.x=27;out.step(STEP);assert.equal(out.result.kind,'out');});
 test('seeded simulation is independent of how a fixed number of steps is grouped',()=>{const a=practice(123),b=practice(123);a.snap();b.snap();for(let i=0;i<120;i++){a.step(STEP);a.step(STEP);}for(let i=0;i<240;i++)b.step(STEP);assert.deepEqual(a.snapshot(),b.snapshot());});
 test('all plays and defensive looks remain finite and terminate',()=>{for(const p of PLAYS)for(const coverage of ['cover2','cover3','man','blitz']){const s=practice(42);s.configure({coverage});s.selectPlay(p.id);s.snap();let thrown=false;for(let i=0;i<2900&&s.phase!=='dead';i++){if(s.time>1.8&&!thrown&&p.type!=='run'){s.requestThrow('X','touch');thrown=true;}s.step(STEP,{z:s.phase==='run'?1:0,sprint:s.phase==='run'});}assert.equal(s.phase,'dead',p.id+' '+coverage);for(const p of s.players)assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.z));}});
-test('juke cooldown and stamina prevent unlimited moves',()=>{const s=practice(1);s.snap();assert.equal(s.juke(1),true);assert.equal(s.juke(1),false);assert.ok(s.byId.QB.stamina<1);});
+test('juke cooldown and stamina prevent unlimited moves',()=>{
+  // A juke is a plant off momentum, so it needs the carrier moving (> 2 yd/s); the cooldown is the 0.45 s move itself.
+  const s=practice(1);s.snap();assert.equal(s.juke(1),false);advance(s,1,{x:1,sprint:true});
+  assert.equal(s.juke(1),true);assert.equal(s.juke(1),false);assert.ok(s.byId.QB.stamina<1);
+});
 
 test('default practice draws offense and defense again for each new rep',()=>{
   const s=new Simulation(2026),offenses=new Set(),defenses=new Set();
