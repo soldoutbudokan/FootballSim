@@ -14,6 +14,8 @@ import { blendSpace1D, strideRate } from './gait.js';
 export const ACTION_DURATION = { cut: 0.2, juke: 0.45, throw: 0.4, catch: 0.45, tackle: 1.0, stumble: 0.7, fall: 0.9, getup: 1.2 };
 // The ball leaves the quarterback's hand this far into the throw.
 export const THROW_RELEASE = 0.23;
+// Backpedal without a clip: the forward cycle reversed, quicker and shorter.
+export const BACKPEDAL_STEP = { rate: 1.45, stride: 0.65 };
 
 const KNOWN_ACTIONS = new Set(['ready', 'run', 'cut', 'juke', 'block', 'throw', 'catch', 'carry', 'wrapped', 'tackle', 'down', 'stumble']);
 const LINEMEN = new Set(['ol', 'dl']);
@@ -131,7 +133,11 @@ export function planAnimation(p, spec, state, elapsed, ctx) {
     }
     plan.cycleRate = total ? rate / total : 0;
     plan.stretch = total ? stretch / total : 1;
-    if (mode === 'backpedal') { plan.reverse = true; plan.procedural.backpedal = true; }
+    if (mode === 'backpedal') {
+      // A forward clip played backward: short, quick steps under the body.
+      plan.reverse = true; plan.procedural.backpedal = true;
+      plan.cycleRate *= BACKPEDAL_STEP.rate; plan.stretch = BACKPEDAL_STEP.stride;
+    }
     if (mode.startsWith('shuffle')) {
       // Turn the legs toward travel (positive = to the player's right).
       plan.procedural.strafe = Math.max(-1.22, Math.min(1.22, Math.atan2(d.lateral, Math.abs(d.forward))));

@@ -19,11 +19,15 @@ const _q = new THREE.Quaternion();
 
 // Stance geometry by type, as fractions of the leg length (hips above the
 // ankle) so it fits any model; x/z in yards for a 2.06 yd athlete.
+// three: linemen, back flat, right hand down in front of the right shoulder
+// two:   linebackers, backs, safeties, corners: hips back, chest over knees
+// split: receivers, staggered feet, weight forward
+// gun:   the quarterback waiting for the shotgun snap
 export const STANCES = {
-  three: { drop: 0.42, back: 0.14, hipsPitch: 0.62, spinePitch: 0.42, feet: [[0.25, 0.02], [-0.25, -0.2]], toeOut: 0.18 },
-  two: { drop: 0.25, back: 0.08, hipsPitch: 0.3, spinePitch: 0.3, feet: [[0.21, 0.03], [-0.21, -0.04]], toeOut: 0.22 },
-  split: { drop: 0.13, back: 0.04, hipsPitch: 0.18, spinePitch: 0.22, feet: [[0.12, 0.2], [-0.13, -0.22]], toeOut: 0.12 },
-  gun: { drop: 0.07, back: 0.02, hipsPitch: 0.08, spinePitch: 0.12, feet: [[0.2, 0.02], [-0.2, 0.0]], toeOut: 0.2 },
+  three: { drop: 0.36, back: 0.02, hipsPitch: 1.0, spinePitch: 0.5, feet: [[0.26, 0.06], [-0.26, -0.18]], toeOut: 0.16 },
+  two: { drop: 0.2, back: 0.1, hipsPitch: 0.45, spinePitch: 0.35, feet: [[0.22, 0.03], [-0.22, -0.05]], toeOut: 0.22 },
+  split: { drop: 0.13, back: 0.04, hipsPitch: 0.28, spinePitch: 0.3, feet: [[0.12, 0.2], [-0.13, -0.22]], toeOut: 0.12 },
+  gun: { drop: 0.07, back: 0.02, hipsPitch: 0.1, spinePitch: 0.12, feet: [[0.2, 0.02], [-0.2, 0.0]], toeOut: 0.2 },
 };
 
 // Spine pitch distributed over the spine bones (forward is +x rotation).
@@ -75,7 +79,7 @@ export function stance(rig, type, w, legs) {
   if (type === 'three') {
     // Right hand down in front of the right shoulder, left forearm on the thigh.
     const shoulder = rig.pos('RightArm');
-    hand(rig, 'Right', V(shoulder.x * 0.9, 0.05, shoulder.z + 0.08), V(-0.3, 0, -1), w);
+    hand(rig, 'Right', V(shoulder.x * 0.85, legs.ankle * 0.6, shoulder.z + 0.12), V(-0.3, 0, -1), w);
     const k = knee('Left');
     hand(rig, 'Left', V(k.x - 0.02, k.y + 0.12, k.z + 0.06), V(0.6, -0.2, -0.6), w);
   } else if (type === 'two') {
@@ -102,14 +106,46 @@ export function bank(rig, lean, speed, w = 1) {
   if (Math.abs(angle) > 1e-3) rig.turn('Hips', AXIS.z, angle);
 }
 
-// Longer strides than the clip was authored with.
+// Longer strides than the clip was authored with (k > 1), or shorter ones
+// (k < 1, legs only: shrinking an arm toward its bind pose would raise it
+// toward the T-pose).
 export function stretchStride(rig, k) {
-  if (k <= 1.001) return;
+  if (Math.abs(k - 1) < 0.001) return;
   for (const s of ['Left', 'Right']) {
     rig.stretch(s + 'UpLeg', k);
     rig.stretch(s + 'Leg', 1 + (k - 1) * 0.7);
-    rig.stretch(s + 'Arm', 1 + (k - 1) * 0.5);
+    if (k > 1) rig.stretch(s + 'Arm', 1 + (k - 1) * 0.5);
   }
+}
+
+// Forward lean of a runner: more at speed, more while accelerating, upright
+// while braking. `accel` in yd/s^2.
+export function runLean(rig, speed, accel, w = 1) {
+  if (w <= 0) return;
+  const angle = (0.16 * Math.min(1, Math.max(0, (speed - 3) / 6)) + Math.max(-0.12, Math.min(0.2, accel * 0.03))) * w;
+  if (Math.abs(angle) > 1e-3) pitchTorso(rig, angle);
+}
+
+// Feet where the clips put them (character space), recorded before the
+// action layers lower or shift the hips.
+export function footPositions(rig) {
+  return ['Left', 'Right'].map(s => (rig.bones[s + 'Foot']
+    ? { position: rig.pos(s + 'Foot').clone(), quaternion: rig.quat(s + 'Foot').clone() } : null));
+}
+
+// Puts the feet back on their recorded spots with leg IK (knees forward), so
+// lowered hips bend the knees instead of sinking the feet into the turf.
+export function keepFeet(rig, feet, w, legs) {
+  if (w <= 0.001) return;
+  ['Left', 'Right'].forEach((s, i) => {
+    const foot = feet[i];
+    if (!foot) return;
+    const target = foot.position.clone();
+    target.y = Math.max(target.y, legs.ankle * 0.92);
+    if (rig.pos(s + 'Foot').distanceToSquared(target) < 4e-6) return;
+    rig.reach(s + 'UpLeg', s + 'Leg', s + 'Foot', target, V(i ? -0.2 : 0.2, 0, 1), w);
+    rig.orient(s + 'Foot', foot.quaternion, w);
+  });
 }
 
 // Side shuffle without a clip: legs turn toward travel, torso keeps facing.
@@ -166,7 +202,8 @@ export function catchBall(rig, progress, target, w) {
   const reachTo = target ? target.clone() : V(0, chest.y + 0.15, chest.z + 0.5);
   // Clamp to what the arms can reach in front of the chest.
   reachTo.y = Math.max(chest.y - 0.45, Math.min(chest.y + 0.75, reachTo.y));
-  reachTo.z = Math.max(chest.z + 0.2, reachTo.z);
+  reachTo.x = Math.max(chest.x - 0.45, Math.min(chest.x + 0.45, reachTo.x));
+  reachTo.z = Math.max(chest.z + 0.22, Math.min(chest.z + 0.6, reachTo.z));
   const secure = V(chest.x - 0.08, chest.y - 0.02, chest.z + 0.2);
   const t = ease((progress - 0.25) / 0.65);
   const at = reachTo.lerp(secure, t);
@@ -175,9 +212,17 @@ export function catchBall(rig, progress, target, w) {
 }
 
 // Throwing motion keyed so the hand passes the release point at
-// THROW_RELEASE seconds: wind-up, drive over the top, follow-through.
-export function throwBall(rig, elapsed, w) {
+// THROW_RELEASE seconds: hips and shoulders closed at the wind-up, the front
+// (left) foot steps at the target, the arm drives over the top, then the
+// hips open through the follow-through. `feet` (from footPositions) gets the
+// step so keepFeet plants it.
+export function throwBall(rig, elapsed, w, feet = null) {
   if (w <= 0) return;
+  const hipsYaw = lerp(-0.5, 0.45, ease((elapsed - 0.08) / 0.25));
+  rig.turn('Hips', AXIS.y, hipsYaw * w);
+  const step = ease((elapsed - 0.04) / 0.16) * w;
+  if (feet?.[0]) { feet[0].position.z += 0.26 * step; feet[0].position.x += 0.04 * step; }
+  if (feet?.[1]) feet[1].position.z -= 0.06 * step;
   const shoulder = rig.pos('RightArm').clone();
   const hips = rig.pos('Hips');
   const keys = [
@@ -207,13 +252,19 @@ export function throwBall(rig, elapsed, w) {
   void shoulder; void hips;
 }
 
-// Hands extended into the opponent, low and leaning in.
-export function block(rig, w, legs) {
+// Hands extended into the opponent, low and leaning in, on a wide base.
+export function block(rig, w, legs, feet = null, still = 1) {
   if (w <= 0) return;
-  rig.shiftHips(V(0, -0.16 * legs.height * w, -0.05 * w));
-  rig.turn('Hips', AXIS.x, 0.18 * w);
-  pitchTorso(rig, 0.3 * w);
-  liftHead(rig, 0.4 * w);
+  rig.shiftHips(V(0, -0.2 * legs.height * w, -0.06 * w));
+  rig.turn('Hips', AXIS.x, 0.3 * w);
+  pitchTorso(rig, 0.34 * w);
+  liftHead(rig, 0.55 * w);
+  if (feet && still > 0) {
+    // Feet shoulder-width and staggered when not driving.
+    const k = w * still;
+    const spots = [[0.27, 0.04], [-0.27, -0.16]];
+    feet.forEach((f, i) => { if (f) { f.position.x = lerp(f.position.x, spots[i][0], k); f.position.z = lerp(f.position.z, spots[i][1], k); f.position.y = lerp(f.position.y, legs.ankle, k); } });
+  }
   const chest = rig.pos('Spine2');
   hand(rig, 'Left', V(0.16, chest.y - 0.02, chest.z + 0.48), V(0.8, -0.8, -0.2), w);
   hand(rig, 'Right', V(-0.16, chest.y - 0.02, chest.z + 0.48), V(-0.8, -0.8, -0.2), w);
@@ -244,7 +295,7 @@ export function juke(rig, progress, direction, w, legs) {
 
 // Tackler: drive low, arms wrapping, then go to ground.
 export function tackle(rig, elapsed, w, legs) {
-  if (w <= 0) return;
+  if (w <= 0) return 0;
   const drive = ease(elapsed / 0.25);
   rig.shiftHips(V(0, -0.22 * legs.height * drive * w, 0));
   pitchTorso(rig, 0.55 * drive * w);
@@ -253,7 +304,9 @@ export function tackle(rig, elapsed, w, legs) {
   const wrap = ease((elapsed - 0.15) / 0.25);
   hand(rig, 'Left', V(0.32 - wrap * 0.26, chest.y - 0.1, chest.z + 0.55), V(1, 0, -0.3), w);
   hand(rig, 'Right', V(-0.32 + wrap * 0.26, chest.y - 0.1, chest.z + 0.55), V(-1, 0, -0.3), w);
-  ground(rig, ease((elapsed - 0.35) / 0.5), w, legs, 1);
+  const down = ease((elapsed - 0.35) / 0.5);
+  ground(rig, down, w, legs, 1);
+  return down;
 }
 
 // Ball carrier being wrapped: knees bent, driving forward, ball held.
@@ -269,14 +322,17 @@ export function wrapped(rig, w, legs) {
 // Missed tackle: off balance, arms out, recovering.
 export function stumble(rig, progress, w, legs) {
   if (w <= 0) return;
-  const k = Math.sin(Math.PI * clamp01(progress)) * w;
-  rig.shiftHips(V(0, -0.14 * legs.height * k, 0));
+  const k = Math.sin(Math.PI * Math.min(1, clamp01(progress) * 1.3)) * w;
+  rig.shiftHips(V(0, -0.18 * legs.height * k, 0.04 * k));
+  rig.turn('Hips', AXIS.x, 0.35 * k);
   pitchTorso(rig, 0.55 * k);
-  rig.turn('Hips', AXIS.z, 0.18 * k);
-  for (const side of ['Left', 'Right']) {
-    const s = rig.pos(side + 'Arm');
-    hand(rig, side, V(s.x + (side === 'Left' ? 0.4 : -0.4), s.y - 0.05, s.z + 0.2), V(0, -1, -0.4), k);
-  }
+  rig.turn('Hips', AXIS.z, 0.22 * k);
+  rig.turn('Spine1', AXIS.z, 0.12 * k);
+  liftHead(rig, 0.5 * k);
+  // Arms flung out and low, the off arm reaching for the turf.
+  const l = rig.pos('LeftArm'), r = rig.pos('RightArm');
+  hand(rig, 'Left', V(l.x + 0.5, l.y - 0.2, l.z + 0.25), V(0, -1, -0.4), k);
+  hand(rig, 'Right', V(r.x - 0.35, r.y - 0.5, r.z + 0.35), V(0, -1, -0.4), k);
 }
 
 // Lying prone on the ground; `amount` 0..1 is how far down the fall is.

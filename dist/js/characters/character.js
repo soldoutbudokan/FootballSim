@@ -71,6 +71,8 @@ export class Character {
     this.prevPhase = null;
     this.prevFacing = null;
     this.lean = 0;
+    this.accel = 0;
+    this.prevSpeed = null;
     this.strafe = 0;
     this.ball = null;
     this.frame = 0;
@@ -127,6 +129,9 @@ export class Character {
       this.lean += (raw - this.lean) * Math.min(1, dt * 8);
     } else this.lean = p.lean;
     this.prevFacing = p.facing || 0;
+    // Smoothed forward acceleration (yd/s^2) for the running lean.
+    if (this.prevSpeed != null && dt > 0) this.accel += ((speed - this.prevSpeed) / dt - this.accel) * Math.min(1, dt * 6);
+    this.prevSpeed = speed;
 
     const released = state.phase === 'air' || (state.carrier !== p.id && p.action === 'throw');
     const elapsed = this.clock.update(visual(p, state), p.actionTime, dt, { released });
@@ -225,33 +230,44 @@ export class Character {
     const rig = this.pose, legs = this.asset.legs, pr = plan.procedural;
     const action = pr.action;
     const progress = pr.progress;
-    // Stances (pre-snap) and posture layers.
+    const e = this.clock.elapsed;
+
+    // Stances plant their own feet.
+    let stanced = 0;
     for (const type of ['three', 'two', 'split', 'gun']) {
       const w = this.layer('stance-' + type, pr.stance === type, dt, 0.22);
       if (w > 0) P.stance(rig, type, w, legs);
+      stanced += w;
     }
-    P.backpedal(rig, this.layer('backpedal', pr.backpedal, dt, 0.25), legs);
+    // Leg-shaping layers that move the feet on purpose.
     this.strafe += (pr.strafe - this.strafe) * Math.min(1, dt * 7);
     P.strafe(rig, this.strafe, 1);
     P.stretchStride(rig, plan.stretch || 1);
-    P.bank(rig, this.lean, plan.speed, 1 - (this.layers.down || 0));
 
-    // Action stand-ins (only for clips the model lacks).
-    const e = this.clock.elapsed;
+    // Everything below lowers or shifts the hips; the feet stay where the
+    // clips put them (or where a layer moves them: the throw's step).
+    const feet = P.footPositions(rig);
+    const moving = plan.mode === 'forward' && !action && plan.overlay == null;
+    P.runLean(rig, plan.speed, this.accel, this.layer('lean', moving || action === 'carry', dt, 0.3));
+    P.backpedal(rig, this.layer('backpedal', pr.backpedal, dt, 0.25), legs);
     // The quarterback in the pocket holds the ball at the chest in both hands.
     const qbHold = this.spec.role === 'qb' && plan.action === 'carry' && plan.speed < 3.5 && env.state.phase === 'live';
     this.holding = qbHold;
     P.carry(rig, this.layer('carry', action === 'carry' && !qbHold, dt));
     P.holdBall(rig, this.layer('hold', action === 'carry' && qbHold, dt));
     P.catchBall(rig, progress, env.ball, this.layer('catch', action === 'catch' || env.reach > 0, dt, 0.1) * Math.max(action === 'catch' ? 1 : 0, env.reach || 0));
-    P.throwBall(rig, e, this.layer('throw', action === 'throw', dt, 0.06));
-    P.block(rig, this.layer('block', action === 'block', dt), legs);
+    P.throwBall(rig, e, this.layer('throw', action === 'throw', dt, 0.06), feet);
+    P.block(rig, this.layer('block', action === 'block', dt), legs, feet, 1 - Math.min(1, plan.speed / 2.5));
     P.cut(rig, progress, this.lean, this.layer('cut', action === 'cut', dt, 0.06), legs);
     P.juke(rig, progress, this.jukeDirection(plan), this.layer('juke', action === 'juke', dt, 0.06), legs);
     P.wrapped(rig, this.layer('wrapped', action === 'wrapped', dt), legs);
     P.stumble(rig, progress, this.layer('stumble', action === 'stumble', dt), legs);
-    P.tackle(rig, e, this.layer('tackle', action === 'tackle', dt, 0.08), legs);
+    const tackleDown = P.tackle(rig, e, this.layer('tackle', action === 'tackle', dt, 0.08), legs) || 0;
     P.down(rig, e, this.layer('down', action === 'down', dt, 0.08), legs);
+    const grounded = Math.max(this.layers.down || 0, (this.layers.tackle || 0) * tackleDown);
+    P.keepFeet(rig, feet, (1 - grounded) * Math.max(0, 1 - stanced), legs);
+
+    P.bank(rig, this.lean, plan.speed, 1 - grounded);
     P.lookAt(rig, env.lookTarget, this.layer('look', !!env.lookTarget, dt, 0.25) * 0.85);
   }
 
