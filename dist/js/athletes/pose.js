@@ -17,6 +17,7 @@ export class Pose {
     this.tiltRoll = 0;
     this.tiltLift = 0;         // pivot raised off the ground (airborne dive)
     this.tiltFwd = 0;          // pivot moved forward (lunges)
+    this.tiltSide = 0;         // pivot moved to his left (landing beside a tackled carrier)
     this.pelvis = new THREE.Vector3(0, 1, 0);   // hip-joint centre in the tilt frame
     this.hips = new THREE.Vector3();            // pelvis orientation
     this.spine = new THREE.Vector3();           // spread over abdomen and chest
@@ -30,7 +31,7 @@ export class Pose {
   }
 
   copy(o) {
-    this.yaw = o.yaw; this.tiltPitch = o.tiltPitch; this.tiltRoll = o.tiltRoll; this.tiltLift = o.tiltLift; this.tiltFwd = o.tiltFwd;
+    this.yaw = o.yaw; this.tiltPitch = o.tiltPitch; this.tiltRoll = o.tiltRoll; this.tiltLift = o.tiltLift; this.tiltFwd = o.tiltFwd; this.tiltSide = o.tiltSide;
     this.pelvis.copy(o.pelvis); this.hips.copy(o.hips); this.spine.copy(o.spine); this.head.copy(o.head);
     for (let i = 0; i < 2; i++) {
       this.feet[i].copy(o.feet[i]); this.footRot[i].copy(o.footRot[i]); this.knees[i].copy(o.knees[i]);
@@ -45,7 +46,7 @@ export class Pose {
     if (t >= 1) return this.copy(o);
     const mix = (a, b) => a + (b - a) * t;
     this.yaw = mix(this.yaw, o.yaw); this.tiltPitch = mix(this.tiltPitch, o.tiltPitch); this.tiltRoll = mix(this.tiltRoll, o.tiltRoll);
-    this.tiltLift = mix(this.tiltLift, o.tiltLift); this.tiltFwd = mix(this.tiltFwd, o.tiltFwd);
+    this.tiltLift = mix(this.tiltLift, o.tiltLift); this.tiltFwd = mix(this.tiltFwd, o.tiltFwd); this.tiltSide = mix(this.tiltSide, o.tiltSide);
     this.pelvis.lerp(o.pelvis, t); this.hips.lerp(o.hips, t); this.spine.lerp(o.spine, t); this.head.lerp(o.head, t);
     for (let i = 0; i < 2; i++) {
       this.feet[i].lerp(o.feet[i], t); this.footRot[i].lerp(o.footRot[i], t); this.knees[i].lerp(o.knees[i], t);
@@ -81,7 +82,7 @@ export function chestMatrix(pose, dims, out) {
 export function tiltMatrix(x, z, yaw, pose, out) {
   out.compose(_p.set(x, 0, -z), _q.setFromAxisAngle(UP, yaw + pose.yaw), _s);
   _e.set(pose.tiltPitch, 0, pose.tiltRoll, 'XZY');
-  _m.compose(_p.set(0, pose.tiltLift, pose.tiltFwd), _q.setFromEuler(_e), _s);
+  _m.compose(_p.set(pose.tiltSide, pose.tiltLift, pose.tiltFwd), _q.setFromEuler(_e), _s);
   return out.multiply(_m);
 }
 

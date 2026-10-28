@@ -28,7 +28,7 @@ export function applyStance(anim, pose, p, ctx) {
   const d = anim.dims, k = d.k, a = d.ankle, t = ctx.time, seed = anim.seed;
   const breathe = 0.014 * Math.sin(t * 2.3 + seed * 9);
   const kind = stanceKind(anim.spec, p, ctx);
-  pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0;
+  pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0; pose.tiltSide = 0;
   pose.head.set(0, 0, 0);
   for (let i = 0; i < 2; i++) { pose.footRot[i].set(0, SIDES[i] * 0.14, 0); pose.knees[i].set(SIDES[i] * 0.35, 0, 1); pose.wrists[i].set(0, 0, 0); }
   const feet = (lx, lz, rx, rz) => { pose.feet[0].set(lx, a, lz); pose.feet[1].set(rx, a, rz); };

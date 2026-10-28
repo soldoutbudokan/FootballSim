@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SIDES, clamp, lerp, smoothstep, bump, sampleTrack } from './math.js';
+import { SIDES, clamp, lerp, smoothstep, bump, sampleTrack, wrapAngle } from './math.js';
 import { armAngles } from './pose.js';
 
 // Action layer: each function modifies the locomotion base pose for one
@@ -72,9 +72,6 @@ export function startAction(anim, action, data, p, ctx) {
       const dist = target ? Math.hypot(target.x - p.x, target.z - p.z) : 1;
       data.mode = anim.speed > 7.2 || dist > 1.15 ? 'dive' : 'wrap';
       data.fallAt = null;
-      // A carrier running into the tackler's chest drives him onto his back.
-      const into = target && dist > 1e-3 ? -((target.vx || 0) * (target.x - p.x) + (target.vz || 0) * (target.z - p.z)) / dist : 0;
-      data.fallBack = data.mode === 'wrap' && into > 1.5;
       data.face = (q, c) => (data.target && !data.locked ? c.byId.get(data.target) : null);
       break;
     }
@@ -98,6 +95,26 @@ function nearestOpponent(anim, p, ctx) {
     if (d < bestD) { bestD = d; best = q; }
   }
   return best;
+}
+
+// Where a wrap tackler comes to rest: lying parallel to the carrier (facing
+// the way he falls, or the opposite way if that is the shorter turn) and
+// half a yard to the side he tackled from, so the two bodies never overlap.
+function landingBeside(anim, carrier, p, ctx) {
+  const yaw = carrier.yaw, fx = Math.sin(yaw), fz = Math.cos(yaw), rx = -Math.cos(yaw), rz = Math.sin(yaw);
+  const dx = p.x - carrier.x, dz = -p.z + carrier.z;
+  const side = Math.abs(dx * rx + dz * rz) > 0.05 ? Math.sign(dx * rx + dz * rz) : (anim.seed < 0.5 ? 1 : -1);
+  const same = Math.abs(wrapAngle(anim.yaw - yaw)) < Math.PI / 2;
+  // Same way: beside his hips, a little ahead. Opposite: feet by his head,
+  // arms around his legs.
+  const along = same ? 0.25 : 1.75, lateral = 0.62 * side;
+  const pivot = { x: carrier.x + fx * along + rx * lateral, z: -carrier.z + fz * along + rz * lateral };
+  const holdYaw = same ? yaw : yaw + Math.PI;
+  anim.data.holdYaw = holdYaw;
+  // Roll toward the carrier: facing the same way from the carrier's right
+  // (side > 0), the carrier is on his left (positive roll leans right).
+  const roll = 0.28 * (same ? -side : side);
+  return { pivot, roll };
 }
 
 // Cut and juke: the plant foot is the outside foot of the new direction. The
@@ -280,7 +297,7 @@ export const ACTIONS = {
     const targetAnim = data.target ? ctx.animators.get(data.target) : null;
     const goingDown = ctx.dead || (targetAnim && (targetAnim.action === 'down' || (targetAnim.action === 'wrapped' && targetAnim.age > 0.5)));
     if (goingDown && data.fallAt === null) data.fallAt = age;
-    if (age > 0.3 && !data.locked) { data.locked = true; data.holdYaw = anim.yaw; }
+    if (age > 0.3 && !data.locked) { data.locked = true; if (!data.landing) data.holdYaw = anim.yaw; }
     // Axis from the tackler toward the carrier (scene space, where z = -sim z)
     // for wrapping the arms around him.
     if (target) _perp.set(target.x - p.x, 0, target.z + p.z).normalize();
@@ -289,21 +306,20 @@ export const ACTIONS = {
 
     if (data.mode === 'wrap') {
       const fall = data.fallAt === null ? 0 : smoothstep(0, 0.6, age - data.fallAt), f = fall * fall;
-      const back = data.fallBack ? -1 : 1;
+      if (fall > 0 && !data.landing && targetAnim) data.landing = landingBeside(anim, targetAnim, p, ctx);
       pose.pelvis.y = d.hipY - 0.24 * (1 - fall) - 0.05;
-      pose.hips.x = lerp(0.62, data.fallBack ? -0.1 : 0.12, fall);
-      pose.spine.x = lerp(0.35, data.fallBack ? 0.25 : 0.08, fall);
+      pose.hips.x = lerp(0.62, 0.12, fall);
+      pose.spine.x = lerp(0.35, 0.08, fall);
       pose.feet[0].x += 0.08; pose.feet[1].x -= 0.08;
-      pose.tiltPitch = back * 1.32 * f; pose.tiltFwd = back * 0.2 * fall;
-      pose.head.set(data.fallBack ? -0.15 + 1.2 * fall : -0.15 - 0.9 * fall, 0.35, 0);
-      if (fall > 0) {
-        if (data.fallBack) {
-          // Driven onto his back: knees come up, feet stay planted.
-          for (let i = 0; i < 2; i++) {
-            pose.feet[i].lerp(_c.set(SIDES[i] * 0.15, d.ankle, 0.12), fall);
-            pose.footRot[i].x = lerp(pose.footRot[i].x, -0.6, fall);
-          }
-        } else legsOut(anim, pose, fall);
+      pose.tiltPitch = 1.32 * f;
+      pose.head.set(-0.15 - 0.9 * fall, 0.35, 0);
+      if (fall > 0) legsOut(anim, pose, fall);
+      if (data.landing) {
+        // Slide the pivot to the landing spot (in his turning root frame) and
+        // roll a little toward the carrier so the inside arm drapes over him.
+        const local = anim.worldToRoot(data.landing.pivot, _c);
+        pose.tiltSide = local.x * fall; pose.tiltFwd = local.z * fall;
+        pose.tiltRoll = data.landing.roll * f;
       }
       if (target) {
         for (let i = 0; i < 2; i++) {

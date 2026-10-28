@@ -181,7 +181,7 @@ export class Animator {
     const width = lerp(0.115, 0.07, run) + 0.13 * lateral + 0.04 * bp;
     const dx = this.local.x, dz = this.local.y;
 
-    pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0;
+    pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0; pose.tiltSide = 0;
     for (let i = 0; i < 2; i++) {
       const side = SIDES[i], ph = fract(s + i * 0.5), stance = ph < duty;
       let along, h, pitch;

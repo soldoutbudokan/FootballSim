@@ -319,7 +319,7 @@ export class Rig {
     const d = this.dims;
     this.root.position.set(x, 0, -z);
     this.root.rotation.set(0, yaw + pose.yaw, 0);
-    this.tilt.position.set(0, pose.tiltLift, pose.tiltFwd);
+    this.tilt.position.set(pose.tiltSide, pose.tiltLift, pose.tiltFwd);
     this.tilt.rotation.set(pose.tiltPitch, 0, pose.tiltRoll, 'XZY');
 
     this.pelvis.position.copy(pose.pelvis);
