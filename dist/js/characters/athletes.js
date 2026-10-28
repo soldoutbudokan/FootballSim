@@ -71,8 +71,8 @@ export class SkinnedAthletes {
     this.contactShadows.material.opacity = shadows ? 0.24 : 0.46;
     // Beyond this many yards from the focus, animate every other frame.
     this.lodDistance = profile.id === 'performance' ? 16 : profile.id === 'balanced' ? 30 : Infinity;
-    // Beyond this many yards from the camera, draw the reduced mesh.
-    this.meshLodDistance = { performance: 9, balanced: 17, high: 28 }[profile.id] ?? Infinity;
+    // Beyond these distances from the camera (yards), draw reduced meshes.
+    this.meshLodDistances = { performance: [9, 20], balanced: [17, 32], high: [28, 48] }[profile.id] || [Infinity, Infinity];
   }
 
   update(state, dt, { menu = false } = {}) {
@@ -89,7 +89,8 @@ export class SkinnedAthletes {
       if (!c) return;
       const fromFocus = Math.hypot(p.x - focus.x, p.z - focus.z);
       const fromEye = eye ? Math.hypot(p.x - eye.x, 1 - eye.y, -p.z - eye.z) : fromFocus + 9;
-      c.setLod(fromEye > this.meshLodDistance ? 1 : 0);
+      const [near, far2] = this.meshLodDistances;
+      c.setLod(fromEye > far2 ? 2 : fromEye > near ? 1 : 0);
       const far = fromFocus > this.lodDistance;
       const env = { state, skipAnimation: far && (this.frame + i) % 2 === 1 };
       if (!env.skipAnimation) this.lookAndReach(c, p, state, env, target);

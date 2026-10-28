@@ -121,9 +121,8 @@ export class UniformMaterials {
         position: vertices.get(mesh), boneCanon: boneCanonicals(mesh.skeleton, rig), joints,
       });
       out.set(g.uuid, regions);
-      // The reduced mesh keeps its representatives' regions.
-      const lod = this.asset.lods?.get(g.uuid);
-      if (lod) out.set(lod.geometry.uuid, Uint8Array.from(lod.source, v => regions[v]));
+      // Reduced meshes keep their representatives' regions.
+      for (const lod of this.asset.lods?.get(g.uuid) || []) out.set(lod.geometry.uuid, Uint8Array.from(lod.source, v => regions[v]));
     }
     return out;
   }

@@ -96,38 +96,46 @@ export async function loadCharacterAsset({ modelUrl, clipUrls, manager, clipAlia
   };
 }
 
-// A reduced copy of every skinned mesh for distant players (see lod.js).
-// Map: source geometry uuid -> {geometry, source (new vertex -> old)}.
-export const LOD_CELL = 0.034; // yards (~1.2 in) on a 2.06 yd athlete
+// Reduced copies of every skinned mesh for distant players (see lod.js):
+// level 1 for the middle distance, level 2 for the far field.
+// Map: source geometry uuid -> [{geometry, source (new vertex -> old)}, ...]
+// indexed by level - 1.
+export const LOD_LEVELS = [
+  { cell: 0.034, keep: 0.2 },  // ~1.2 in cells on a 2.06 yd athlete
+  { cell: 0.075, keep: 0.07 }, // ~2.7 in
+];
 function buildLods(rig, vertices) {
   const out = new Map();
   for (const mesh of rig.meshes) {
     const g = mesh.geometry;
-    const positions = vertices.get(mesh);
-    const index = g.index ? g.index.array : Uint32Array.from({ length: g.attributes.position.count }, (_, i) => i);
-    const groups = g.groups.length ? g.groups : [{ start: 0, count: index.length, materialIndex: 0 }];
-    // Small parts (a face, a hand) collapse quickly: refine the grid until
-    // at least a fifth of the triangles survive.
-    let cell = LOD_CELL, rep, source, triangles, ranges;
-    for (let attempt = 0; attempt < 4; attempt++, cell *= 0.65) {
-      ({ rep, source } = clusterVertices(positions, cell));
-      triangles = []; ranges = [];
-      for (const group of groups) {
-        const tris = remapTriangles(index, rep, group.start, group.count);
-        ranges.push([triangles.length, tris.length, group.materialIndex]);
-        for (const t of tris) triangles.push(t);
-      }
-      if (triangles.length >= index.length * 0.2 || index.length < 900) break;
-    }
-    const lod = new THREE.BufferGeometry();
-    for (const [name, attribute] of Object.entries(g.attributes)) lod.setAttribute(name, copyAttribute(attribute, source));
-    if (g.groups.length) for (const [start, count, materialIndex] of ranges) lod.addGroup(start, count, materialIndex);
-    lod.setIndex(triangles);
-    lod.computeBoundingSphere();
-    lod.name = (g.name || mesh.name) + ':lod1';
-    out.set(g.uuid, { geometry: lod, source, triangles: triangles.length / 3, original: index.length / 3 });
+    out.set(g.uuid, LOD_LEVELS.map(level => reduceMesh(g, vertices.get(mesh), level)));
   }
   return out;
+}
+
+function reduceMesh(g, positions, { cell: start, keep }) {
+  const index = g.index ? g.index.array : Uint32Array.from({ length: g.attributes.position.count }, (_, i) => i);
+  const groups = g.groups.length ? g.groups : [{ start: 0, count: index.length, materialIndex: 0 }];
+  // Small parts (a face, a hand) collapse quickly: refine the grid until
+  // enough of the triangles survive.
+  let cell = start, rep, source, triangles, ranges;
+  for (let attempt = 0; attempt < 4; attempt++, cell *= 0.65) {
+    ({ rep, source } = clusterVertices(positions, cell));
+    triangles = []; ranges = [];
+    for (const group of groups) {
+      const tris = remapTriangles(index, rep, group.start, group.count);
+      ranges.push([triangles.length, tris.length, group.materialIndex]);
+      for (const t of tris) triangles.push(t);
+    }
+    if (triangles.length >= index.length * keep || index.length < 900) break;
+  }
+  const lod = new THREE.BufferGeometry();
+  for (const [name, attribute] of Object.entries(g.attributes)) lod.setAttribute(name, copyAttribute(attribute, source));
+  if (g.groups.length) for (const [first, count, materialIndex] of ranges) lod.addGroup(first, count, materialIndex);
+  lod.setIndex(triangles);
+  lod.computeBoundingSphere();
+  lod.name = (g.name || 'mesh') + ':lod';
+  return { geometry: lod, source, triangles: triangles.length / 3, original: index.length / 3 };
 }
 
 function copyAttribute(attribute, source) {

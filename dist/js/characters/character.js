@@ -90,29 +90,31 @@ export class Character {
     return action;
   }
 
-  // A reduced sibling for every skinned mesh, bound to the same skeleton.
+  // Reduced siblings for every skinned mesh (one per level), bound to the
+  // same skeleton.
   addLods(asset) {
     for (const mesh of [...this.meshes]) {
       mesh.userData.lod = 0;
-      const lod = asset.lods?.get(mesh.geometry.uuid);
-      if (!lod) continue;
-      const reduced = new THREE.SkinnedMesh(lod.geometry, mesh.material);
-      reduced.name = mesh.name + ':lod1';
-      reduced.position.copy(mesh.position); reduced.quaternion.copy(mesh.quaternion); reduced.scale.copy(mesh.scale);
-      reduced.bindMode = mesh.bindMode;
-      reduced.bind(mesh.skeleton, mesh.bindMatrix);
-      reduced.userData.lod = 1;
-      mesh.parent.add(reduced);
-      this.meshes.push(reduced);
+      (asset.lods?.get(mesh.geometry.uuid) || []).forEach((lod, i) => {
+        const reduced = new THREE.SkinnedMesh(lod.geometry, mesh.material);
+        reduced.name = mesh.name + ':lod' + (i + 1);
+        reduced.position.copy(mesh.position); reduced.quaternion.copy(mesh.quaternion); reduced.scale.copy(mesh.scale);
+        reduced.bindMode = mesh.bindMode;
+        reduced.bind(mesh.skeleton, mesh.bindMatrix);
+        reduced.userData.lod = i + 1;
+        mesh.parent.add(reduced);
+        this.meshes.push(reduced);
+      });
     }
+    this.lodLevels = Math.max(0, ...this.meshes.map(m => m.userData.lod));
   }
 
-  // 0 = full mesh, 1 = reduced mesh.
+  // 0 = full mesh, 1 and 2 = reduced meshes.
   setLod(level) {
+    level = Math.min(level, this.lodLevels);
     if (this.lod === level) return;
     this.lod = level;
-    const has = this.meshes.some(m => m.userData.lod === level);
-    for (const m of this.meshes) m.visible = has ? m.userData.lod === level : m.userData.lod === 0;
+    for (const m of this.meshes) m.visible = m.userData.lod === level;
   }
 
   setShadows(cast) { for (const m of this.meshes) m.castShadow = cast; }
