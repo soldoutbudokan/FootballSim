@@ -182,7 +182,7 @@ function helmetPoint(theta, phi, scale, out) {
   out.push(x * scale, y * scale, z * scale);
 }
 
-export function helmetShell({ columns = 34, rows = 13, inner = 0.925 } = {}) {
+export function helmetShell({ columns = 30, rows = 12, inner = 0.925 } = {}) {
   const positions = [], uvs = [], indices = [];
   const cols = columns + 1, layer = (rows + 1) * cols;
   for (const scale of [1, inner]) {
@@ -221,7 +221,7 @@ export function helmetShell({ columns = 34, rows = 13, inner = 0.925 } = {}) {
 // Facemask, clips and ear holes in one vertex-coloured mesh (shell-local).
 export function helmetHardware() {
   const parts = [];
-  const bar = (points, r = 0.0072, segments = 14) => parts.push(tint(tube(points, r, 5, segments), '#8e949b'));
+  const bar = (points, r = 0.0072, segments = 14) => parts.push(tint(tube(points, r, 4, segments), '#8e949b'));
   bar([[-0.083, -0.022, 0.112], [-0.072, -0.034, 0.163], [0, -0.041, 0.19], [0.072, -0.034, 0.163], [0.083, -0.022, 0.112]]);
   bar([[-0.088, -0.074, 0.072], [-0.068, -0.086, 0.152], [0, -0.092, 0.18], [0.068, -0.086, 0.152], [0.088, -0.074, 0.072]]);
   bar([[-0.074, -0.102, 0.048], [-0.052, -0.133, 0.122], [0, -0.146, 0.147], [0.052, -0.133, 0.122], [0.074, -0.102, 0.048]]);
@@ -275,7 +275,7 @@ export function glove() {
     { y: -0.115, w: 0.02, d: 0.043, n: 2.6 },
     { y: -0.165, w: 0.016, d: 0.037, n: 2.4 },
     { y: -0.188, w: 0.009, d: 0.024 },
-  ], { radial: 10, subdiv: 2 });
+  ], { radial: 8, subdiv: 2 });
   const thumb = loft([
     { y: 0, w: 0.014, d: 0.016 }, { y: -0.04, w: 0.012, d: 0.013 }, { y: -0.068, w: 0.006, d: 0.007 },
   ], { radial: 8, subdiv: 2 });
@@ -295,7 +295,7 @@ export function cleat() {
     { y: 0.13, w: 0.047, d: 0.022, z: 0.07, n: 2.6 },
     { y: 0.19, w: 0.036, d: 0.016, z: 0.075, n: 2.4 },
     { y: 0.218, w: 0.014, d: 0.009, z: 0.078 },
-  ], { radial: 12, subdiv: 2 });
+  ], { radial: 10, subdiv: 2 });
   g.rotateX(Math.PI / 2);
   const p = g.attributes.position, colors = new Float32Array(p.count * 3);
   for (let i = 0; i < p.count; i++) {

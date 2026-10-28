@@ -244,14 +244,22 @@ export const ACTIONS = {
   juke: plantAndDrive,
 
   // Engaged: low, wide base, hands inside on the opponent's chest.
+  // The closer the two are, the more upright they stand, so the pads meet
+  // and the helmets slide past each other (each puts his head to his left
+  // side of the opponent) instead of passing through one another.
   block(anim, pose, age, data, p, ctx) {
     const d = anim.dims;
-    pose.pelvis.y = d.hipY - 0.2;
-    pose.hips.x = 0.5; pose.spine.x = 0.28;
+    const q = p.engaged != null ? ctx.byId.get(p.engaged) : null;
+    const gap = q ? Math.hypot(q.x - p.x, q.z - p.z) : 1.3;
+    const lean = smoothstep(0.75, 1.35, gap);
+    pose.pelvis.y = d.hipY - 0.2 + 0.05 * (1 - lean);
+    pose.pelvis.z -= 0.08 * (1 - lean);
+    pose.hips.x = 0.3 + 0.22 * lean; pose.spine.x = 0.1 + 0.2 * lean;
+    pose.spine.y = -0.12; pose.spine.z = -0.05;
     pose.feet[0].x += 0.12; pose.feet[1].x -= 0.12;
     pose.feet[0].z += 0.06; pose.feet[1].z -= 0.06;
-    pose.head.set(-0.1, 0, 0);
-    const opp = p.engaged != null ? bodyPoint(ctx, p.engaged, 'chest', _a, 1.35) : null;
+    pose.head.set(-0.1, 0.25, 0);
+    const opp = q ? bodyPoint(ctx, p.engaged, 'chest', _a, 1.35) : null;
     if (opp) {
       anim.worldToChest(pose, opp, _b);
       // Contact surface: a little short of the opponent's chest centre.

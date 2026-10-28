@@ -194,7 +194,7 @@ function leatherTexture() {
 // Roughness and metalness per kind of surface; baked per vertex because the
 // squad's cloth, skin, rubber and metal share one material.
 export const SURFACE = {
-  cloth: [0.86, 0], pants: [0.62, 0.04], belt: [0.6, 0], sock: [0.92, 0], skin: [0.55, 0],
+  cloth: [0.86, 0], pants: [0.46, 0.22], belt: [0.6, 0], sock: [0.92, 0], skin: [0.55, 0],
   sleeve: [0.7, 0], glove: [0.62, 0], cleat: [0.42, 0], tape: [0.85, 0], towel: [1, 0],
   shell: [0.32, 0.25], facemask: [0.45, 0.35], strap: [0.35, 0], visor: [0.06, 0.7],
 };

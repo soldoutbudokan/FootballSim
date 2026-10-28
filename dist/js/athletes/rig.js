@@ -115,17 +115,17 @@ export function createGeometries() {
     pelvis: loft([
       { y: -0.094, w: 0.04, d: 0.045, z: -0.01 }, { y: -0.074, w: 0.12, d: 0.09, z: -0.016 }, { y: -0.03, w: 0.162, d: 0.11, z: -0.02 },
       { y: 0.03, w: 0.176, d: 0.116, z: -0.012 }, { y: 0.1, w: 0.174, d: 0.116, z: -0.004 }, { y: 0.17, w: 0.168, d: 0.116 },
-    ], { radial: 20, subdiv: 2, ao: AO.pelvis }),
-    belt: loft([{ y: 0.126, w: 0.173, d: 0.12 }, { y: 0.152, w: 0.17, d: 0.119 }], { radial: 20, subdiv: 1, capTop: false, capBottom: false }),
+    ], { radial: 16, subdiv: 2, ao: AO.pelvis }),
+    belt: loft([{ y: 0.126, w: 0.173, d: 0.12 }, { y: 0.152, w: 0.17, d: 0.119 }], { radial: 16, subdiv: 1, capTop: false, capBottom: false }),
     abdomen: loft([
       { y: -0.035, w: 0.16, d: 0.11 }, { y: 0.04, w: 0.168, d: 0.12 }, { y: 0.14, w: 0.186, d: 0.132 }, { y: 0.27, w: 0.206, d: 0.142 },
-    ], { radial: 20, subdiv: 2, capTop: false, capBottom: false, ao: AO.abdomen }),
+    ], { radial: 16, subdiv: 2, capTop: false, capBottom: false, ao: AO.abdomen }),
     chest: loft([
       { y: -0.06, w: 0.212, d: 0.146, n: 2.2 }, { y: 0.04, w: 0.224, d: 0.153, n: 2.3 }, { y: 0.14, w: 0.244, d: 0.16, n: 2.45 },
       { y: 0.205, w: 0.26, d: 0.165, n: 2.6 }, { y: 0.255, w: 0.268, d: 0.166, n: 2.7 }, { y: 0.3, w: 0.254, d: 0.158, n: 2.6 },
       { y: 0.335, w: 0.22, d: 0.14, n: 2.4 }, { y: 0.36, w: 0.165, d: 0.115, n: 2.2 }, { y: 0.377, w: 0.105, d: 0.088 },
       { y: 0.383, w: 0.072, d: 0.068 },
-    ], { radial: 26, subdiv: 2, capBottom: false, flipU: true, ao: AO.chest }),
+    ], { radial: 22, subdiv: 2, capBottom: false, flipU: true, ao: AO.chest }),
     neck: loft([{ y: 0.3, w: 0.063, d: 0.064 }, { y: 0.47, w: 0.056, d: 0.058 }], { radial: 12, subdiv: 2, capBottom: false, ao: AO.neck }),
     // One pant leg from inside the pelvis, over the knee pad, to the cuff
     // below the knee; it is skinned across the knee so it bends as one piece.
@@ -134,23 +134,23 @@ export function createGeometries() {
       { y: -0.3, w: 0.077, d: 0.082 }, { y: -0.38, w: 0.066, d: 0.07 }, { y: -0.44, w: 0.059, d: 0.066, z: 0.006 },
       { y: -0.49, w: 0.057, d: 0.066, z: 0.01 }, { y: -0.54, w: 0.054, d: 0.058, z: 0.004 }, { y: -0.585, w: 0.053, d: 0.056 },
       { y: -0.59, w: 0.04, d: 0.043 },
-    ], { radial: 16, subdiv: 2, ao: AO.leg }),
+    ], { radial: 14, subdiv: 2, ao: AO.leg }),
     sock: loft([
       { y: -0.07, w: 0.046, d: 0.048 }, { y: -0.115, w: 0.05, d: 0.053, z: -0.003 }, { y: -0.17, w: 0.054, d: 0.06, z: -0.008 },
       { y: -0.28, w: 0.05, d: 0.054, z: -0.005 }, { y: -0.4, w: 0.037, d: 0.041 }, { y: -0.5, w: 0.035, d: 0.042 },
-    ], { radial: 14, subdiv: 2, ao: AO.sock }),
+    ], { radial: 12, subdiv: 2, ao: AO.sock }),
     upperArm: loft([
       { y: 0.05, w: 0.055, d: 0.058 }, { y: -0.02, w: 0.066, d: 0.068 }, { y: -0.14, w: 0.064, d: 0.066 },
       { y: -0.28, w: 0.053, d: 0.054 }, { y: -0.37, w: 0.045, d: 0.046 }, { y: -0.4, w: 0.034, d: 0.036 },
-    ], { radial: 14, subdiv: 2, ao: AO.upperArm }),
+    ], { radial: 12, subdiv: 2, ao: AO.upperArm }),
     sleeve: loft([
       { y: 0.065, w: 0.068, d: 0.07 }, { y: -0.04, w: 0.077, d: 0.079 }, { y: -0.15, w: 0.075, d: 0.077 }, { y: -0.178, w: 0.074, d: 0.076 },
-    ], { radial: 14, subdiv: 2, capBottom: false, ao: AO.sleeve }),
+    ], { radial: 12, subdiv: 2, capBottom: false, ao: AO.sleeve }),
     forearm: loft([
       { y: 0.035, w: 0.04, d: 0.042 }, { y: -0.01, w: 0.046, d: 0.046 }, { y: -0.06, w: 0.05, d: 0.048 }, { y: -0.2, w: 0.04, d: 0.037 },
       { y: -0.33, w: 0.031, d: 0.026 }, { y: -0.36, w: 0.029, d: 0.024 },
-    ], { radial: 12, subdiv: 2, ao: AO.forearm }),
-    tape: loft([{ y: -0.255, w: 0.039, d: 0.034 }, { y: -0.335, w: 0.034, d: 0.029 }], { radial: 12, subdiv: 1, capTop: false, capBottom: false }),
+    ], { radial: 10, subdiv: 2, ao: AO.forearm }),
+    tape: loft([{ y: -0.255, w: 0.039, d: 0.034 }, { y: -0.335, w: 0.034, d: 0.029 }], { radial: 10, subdiv: 1, capTop: false, capBottom: false }),
     gloveL: glove(),
     gloveR: mirrorX(glove()),
     cleat: cleat(),
@@ -158,7 +158,7 @@ export function createGeometries() {
     hardware: helmetHardware(),
     strap: chinStrap(),
     visor: helmetVisor(),
-    face: (() => { const g = new THREE.SphereGeometry(1, 14, 10); g.scale(0.078, 0.1, 0.09); return tint(g, '#ffffff'); })(),
+    face: (() => { const g = new THREE.SphereGeometry(1, 12, 8); g.scale(0.078, 0.1, 0.09); return tint(g, '#ffffff'); })(),
     // A hand towel, curved around the front of the thigh.
     towel: (() => {
       const g = new THREE.BoxGeometry(0.085, 0.2, 0.006, 3, 6, 1);

@@ -27,7 +27,7 @@ function ringTexture() {
   return canvasTexture(256, (ctx, s) => {
     const c = s / 2, r = s * 0.4;
     ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(214,218,224,0.5)';
+    ctx.strokeStyle = 'rgba(214,218,224,0.62)';
     ctx.lineWidth = s * 0.016;
     ctx.beginPath(); ctx.arc(c, c, r, 0, Math.PI * 2); ctx.stroke();
     ctx.strokeStyle = 'rgba(240,242,245,0.95)';
