@@ -124,7 +124,9 @@ export function jointWeights(own, joints) {
       if (j.crease) {
         const dx = p.x - j.x, dz = p.z - j.z, len = Math.hypot(dx, dz) || 1;
         const facing = (dx * j.crease.x + dz * j.crease.z) / len;
-        r += (j.crease.radius - r) * smoothstep(0, 0.7, facing);
+        // Narrow on the fold side, full width on the outside, with a wide
+        // transition around the limb so neighbouring vertices stay close.
+        r += (j.crease.radius - r) * smoothstep(-0.6, 0.9, facing);
         if (Math.abs(s) >= r) return across ? [own, j.other, 0] : [own, own, 1];
       }
       const lower = smoothstep(-r, r, s);
