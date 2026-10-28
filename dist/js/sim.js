@@ -78,6 +78,7 @@ const JUKE = { plant: 0.25, action: 0.45, keep: 0.65, cost: 0.05, minSpeed: 2 };
 const SPRINT_DRAIN = 1 / 9;            // a full tank lasts nine seconds of sprinting
 const RECOVERY = 0.12;
 const REACH = 0.95;                    // tackling reach, yards
+const WRAP_KEEP = 0.8;
 const TACKLE_DECEL = 12, GANG_DECEL = 6, TACKLE_HOLD = 0.9;
 const STUMBLE_TIME = 0.7, STUMBLE_SPEED = 0.3, BROKEN_KEEP = 0.8;
 const BALL_REST = 0.1;                 // centre height of a ball lying on the turf
@@ -633,15 +634,17 @@ export class Simulation {
         p.want = meetWant(p, this.pass.target, (this.pass.duration || 0) - this.pass.elapsed, speedCap(p));
         continue;
       }
-      if (run && id !== 'R' && this.blockDownfield(p)) continue;
+      // On runs, and once a pass is caught, the other receivers block.
+      const blocking = (run && id !== 'R') || (this.completed && this.phase !== 'air');
+      if (blocking && this.blockDownfield(p)) continue;
       p.want = routeWant(p, speedCap(p));
     }
   }
 
-  // Run plays: receivers take the nearest defender in front of them.
+  // Receivers blocking: take the nearest defender in front of them.
   blockDownfield(p) {
     let defender = null, best = Infinity;
-    for (const d of this.defense) if (d.z > p.z - 1 && dist(d, p) < best) { best = dist(d, p); defender = d; }
+    for (const d of this.defense) if (d.z > p.z - 1 && d.action !== 'tackle' && dist(d, p) < best) { best = dist(d, p); defender = d; }
     if (!defender || best >= 3.5) return false;
     if (best < 1.2 && !defender.engaged && this.time < defender.shed + 0.9) this.engage(p, defender);
     const c = this.guardPoint(), away = scaled(c.x - defender.x, c.z - defender.z, 0.9);
@@ -959,9 +962,14 @@ export class Simulation {
   startTackle(d, c) {
     const sack = this.carrier === 'QB' && !this.threw && !this.crossedLine && this.play.type !== 'run';
     // The hit: momentum is shared, so a head-on tackle stops the runner short
-    // and a tackle from behind lets him fall forward.
-    const k = 0.6 * d.mass / (d.mass + c.mass);
-    c.vx += (d.vx - c.vx) * k; c.vz += (d.vz - c.vz) * k;
+    // (never driving him backward) and one from behind lets him fall forward.
+    // Being wrapped also breaks his stride: he keeps WRAP_KEEP of his speed.
+    const speed = Math.hypot(c.vx, c.vz), ux = speed > 1e-6 ? c.vx / speed : 0, uz = speed > 1e-6 ? c.vz / speed : 0;
+    const k = 0.45 * d.mass / (d.mass + c.mass);
+    let vx = c.vx + (d.vx - c.vx) * k, vz = c.vz + (d.vz - c.vz) * k;
+    const back = vx * ux + vz * uz;
+    if (back < 0) { vx -= back * ux; vz -= back * uz; }
+    c.vx = vx * WRAP_KEEP; c.vz = vz * WRAP_KEEP;
     c.juke = null; c.cutting = false;
     c.action = 'wrapped'; c.actionTime = TACKLE_HOLD;
     d.action = 'tackle'; d.actionTime = 1.0;
