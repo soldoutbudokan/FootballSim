@@ -133,7 +133,7 @@ export function createGeometries() {
       { y: 0.065, w: 0.07, d: 0.074 }, { y: 0.0, w: 0.094, d: 0.099 }, { y: -0.09, w: 0.095, d: 0.1 }, { y: -0.2, w: 0.087, d: 0.093 },
       { y: -0.3, w: 0.077, d: 0.082 }, { y: -0.38, w: 0.066, d: 0.07 }, { y: -0.44, w: 0.059, d: 0.066, z: 0.006 },
       { y: -0.49, w: 0.057, d: 0.066, z: 0.01 }, { y: -0.54, w: 0.054, d: 0.058, z: 0.004 }, { y: -0.585, w: 0.053, d: 0.056 },
-      { y: -0.59, w: 0.047, d: 0.05 },
+      { y: -0.59, w: 0.04, d: 0.043 },
     ], { radial: 16, subdiv: 2, ao: AO.leg }),
     sock: loft([
       { y: -0.07, w: 0.046, d: 0.048 }, { y: -0.115, w: 0.05, d: 0.053, z: -0.003 }, { y: -0.17, w: 0.054, d: 0.06, z: -0.008 },
@@ -216,6 +216,12 @@ export class Rig {
     ];
 
     // Rest pose = bind pose: standing straight, arms hanging, at the origin.
+    // The arm solver points each upper arm's local +Z at the elbow, which
+    // hangs behind him, so the bind arms are turned the same way (half a turn
+    // about their length); otherwise the shoulder blend would average two
+    // orientations 180 degrees apart and pinch the sleeves. Rigid parts look
+    // the same whatever the bind pose.
+    for (const upper of this.uppers) upper.quaternion.setFromAxisAngle(_t.set(0, 1, 0), Math.PI);
     this.root.updateMatrixWorld(true);
     this.bindInverse = this.joints.map(j => j.matrixWorld.clone().invert());
     this.buildParts(geometry, atlas, jersey, look);
@@ -235,12 +241,19 @@ export class Rig {
     const own = this.joints[BONE_INDEX[bone]];
     _local.compose(_t.set(...pos), _q.setFromEuler(_e.set(...rot)), _origin.set(...scale));
     const bind = new THREE.Matrix4().multiplyMatrices(own.matrixWorld, _local);
-    const joints = blend.map(([name, radius]) => {
+    const joints = blend.map(([name, radius, crease]) => {
       const other = this.joints[BONE_INDEX[name]];
       // The joint is the origin of whichever bone is the child of the pair.
       const ownIsLower = own.parent === other;
-      const pivot = ownIsLower ? own : other;
-      return { y: _t.setFromMatrixPosition(pivot.matrixWorld).y, radius, ownIsLower, other: this.boneBase + BONE_INDEX[name] };
+      const pivot = ownIsLower ? own : other, upper = ownIsLower ? other : own;
+      _t.setFromMatrixPosition(pivot.matrixWorld);
+      const j = { x: _t.x, y: _t.y, z: _t.z, radius, ownIsLower, other: this.boneBase + BONE_INDEX[name] };
+      // The fold side of a hinge, given in the upper bone's frame.
+      if (crease) {
+        const dir = _origin.set(0, 0, crease.side).transformDirection(upper.matrixWorld);
+        j.crease = { x: dir.x, z: dir.z, radius: crease.radius };
+      }
+      return j;
     });
     const jointBlend = jointWeights(this.boneBase + BONE_INDEX[bone], joints);
     this.squad.builders[target].add(geometry, {
@@ -286,13 +299,13 @@ export class Rig {
     const armColor = look.armSleeve || look.skin, armSurface = look.armSleeve ? SURFACE.sleeve : SURFACE.skin;
     SIDES.forEach((s, i) => {
       const thigh = 'thigh' + i, shin = 'shin' + i, foot = 'foot' + i, upper = 'upper' + i, fore = 'fore' + i, hand = 'hand' + i;
-      body(thigh, geometry.leg, { scale: [limb, d.k, limb], color: TEAM.silver, surface: SURFACE.pants, uv: plain, blend: [['pelvis', 0.08], [shin, 0.09]] });
-      body(shin, geometry.sock, { scale: [limb, d.k, limb], color: TEAM.sock, surface: SURFACE.sock, uv: plain, blend: [[thigh, 0.09], [foot, 0.05]] });
+      body(thigh, geometry.leg, { scale: [limb, d.k, limb], color: TEAM.silver, surface: SURFACE.pants, uv: plain, blend: [['pelvis', 0.08, { side: 1, radius: 0.035 }], [shin, 0.09, { side: -1, radius: 0.03 }]] });
+      body(shin, geometry.sock, { scale: [limb, d.k, limb], color: TEAM.sock, surface: SURFACE.sock, uv: plain, blend: [[thigh, 0.09, { side: -1, radius: 0.03 }], [foot, 0.05]] });
       body(foot, geometry.cleat, { scale: [1, d.k, d.k], color: look.cleat, surface: SURFACE.cleat, uv: plain, blend: [[shin, 0.04]] });
 
-      body(upper, geometry.upperArm, { scale: [limb, d.k, limb], color: armColor, surface: armSurface, uv: plain, blend: [['chest', 0.08], [fore, 0.06]] });
+      body(upper, geometry.upperArm, { scale: [limb, d.k, limb], color: armColor, surface: armSurface, uv: plain, blend: [['chest', 0.08], [fore, 0.06, { side: -1, radius: 0.025 }]] });
       body(upper, geometry.sleeve, { scale: [limb ** 0.7, d.k, limb ** 0.7], color: jersey, uv: plain, blend: [['chest', 0.08]] });
-      body(fore, geometry.forearm, { scale: [limb, d.k, limb], color: armColor, surface: armSurface, uv: plain, blend: [[upper, 0.06], [hand, 0.03]] });
+      body(fore, geometry.forearm, { scale: [limb, d.k, limb], color: armColor, surface: armSurface, uv: plain, blend: [[upper, 0.06, { side: -1, radius: 0.025 }], [hand, 0.03]] });
       if (look.tape) body(fore, geometry.tape, { scale: [limb, d.k, limb], color: '#f3f2ec', surface: SURFACE.tape, uv: plain, blend: [[hand, 0.03]], detail: true });
       body(hand, i === 0 ? geometry.gloveL : geometry.gloveR, { scale: [limb ** 0.5, d.k, limb ** 0.5], color: look.glove, surface: SURFACE.glove, uv: plain, blend: [[fore, 0.03]] });
     });

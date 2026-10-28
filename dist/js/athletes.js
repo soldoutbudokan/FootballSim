@@ -98,7 +98,11 @@ export class Athletes {
       byId: this.byId, rigs: this.rigs, animators: this.animators,
       holderId, carrierId: state.carrier, qbId: this.qbId,
       pocket: holderId === this.qbId && state.phase === 'live' && !!qb && qb.z < (state.spot ?? 35) + 0.3,
+      // Where the ball was when a pass was caught: the snapshot already puts
+      // it in the receiver's hands, the hands still have to meet it there.
+      catchFrom: this.lastPhase === 'air' && state.phase !== 'air' ? this.ball.position.clone() : null,
     };
+    this.lastPhase = state.phase;
     this.anticipateCatches(ctx);
     return ctx;
   }

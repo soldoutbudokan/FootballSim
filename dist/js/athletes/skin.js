@@ -105,15 +105,30 @@ export class SkinnedGeometryBuilder {
 // Joint blending. A joint between an upper bone and a lower bone sits at a
 // bind-space height; vertices within `radius` of it are shared between the
 // two bones (50/50 exactly at the joint), so both sides deform as one surface.
+// A hinge (knee, elbow, the front of the hip) folds on one side: there the
+// blend narrows to `crease.radius` so the fold stays a tight crease instead of
+// the upper bone's surface sticking out past the lower one.
 
 export function jointWeights(own, joints) {
   return p => {
     for (const j of joints) {
       const s = j.y - p.y;                 // > 0 below the joint
-      if (Math.abs(s) >= j.radius) continue;
-      const lower = smoothstep(-j.radius, j.radius, s);
-      const other = j.other;
-      return j.ownIsLower ? [own, other, lower] : [own, other, 1 - lower];
+      // Overhang past the joint (a pant leg reaching below the knee, a neck
+      // reaching into the helmet) belongs to the other bone.
+      const across = j.ownIsLower ? s < 0 : s > 0;
+      if (Math.abs(s) >= j.radius) {
+        if (across) return [own, j.other, 0];
+        continue;
+      }
+      let r = j.radius;
+      if (j.crease) {
+        const dx = p.x - j.x, dz = p.z - j.z, len = Math.hypot(dx, dz) || 1;
+        const facing = (dx * j.crease.x + dz * j.crease.z) / len;
+        r += (j.crease.radius - r) * smoothstep(0, 0.7, facing);
+        if (Math.abs(s) >= r) return across ? [own, j.other, 0] : [own, own, 1];
+      }
+      const lower = smoothstep(-r, r, s);
+      return j.ownIsLower ? [own, j.other, lower] : [own, j.other, 1 - lower];
     }
     return [own, own, 1];
   };

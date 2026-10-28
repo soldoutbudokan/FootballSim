@@ -110,7 +110,9 @@ export class Football {
   // the throwing hand during the throw, otherwise tucked along the forearm.
   held(rig, anim, ctx) {
     const W = rig.world, action = anim?.action;
-    const twoHands = action === 'pocket' || action === 'ready' || (action === 'catch' && anim.age < 0.22);
+    // Two hands on the ball only while they are actually together.
+    const together = W.hands[0].distanceTo(W.hands[1]) < 0.3;
+    const twoHands = together && (action === 'pocket' || action === 'ready' || (action === 'catch' && anim.age < 0.22));
     const yaw = rig.root.rotation.y;
     if (action === 'throw') {
       // Ball sits in the fingers of the right hand, nose toward the target.

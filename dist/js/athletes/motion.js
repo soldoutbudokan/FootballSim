@@ -11,7 +11,7 @@ const SIM_ACTIONS = new Set(['ready', 'run', 'cut', 'juke', 'block', 'throw', 'c
 function blendTime(from, to) {
   if (to === 'ready') return 0;
   if (from === 'ready') return 0.24;
-  return { throw: 0.07, catch: 0.1, cut: 0.06, juke: 0.06, tackle: 0.1, down: 0.14, stumble: 0.08, wrapped: 0.1 }[to] ?? 0.16;
+  return { throw: 0.07, catch: 0.04, cut: 0.06, juke: 0.06, tackle: 0.1, down: 0.14, stumble: 0.08, wrapped: 0.1 }[to] ?? 0.16;
 }
 
 const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _v = new THREE.Vector3();
@@ -81,6 +81,7 @@ export class Animator {
     } else {
       this.pose.copy(this.work);
     }
+    this.groundClamp(this.pose);
     this.fresh = false;
     return this.pose;
   }
@@ -243,6 +244,20 @@ export class Animator {
       armAngles(pose, i, d, flex, elbow, abduct, inward);
       pose.wrists[i].set(-0.1 * run, 0, 0);
     }
+  }
+
+  // Keeps a falling or lying body on top of the turf: raises the tilt pivot
+  // until the lowest of the pelvis, chest and helmet surfaces touches the
+  // ground. Upright poses are left alone.
+  groundClamp(pose) {
+    if (Math.abs(pose.tiltPitch) < 0.35 && Math.abs(pose.tiltRoll) < 0.35) return;
+    const d = this.dims, depth = (1 + d.torso) / 2;
+    tiltMatrix(0, 0, 0, pose, _m);
+    chestMatrix(pose, d, _m2).premultiply(_m);
+    let lowest = _v.copy(pose.pelvis).applyMatrix4(_m).y - 0.12 * depth;
+    lowest = Math.min(lowest, _v.set(0, 0.12 * d.k, 0).applyMatrix4(_m2).y - 0.16 * depth);
+    lowest = Math.min(lowest, _v.set(0, d.neck + 0.115, 0.01).applyMatrix4(_m2).y - 0.14);
+    if (lowest < 0) pose.tiltLift -= lowest;
   }
 
   resetLocks() { for (const l of this.locks) l.active = false; }

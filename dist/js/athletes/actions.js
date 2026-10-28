@@ -25,6 +25,18 @@ function tuck(pose, i, weight = 1) {
   pose.wrists[i].lerp(_w.set(0.55, 0, 0), weight);
 }
 
+// Lying on the ground the legs stretch out along the body (feet at full leg
+// length below the hips in the tilt frame), so knees never dig into the turf.
+function legsOut(anim, pose, weight, z = -0.04, lift = 0) {
+  const d = anim.dims, reach = 0.985 * (d.thigh + d.shin);
+  for (let i = 0; i < 2; i++) {
+    _w.set(SIDES[i] * 0.12 + pose.pelvis.x, pose.pelvis.y - reach + lift, z + pose.pelvis.z);
+    pose.feet[i].lerp(_w, weight);
+    pose.footRot[i].x = lerp(pose.footRot[i].x, 0.9, weight);
+    pose.knees[i].lerp(_w.set(SIDES[i] * 0.5, 0, 1), weight);
+  }
+}
+
 // Helper: point in the scene for a snapshot player's body part.
 function bodyPoint(ctx, id, part, out, height = 1.0) {
   const rig = ctx.rigs.get(id);
@@ -37,7 +49,7 @@ export function startAction(anim, action, data, p, ctx) {
   if (action === 'ready') { anim.carryArm = undefined; anim.catchPoint = null; }
   switch (action) {
     case 'catch':
-      data.point = anim.catchPoint ? anim.catchPoint.clone() : null;
+      data.point = ctx.catchFrom ? ctx.catchFrom.clone() : anim.catchPoint ? anim.catchPoint.clone() : null;
       anim.carryArm = undefined;
       carryArm(anim, p);
       break;
@@ -277,10 +289,13 @@ export const ACTIONS = {
       pose.tiltPitch = back * 1.32 * f; pose.tiltFwd = back * 0.2 * fall;
       pose.head.set(data.fallBack ? -0.15 + 1.2 * fall : -0.15 - 0.9 * fall, 0.35, 0);
       if (fall > 0) {
-        for (let i = 0; i < 2; i++) {
-          pose.feet[i].lerp(_c.set(SIDES[i] * 0.15, d.ankle, data.fallBack ? 0.12 : -0.05), fall);
-          pose.footRot[i].x = lerp(pose.footRot[i].x, data.fallBack ? -0.6 : 0.9, fall);
-        }
+        if (data.fallBack) {
+          // Driven onto his back: knees come up, feet stay planted.
+          for (let i = 0; i < 2; i++) {
+            pose.feet[i].lerp(_c.set(SIDES[i] * 0.15, d.ankle, 0.12), fall);
+            pose.footRot[i].x = lerp(pose.footRot[i].x, -0.6, fall);
+          }
+        } else legsOut(anim, pose, fall);
       }
       if (target) {
         for (let i = 0; i < 2; i++) {
@@ -301,10 +316,7 @@ export const ACTIONS = {
     pose.tiltFwd = 0.35 * launch;
     pose.pelvis.y = lerp(d.hipY - 0.2, d.hipY - 0.04, launch);
     pose.hips.x = lerp(0.6, 0.0, launch); pose.spine.x = lerp(0.3, 0.05, launch);
-    for (let i = 0; i < 2; i++) {
-      pose.feet[i].lerp(_c.set(SIDES[i] * 0.13, d.ankle + 0.12 * (1 - ground) * launch, -0.08), launch);
-      pose.footRot[i].x = lerp(pose.footRot[i].x, 0.9, launch);
-    }
+    legsOut(anim, pose, launch, -0.06, 0.1 * (1 - ground));
     pose.head.set(-0.9 * launch, 0.3 * launch, 0);
     if (target) {
       for (let i = 0; i < 2; i++) {
@@ -338,10 +350,7 @@ export const ACTIONS = {
     pose.pelvis.set(0, lerp(lerp(pose.pelvis.y, d.hipY - 0.3, buckle), d.hipY - 0.06, f), 0);
     pose.hips.set(lerp(pose.hips.x + 0.3 * buckle, 0.04, f), 0, 0);
     pose.spine.set(lerp(pose.spine.x, 0.08, f), 0.15 * data.roll * f, 0);
-    for (let i = 0; i < 2; i++) {
-      pose.feet[i].lerp(_c.set(SIDES[i] * 0.13, d.ankle, -0.08), f);
-      pose.footRot[i].x = lerp(pose.footRot[i].x, 0.9, f);
-    }
+    legsOut(anim, pose, f);
     if (data.holding) {
       const i = carryArm(anim, p), j = 1 - i;
       tuck(pose, i);
