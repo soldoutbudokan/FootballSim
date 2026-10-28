@@ -1,5 +1,5 @@
 import { Simulation, STEP, GOAL } from './sim.js';
-import { PLAYS, FORMATION, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES } from './plays.js';
+import { PLAYS, formationFor, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES } from './plays.js';
 import { FieldScene } from './scene.js';
 import { AdaptiveGraphics, PROFILES } from './graphics.js';
 import { FieldAudio } from './audio.js';
@@ -22,6 +22,8 @@ const LIGHTING = [
   { id: 'night', label: 'Under the lights' },
 ];
 const PASS_STYLES = ['timing', 'bullet', 'touch', 'lob'];
+// Keep tap/hold selection, meter fill and its tick marks on the same scale.
+const PASS_CHARGE = { touch: 0.12, bullet: 0.24, full: 0.30 };
 const DOWN_NAMES = ['', '1ST', '2ND', '3RD', '4TH'];
 // Gamepad buttons that pass to receivers 1-5 after the snap: A, X, Y, B, RB.
 const PASS_BUTTONS = [0, 2, 3, 1, 5];
@@ -58,6 +60,8 @@ let inMenu = true, paused = false, started = false, showArt = true;
 let replay = null, charge = null, frameId = 0;
 let activeDialog = null, dialogReturn = null;
 let toastTimer = 0, playFilter = 'all', hotReceiver = 0, menuIndex = 0, padStickLatch = 0;
+let audiblePage = 0;
+const AUDIBLES_PER_PAGE = 8;
 const keys = new Set();
 const touch = { x: 0, z: 0, sprint: false };
 const padMove = { x: 0, z: 0, sprint: false };
@@ -287,7 +291,7 @@ function beginCharge(index) {
 
 function passStyleFor(seconds) {
   if (prefs.passStyle !== 'timing') return prefs.passStyle;
-  return seconds < .17 ? 'lob' : seconds < .43 ? 'touch' : 'bullet';
+  return seconds < PASS_CHARGE.touch ? 'lob' : seconds < PASS_CHARGE.bullet ? 'touch' : 'bullet';
 }
 
 function releaseCharge(index) {
@@ -359,6 +363,7 @@ function openHotRoutes() {
 
 function openAudibles() {
   if (!canAdjust()) return;
+  audiblePage = Math.floor(Math.max(0, PLAYS.findIndex(p => p.id === sim.play.id)) / AUDIBLES_PER_PAGE);
   renderAudibles();
   openDialog('audibles');
 }
@@ -402,13 +407,21 @@ function renderHotRoutes() {
 }
 
 function renderAudibles() {
-  const cards = PLAYS.map((play, i) => {
-    const b = button('option-card', `<kbd>${i + 1}</kbd><div><span>${play.name}</span><small>${play.tag}</small></div>`, () => chooseAudible(play.id));
+  const cards = PLAYS.slice(audiblePage * AUDIBLES_PER_PAGE, (audiblePage + 1) * AUDIBLES_PER_PAGE).map((play, i) => {
+    const b = button('option-card', `<kbd>${i + 1}</kbd><div><span>${play.name}</span><small>${play.formation} · ${play.tag}</small></div>`, () => chooseAudible(play.id));
     b.setAttribute('aria-label', 'Audible ' + (i + 1) + ': ' + play.name);
     b.setAttribute('aria-pressed', String(play.id === sim.play.id));
     return b;
   });
   $('audible-grid').replaceChildren(...cards);
+  $('audible-page').textContent = `Page ${audiblePage + 1} of ${Math.ceil(PLAYS.length / AUDIBLES_PER_PAGE)}`;
+  $('audible-prev').disabled = audiblePage === 0;
+  $('audible-next').disabled = (audiblePage + 1) * AUDIBLES_PER_PAGE >= PLAYS.length;
+}
+
+function changeAudiblePage(step) {
+  audiblePage = clamp(audiblePage + step, 0, Math.ceil(PLAYS.length / AUDIBLES_PER_PAGE) - 1);
+  renderAudibles();
 }
 
 // ---------- Pause ----------
@@ -461,6 +474,7 @@ function closeReplay() {
 // Route diagram on a dark field: 2 px per yard downfield, the line of scrimmage at y = 100.
 function diagram(play) {
   const flip = sim.config.flip;
+  const formation = formationFor(play);
   const map = ([x, z]) => [100 + (flip ? -x : x) * 3.4, 100 - z * 2];
   const fmt = n => n.toFixed(1);
   let svg = '<svg viewBox="0 0 200 122" role="img" aria-label="Route diagram"><rect width="200" height="122" fill="#0e2a26"/>';
@@ -472,7 +486,7 @@ function diagram(play) {
   svg += '<path d="M0 100H200" stroke="#c9ccd1" stroke-opacity=".55" stroke-width="1"/>';
 
   RECEIVERS.forEach((id, i) => {
-    const spec = FORMATION.find(p => p.id === id);
+    const spec = formation.find(p => p.id === id);
     const points = [[spec.x, spec.z], ...play.routes[id]].map(map);
     const color = ROUTE_COLORS[i];
     const blocker = play.type === 'run' && id !== 'R';
@@ -481,13 +495,13 @@ function diagram(play) {
     svg += `<circle cx="${fmt(points[0][0])}" cy="${fmt(points[0][1])}" r="3" fill="${color}"/>`;
   });
   // Offensive line (centre drawn as a square) and the quarterback.
-  for (const spec of FORMATION.filter(p => p.role === 'ol')) {
+  for (const spec of formation.filter(p => p.role === 'ol')) {
     const [x, y] = map([spec.x, spec.z]);
     svg += spec.id === 'C'
       ? `<rect x="${fmt(x - 2.6)}" y="${fmt(y - 2.6)}" width="5.2" height="5.2" fill="none" stroke="#c9ccd1" stroke-width="1.2"/>`
       : `<circle cx="${fmt(x)}" cy="${fmt(y)}" r="2.6" fill="none" stroke="#c9ccd1" stroke-width="1.2"/>`;
   }
-  const qb = FORMATION.find(p => p.id === 'QB');
+  const qb = formation.find(p => p.id === 'QB');
   const [qx, qy] = map([qb.x, qb.z]);
   svg += `<circle cx="${fmt(qx)}" cy="${fmt(qy)}" r="3" fill="#f4f2ec"/></svg>`;
   return svg;
@@ -505,8 +519,11 @@ function routeEnd(points, color, blocker) {
 }
 
 function matchesFilter(play) {
-  if (playFilter === 'all') return true;
-  return playFilter === 'run' ? play.type === 'run' : play.type !== 'run';
+  const typeMatches = playFilter === 'all' || (playFilter === 'run' ? play.type === 'run' : play.type !== 'run');
+  const formationMatches = !$('play-formation-filter').value || play.formation === $('play-formation-filter').value;
+  const query = $('play-search').value.trim().toLowerCase();
+  const searchMatches = !query || `${play.name} ${play.tag} ${play.formation} ${play.family || ''} ${play.read}`.toLowerCase().includes(query);
+  return typeMatches && formationMatches && searchMatches;
 }
 
 function choosePlay(id) {
@@ -521,11 +538,12 @@ function renderPlaybook() {
   const cards = PLAYS.filter(matchesFilter).map(play => {
     const current = play.id === sim.play.id;
     const head = `<div class="play-card-head"><span class="play-tag">${play.tag}</span>${current ? '<span class="play-current">Current</span>' : ''}</div>`;
-    const b = button('play-card' + (current ? ' selected' : ''), `${head}<h3>${play.name}</h3>${diagram(play)}<span class="play-formation">${play.formation}</span>`, () => choosePlay(play.id));
+    const b = button('play-card' + (current ? ' selected' : ''), `${head}<h3>${play.name}</h3>${diagram(play)}<span class="play-formation">${play.formation}</span><span class="play-read">${play.read}</span>`, () => choosePlay(play.id));
     b.setAttribute('aria-label', play.name + ' — ' + play.tag);
     return b;
   });
   $('play-grid').replaceChildren(...cards);
+  $('playbook-results').textContent = cards.length ? `${cards.length} of ${PLAYS.length} plays` : 'No matching plays. Try another formation or search.';
 }
 
 function renderPlayCounts() {
@@ -675,7 +693,7 @@ function updatePassMeter(state, now) {
   if (!charge) return;
   const seconds = (now - charge.started) / 1000;
   const style = passStyleFor(seconds);
-  $('charge-fill').style.height = Math.min(100, seconds / .6 * 100) + '%';
+  $('charge-fill').style.height = Math.min(100, seconds / PASS_CHARGE.full * 100) + '%';
   setText('charge-label', style);
   $('charge').classList.toggle('bullet', style === 'bullet');
   const qb = state.players.find(p => p.id === 'QB');
@@ -687,6 +705,9 @@ function updatePassMeter(state, now) {
 
 // ---------- Static UI setup ----------
 function buildTargets() {
+  const meterTicks = $('charge').querySelectorAll('.meter-tick');
+  meterTicks[0].style.bottom = PASS_CHARGE.touch / PASS_CHARGE.full * 100 + '%';
+  meterTicks[1].style.bottom = PASS_CHARGE.bullet / PASS_CHARGE.full * 100 + '%';
   RECEIVERS.forEach((id, i) => {
     const key = String(i + 1);
     const b = button('target-button', `<strong>${key}</strong>`);
@@ -712,6 +733,7 @@ function buildTargets() {
 
 function buildSettings() {
   PLAYS.forEach(play => $('offense').append(new Option(play.name, play.id)));
+  [...new Set(PLAYS.map(play => play.formation))].forEach(name => $('play-formation-filter').append(new Option(name, name)));
   fillOptions($('lighting'), LIGHTING);
   fillOptions($('camera'), CAMERAS);
   $('graphics').value = prefs.graphics;
@@ -742,6 +764,10 @@ $('result-playbook').onclick = openPlaybook;
 $('random-play').onclick = () => choosePlay('random');
 $('hot-routes-open').onclick = openHotRoutes;
 $('audible-open').onclick = openAudibles;
+$('audible-prev').onclick = () => changeAudiblePage(-1);
+$('audible-next').onclick = () => changeAudiblePage(1);
+$('play-search').oninput = renderPlaybook;
+$('play-formation-filter').onchange = renderPlaybook;
 $('hot-route-reset').onclick = () => applyHotRoute('default');
 $('pause-button').onclick = togglePause;
 $('resume').onclick = closeAllDialogs;
@@ -810,9 +836,13 @@ function dialogKey(e) {
       const route = HOT_ROUTES.find(r => e.code === 'Key' + r.key);
       if (route) { e.preventDefault(); applyHotRoute(route.id); }
     }
-  } else if (activeDialog.id === 'audibles' && /^Digit[1-9]$/.test(e.code)) {
-    const play = PLAYS[Number(e.code.slice(-1)) - 1];
-    if (play) { e.preventDefault(); chooseAudible(play.id); }
+  } else if (activeDialog.id === 'audibles') {
+    if (/^Digit[1-8]$/.test(e.code)) {
+      const play = PLAYS[audiblePage * AUDIBLES_PER_PAGE + Number(e.code.slice(-1)) - 1];
+      if (play) { e.preventDefault(); chooseAudible(play.id); }
+    } else if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+      e.preventDefault(); changeAudiblePage(e.code === 'BracketLeft' ? -1 : 1);
+    }
   }
 }
 

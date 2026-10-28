@@ -159,8 +159,6 @@ kbd {
 .meter-track i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(0deg, var(--silver) 0%, var(--paper) 100%); }
 .pass-meter.bullet .meter-track i { background: linear-gradient(0deg, var(--silver) 0%, var(--accent) 100%); }
 .meter-tick { position: absolute; left: 0; right: 0; height: 1px; background: rgba(9, 26, 45, .9); }
-.meter-tick:nth-of-type(1) { bottom: 28%; }
-.meter-tick:nth-of-type(2) { bottom: 72%; }
 .meter-text { display: flex; flex-direction: column; gap: 3px; padding: 6px 9px; background: rgba(9, 26, 45, .86); border-left: 3px solid var(--target-color, var(--silver)); }
 .meter-text b { font: 800 22px/1 var(--display); color: var(--target-color, var(--paper)); }
 .meter-text span { font: 700 14px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--paper); }
@@ -298,6 +296,10 @@ dialog { color: var(--paper); }
 
 /* Playbook */
 .playbook-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.playbook-filters { display: flex; flex-wrap: wrap; gap: 12px; }
+.playbook-filters label { display: flex; flex: 1 1 210px; min-width: 0; flex-direction: column; gap: 7px; font: 600 14px/1.2 var(--display); color: var(--silver); text-transform: uppercase; letter-spacing: .06em; }
+.playbook-filters input, .playbook-filters select { width: 100%; min-width: 0; height: 40px; padding: 0 10px; border: 1px solid var(--line-strong); background: var(--panel-solid); color: var(--paper); font: 400 15px/1 var(--body); }
+.playbook-results { margin: 12px 0; min-height: 18px; font-size: 13px; color: var(--silver-dim); }
 .tabs { display: flex; }
 .tabs button { height: 36px; padding: 0 16px; font: 700 16px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--silver); border: 1px solid var(--line); }
 .tabs button + button { border-left: 0; }
@@ -319,6 +321,7 @@ dialog { color: var(--paper); }
 .play-card h3 { padding: 5px 12px 10px; font: 800 23px/1 var(--display); text-transform: uppercase; letter-spacing: .01em; color: var(--paper); }
 .play-card svg { display: block; width: 100%; height: auto; }
 .play-card .play-formation { padding: 8px 12px 10px; font: 600 13px/1 var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--silver-dim); }
+.play-card .play-read { padding: 0 12px 13px; font-size: 12px; line-height: 1.45; color: var(--silver); }
 
 /* Hot routes and audibles */
 .receiver-picker { display: flex; gap: 8px; margin-bottom: 22px; }
@@ -335,6 +338,9 @@ dialog { color: var(--paper); }
 .option-card small { display: block; margin-top: 5px; font: 600 13px/1 var(--display); letter-spacing: .1em; color: var(--silver-dim); }
 .audible-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .audible-grid .option-card { justify-content: flex-start; gap: 14px; }
+.audible-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px; font-size: 13px; color: var(--silver); }
+.audible-pagination button:disabled { opacity: .35; cursor: default; }
+.difficulty-note { margin: 2px 0 16px; font-size: 12px; line-height: 1.5; color: var(--silver-dim); }
 
 /* Settings */
 .settings-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 0 34px; }

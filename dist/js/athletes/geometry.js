@@ -51,15 +51,16 @@ function weldSeam(geometry, rows, cols) {
 // running from the first key (0) to the last (1) and t the angle around the
 // loft (0 = +X). Keys may run up or down (limbs are authored from the joint
 // downwards); `capTop` and `capBottom` always mean the upper and lower end,
-// and faces always point outwards.
-export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom = true, flipU = false, ao = null } = {}) {
+// and faces always point outwards. A partial arc builds a fitted cloth panel
+// (such as a pant stripe); unlike a full tube, its two edges are not welded.
+export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom = true, flipU = false, ao = null, arcStart = 0, arcLength = TAU } = {}) {
   const rings = interpolateRings(keys, subdiv);
   const positions = [], uvs = [], indices = [], colors = [];
   const cols = radial + 1, y0 = rings[0].y, y1 = rings[rings.length - 1].y, span = (y1 - y0) || 1;
   const shade = (v, t) => { const k = ao ? ao(v, t) : 1; colors.push(k, k, k); };
   for (const r of rings) {
     for (let j = 0; j <= radial; j++) {
-      const t = j / radial * TAU, [px, pz] = superellipse(t, r.w, r.d, r.n), v = (r.y - y0) / span;
+      const t = arcStart + j / radial * arcLength, [px, pz] = superellipse(t, r.w, r.d, r.n), v = (r.y - y0) / span;
       positions.push(r.x + px, r.y, r.z + pz);
       uvs.push(flipU ? 1 - j / radial : j / radial, v);
       shade(v, t);
@@ -95,7 +96,7 @@ export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom =
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
-  weldSeam(geometry, rings.length, cols);
+  if (Math.abs(arcLength - TAU) < 1e-6) weldSeam(geometry, rings.length, cols);
   return geometry;
 }
 
@@ -266,24 +267,57 @@ export function helmetVisor({ low = false } = {}) {
   return g;
 }
 
+// A compact head with a jaw, cheekbones and brow. The face stays behind the
+// facemask; its profile is visible through the open cage on unvisored players.
+export function athleteFace({ low = false } = {}) {
+  const head = loft([
+    { y: -0.105, w: 0.035, d: 0.04, z: 0.018, n: 2.5 },
+    { y: -0.084, w: 0.057, d: 0.057, z: 0.013, n: 2.8 },
+    { y: -0.04, w: 0.069, d: 0.07, z: 0.005, n: 2.5 },
+    { y: 0.005, w: 0.078, d: 0.079, n: 2.1 },
+    { y: 0.054, w: 0.074, d: 0.083, z: -0.005 },
+    { y: 0.093, w: 0.061, d: 0.069, z: -0.011 },
+    { y: 0.113, w: 0.028, d: 0.037, z: -0.011 },
+  ], { radial: low ? 8 : 14, subdiv: low ? 1 : 2 });
+  if (low) return head;
+  const nose = ellipsoid(0, -0.004, 0.079, 0.015, 0.029, 0.025, 8, 6);
+  const ears = [-1, 1].map(s => ellipsoid(s * 0.075, -0.002, -0.002, 0.011, 0.024, 0.017, 8, 6));
+  return mergeGeometries([head, nose, ...ears]);
+}
+
+export function faceDetails() {
+  const parts = [];
+  for (const s of [-1, 1]) {
+    parts.push(tint(ellipsoid(s * 0.032, 0.021, 0.075, 0.016, 0.006, 0.004, 8, 4), '#30251f'));
+    // Eye-black strips are subdued and sit on the cheek, below the eye.
+    parts.push(tint(ellipsoid(s * 0.035, 0.004, 0.077, 0.019, 0.005, 0.003, 8, 4), '#302f2b'));
+  }
+  parts.push(tint(ellipsoid(0, -0.051, 0.074, 0.022, 0.003, 0.003, 8, 4), '#60453b'));
+  return mergeGeometries(parts);
+}
+
 // ---------------------------------------------------------------------------
 // Hands and feet
 
 // Left glove: palm faces +X, thumb on the -Z side, fingers along -Y.
 export function glove({ low = false } = {}) {
-  const detail = low ? { radial: 6, subdiv: 1 } : { radial: 8, subdiv: 2 };
+  const detail = low ? { radial: 6, subdiv: 1 } : { radial: 10, subdiv: 2 };
+  // Relaxed cupped hand: a broad palm, visible knuckles and softly curled
+  // fingers. The palm has real thickness so it does not disappear edge-on.
   const hand = loft([
-    { y: 0.012, w: 0.02, d: 0.03 },
-    { y: -0.02, w: 0.024, d: 0.039 },
-    { y: -0.07, w: 0.024, d: 0.045, n: 2.4 },
-    { y: -0.115, w: 0.02, d: 0.043, n: 2.6 },
-    { y: -0.165, w: 0.016, d: 0.037, n: 2.4 },
-    { y: -0.188, w: 0.009, d: 0.024 },
+    { y: 0.012, w: 0.026, d: 0.029 },
+    { y: -0.018, w: 0.03, d: 0.041 },
+    { y: -0.056, w: 0.033, d: 0.05, n: 2.3 },
+    { y: -0.096, w: 0.033, d: 0.049, x: 0.003, n: 2.5 },
+    { y: -0.133, w: 0.029, d: 0.043, x: 0.011, n: 2.3 },
+    { y: -0.158, w: 0.022, d: 0.036, x: 0.019 },
+    { y: -0.174, w: 0.01, d: 0.024, x: 0.024 },
   ], detail);
   const thumb = loft([
-    { y: 0, w: 0.014, d: 0.016 }, { y: -0.04, w: 0.012, d: 0.013 }, { y: -0.068, w: 0.006, d: 0.007 },
+    { y: 0, w: 0.017, d: 0.018 }, { y: -0.035, w: 0.014, d: 0.016 },
+    { y: -0.062, w: 0.01, d: 0.011 }, { y: -0.074, w: 0.005, d: 0.007 },
   ], detail);
-  thumb.rotateX(-0.55); thumb.rotateZ(-0.25); thumb.translate(0.01, -0.035, -0.035);
+  thumb.rotateX(-0.55); thumb.rotateZ(-0.38); thumb.translate(0.014, -0.028, -0.039);
   const g = mergeGeometries([hand, thumb]);
   g.computeVertexNormals();
   return g;

@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { FORMATION, RECEIVERS, ROUTE_COLORS, routeFor } from '../plays.js';
+import { formationFor, RECEIVERS, ROUTE_COLORS, routeFor } from '../plays.js';
 import { canvasTexture } from './common.js';
 
 // Pre-snap route art painted on the grass: dashed ribbons with arrowheads in
@@ -79,7 +79,7 @@ export function rebuildPlayArt(group, play, spot, flip) {
     child.material?.dispose();
   }
   RECEIVERS.forEach((id, i) => {
-    const start = FORMATION.find(p => p.id === id);
+    const start = formationFor(play).find(p => p.id === id);
     const route = routeFor(play, id, spot, flip);
     const points = [
       new THREE.Vector3(flip ? -start.x : start.x, 0.03, -(spot + start.z)),
