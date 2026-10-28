@@ -1027,6 +1027,11 @@ export class Simulation {
     this.deadTime += dt;
     for (const p of this.players) {
       p.juke = null;
+      // Short moves run out; the downed carrier and his tacklers stay down,
+      // and blocks are released a moment after the whistle.
+      p.actionTime = Math.max(0, p.actionTime - dt);
+      if (!p.actionTime && p.action !== 'down' && p.action !== 'tackle') p.action = this.restingAction(p);
+      if (this.deadTime > 0.4) p.engaged = null;
       const grounded = p.action === 'down' || p.action === 'tackle';
       moveBody(p, 0, 0, dt, { brakeScale: grounded ? 1.6 : 0.6 });
       p.cutting = false;

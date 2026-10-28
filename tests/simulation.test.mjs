@@ -286,3 +286,11 @@ test('an interceptor keeps the ball after the whistle',()=>{
   s.ball={x:d.x,y:1.4,z:d.z,vx:0,vy:0,vz:0};s.pass={receiver:'X',target:{x:d.x,z:d.z,y:1.4},elapsed:.5,duration:1};s.step(STEP);
   assert.equal(s.result.kind,'interception');advance(s,1);assert.ok(s.ball.y>1&&Math.hypot(s.ball.x-d.x,s.ball.z-d.z)<.5);
 });
+
+test('after the whistle players pull up, blocks release and the tackled carrier stays down',()=>{
+  const s=practice(7);s.snap();advance(s,12);assert.equal(s.result.kind,'sack');
+  const tackler=s.byId[s.tackler];advance(s,1.5);
+  assert.equal(s.byId.QB.action,'down');assert.equal(tackler.action,'tackle');
+  assert.ok(s.players.every(p=>p.engaged===null));assert.ok(s.players.every(p=>Math.hypot(p.vx,p.vz)<.05),'everyone has stopped');
+  assert.ok(s.players.every(p=>!['cut','juke','throw','catch','block','stumble'].includes(p.action)));
+});
