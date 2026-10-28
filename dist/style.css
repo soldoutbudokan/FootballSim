@@ -450,8 +450,11 @@ dialog { color: var(--paper); }
   .snap-area { gap: 8px; }
   .snap-button { width: 136px; height: 56px; justify-content: center; font-size: 26px; }
   .snap-button kbd { display: none; }
-  .targets { bottom: calc(200px + var(--safe-bottom)); gap: 5px; }
-  .target-button { width: 50px; height: 46px; }
+  /* Pass buttons: a column on the right edge, 1 at the top, within reach of
+     the right thumb: above Snap before the snap, above Juke/Sprint during
+     the play, with Throw away beside the bottom of the column. */
+  .targets { left: auto; right: var(--gutter); transform: none; flex-direction: column; gap: 6px; bottom: calc(94px + var(--safe-bottom)); }
+  .target-button { width: 56px; height: 46px; }
   .field-strip { width: 136px; height: 30px; }
 
   .result-main { flex-direction: row; }
@@ -488,8 +491,8 @@ dialog { color: var(--paper); }
   .touch-actions { right: 12px; gap: 6px; }
   .touch-actions button { min-width: 58px; padding: 0 8px; font-size: 16px; }
   #touch-sprint { min-width: 72px; }
-  .touch-active.playing .targets { bottom: calc(152px + var(--safe-bottom)); }
-  .touch-active.playing .snap-area { bottom: calc(210px + var(--safe-bottom)); }
+  .touch-active.playing .targets { bottom: calc(92px + var(--safe-bottom)); }
+  .touch-active.playing .snap-area { right: calc(var(--gutter) + 64px); bottom: calc(92px + var(--safe-bottom)); }
 }
 
 /* ---------- Short landscape (phones held sideways) ---------- */
