@@ -153,16 +153,21 @@ export class CameraDirector {
     };
   }
 
-  // Dead ball: hold the last framing and push in slowly.
+  // Dead ball: hold the last framing, settle the look onto the ball (the
+  // pile, the receiver, the spot where the pass landed) and push in slowly
+  // toward it. Pushing toward the old look-at point, 12 yd downfield, would
+  // carry the camera over the tackle and frame empty grass.
   deadPose(pose, state) {
     if (!this.hold) this.hold = { position: this.position.clone(), target: this.target.clone(), fov: this.fov };
-    const push = Math.min(0.28, (state.deadTime || 0) * 0.07);
-    return {
-      position: this.hold.position.clone().lerp(this.hold.target, push),
-      target: this.hold.target.clone(),
-      fov: this.hold.fov,
-      smooth: 0.6,
-    };
+    const t = state.deadTime || 0, b = state.ball;
+    const focus = new THREE.Vector3(b.x, clamp(b.y, 0.6, 1.4), b.z);
+    const settle = Math.min(1, t / 1.2);
+    const target = this.hold.target.clone().lerp(focus, 0.85 * settle * settle * (3 - 2 * settle));
+    const position = this.hold.position.clone();
+    const reach = position.distanceTo(focus);
+    const push = Math.min(0.22, t * 0.06) * clamp((reach - 6) / reach, 0, 1);
+    position.lerp(focus, push);
+    return { position, target, fov: this.hold.fov, smooth: 0.6 };
   }
 
   // --- broadcast: sideline press box, long lens -----------------------------
