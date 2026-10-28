@@ -243,11 +243,24 @@ export const ACTIONS = {
   catch(anim, pose, age, data, p, ctx) {
     const i = carryArm(anim, p), j = 1 - i;
     const secure = smoothstep(0.04, 0.26, age);
+    // The shoulders stay turned to where the ball arrived (a ball thrown
+    // across or over the shoulder), then square up as it comes in.
+    if (data.twist === undefined) {
+      data.twist = 0;
+      if (data.point) {
+        anim.worldToTilt(pose, data.point, _a);
+        data.twist = clamp(Math.atan2(_a.x, Math.max(0.05, _a.z)), -0.8, 0.8);
+      }
+    }
+    pose.spine.y += data.twist * (1 - secure);
     if (!data.local) {
+      const twisted = _w.copy(pose.spine);
+      pose.spine.y += data.twist * secure;            // full twist for the meeting point
       data.local = data.point ? anim.worldToChest(pose, data.point, new THREE.Vector3()) : new THREE.Vector3(0, 0.2, 0.42);
-      // Never further than the arms reach, never behind the chest.
-      data.local.z = Math.max(0.18, data.local.z);
-      const reach = 0.9 * (anim.dims.upperArm + anim.dims.forearm);
+      pose.spine.copy(twisted);
+      // Never further than the arms reach, never behind the shoulders.
+      data.local.z = Math.max(0.02, data.local.z);
+      const reach = 0.92 * (anim.dims.upperArm + anim.dims.forearm);
       const sh = _d.set(0, anim.dims.shoulder[1], 0), off = data.local.clone().sub(sh);
       if (off.length() > reach) data.local.copy(sh).addScaledVector(off.normalize(), reach);
     }

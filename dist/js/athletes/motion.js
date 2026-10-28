@@ -9,9 +9,11 @@ const DURATIONS = { throw: 0.4, catch: 0.45, juke: 0.45, cut: 0.2, tackle: 1.0, 
 const SIM_ACTIONS = new Set(['ready', 'run', 'cut', 'juke', 'block', 'throw', 'catch', 'carry', 'wrapped', 'tackle', 'down', 'stumble']);
 
 function blendTime(from, to) {
-  if (to === 'ready') return 0;
+  // The catch starts exactly where the reach for the ball left the hands
+  // (the reach itself disappears once the pass is complete), so it cuts in.
+  if (to === 'ready' || to === 'catch') return 0;
   if (from === 'ready') return 0.24;
-  return { throw: 0.07, catch: 0.04, cut: 0.06, juke: 0.06, tackle: 0.1, down: 0.14, stumble: 0.08, wrapped: 0.1 }[to] ?? 0.16;
+  return { throw: 0.07, cut: 0.06, juke: 0.06, tackle: 0.1, down: 0.14, stumble: 0.08, wrapped: 0.1 }[to] ?? 0.16;
 }
 
 const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _v = new THREE.Vector3();
