@@ -20,7 +20,11 @@ test('repeat-spot practice retains the configured location after a gain',()=>{co
 test('touchdowns and out-of-bounds terminate a rep exactly once',()=>{const s=practice(1);s.snap();s.phase='run';s.carrier='R';s.byId.R.z=110.1;s.step(STEP);assert.equal(s.result.kind,'touchdown');assert.equal(s.stats.td,1);const yards=s.stats.yards;s.finish('Tackled',99,'tackle');assert.equal(s.stats.yards,yards);const out=practice(1);out.snap();out.byId.QB.x=27;out.step(STEP);assert.equal(out.result.kind,'out');});
 test('seeded simulation is independent of how a fixed number of steps is grouped',()=>{const a=practice(123),b=practice(123);a.snap();b.snap();for(let i=0;i<120;i++){a.step(STEP);a.step(STEP);}for(let i=0;i<240;i++)b.step(STEP);assert.deepEqual(a.snapshot(),b.snapshot());});
 test('all plays and defensive looks remain finite and terminate',()=>{for(const p of PLAYS)for(const coverage of ['cover2','cover3','man','blitz']){const s=practice(42);s.configure({coverage});s.selectPlay(p.id);s.snap();let thrown=false;for(let i=0;i<2900&&s.phase!=='dead';i++){if(s.time>1.8&&!thrown&&p.type!=='run'){s.requestThrow('X','touch');thrown=true;}s.step(STEP,{z:s.phase==='run'?1:0,sprint:s.phase==='run'});}assert.equal(s.phase,'dead',p.id+' '+coverage);for(const p of s.players)assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.z));}});
-test('juke cooldown and stamina prevent unlimited moves',()=>{const s=practice(1);s.snap();assert.equal(s.juke(1),true);assert.equal(s.juke(1),false);assert.ok(s.byId.QB.stamina<1);});
+test('juke cooldown and stamina prevent unlimited moves',()=>{
+  // A juke is a plant off momentum, so it needs the carrier moving (> 2 yd/s); the cooldown is the 0.45 s move itself.
+  const s=practice(1);s.snap();assert.equal(s.juke(1),false);advance(s,1,{x:1,sprint:true});
+  assert.equal(s.juke(1),true);assert.equal(s.juke(1),false);assert.ok(s.byId.QB.stamina<1);
+});
 
 test('default practice draws offense and defense again for each new rep',()=>{
   const s=new Simulation(2026),offenses=new Set(),defenses=new Set();
@@ -73,4 +77,239 @@ test('the same defensive call varies its front between reps and stays set during
   const s=new Simulation(91,{offense:'mesh',coverage:'cover3'}),fronts=new Set(),positions=new Set();
   for(let i=0;i<30;i++){fronts.add(s.defensiveFront);positions.add(s.byId.DE1.x);const x=s.byId.DE1.x;s.setHotRoute('X','curl');s.reset();assert.equal(s.byId.DE1.x,x);s.snap();s.finish('Incomplete',0,'incomplete');s.next();}
   assert.equal(fronts.size,4);assert.ok(positions.size>4);
+});
+
+// ---------------------------------------------------------------------------
+// Movement model (plan 4.1-4.3 and acceptance 6.3).
+
+// A back running free: the zone handoff is done and the defense is moved far away.
+function openField(seed=1){
+  const s=new Simulation(seed,{offense:'zone',coverage:'cover3'});
+  s.snap();advance(s,.8,{z:1});
+  for(const d of s.defense){d.x=d.x<0?-26:26;d.z=s.spot+45;d.vx=d.vz=0;}
+  return s;
+}
+const speedOf=p=>Math.hypot(p.vx,p.vz);
+
+test('a sprinting back needs over half a second to reverse and keeps moving forward over a yard first',()=>{
+  const s=openField(),r=s.byId.R;advance(s,2,{z:1,sprint:true});
+  assert.ok(r.vz>7.5,'at speed before the reversal');
+  const z0=r.z,t0=s.time;let stopped=null,furthest=z0;
+  for(let i=0;i<240&&stopped===null;i++){s.step(STEP,{z:-1,sprint:true});furthest=Math.max(furthest,r.z);if(r.vz<=0)stopped=s.time-t0;}
+  assert.ok(stopped>.5,'took '+stopped+' s to stop');assert.ok(furthest-z0>1,'drifted '+(furthest-z0)+' yd forward');
+  advance(s,1,{z:-1,sprint:true});assert.ok(r.vz<-3,'then runs the other way');
+});
+
+test('a sharp change of direction at speed plants with a cut action and event, and costs speed',()=>{
+  const s=openField(),r=s.byId.R;advance(s,2,{z:1,sprint:true});s.drainEvents();
+  const before=speedOf(r);let slowest=before,cut=false;
+  for(let i=0;i<60;i++){s.step(STEP,{x:1,sprint:true});slowest=Math.min(slowest,speedOf(r));if(r.action==='cut')cut=true;}
+  assert.ok(s.drainEvents().includes('cut'));assert.ok(cut);assert.ok(slowest<before*.7,'slowed to '+slowest);
+  advance(s,.8,{x:1,sprint:true});assert.ok(r.vx>6,'explodes out of the cut');assert.ok(Math.abs(r.vz)<1);
+});
+
+test('three jukes within 1.5 s all succeed without a stun, momentum-consistent and paid for in speed',()=>{
+  const s=openField(),r=s.byId.R;advance(s,1.5,{z:1,sprint:true});
+  const results=[],start=s.time;let biggestJump=0,last={x:r.vx,z:r.vz};
+  for(let k=0;k<3;k++){
+    results.push(s.juke(k%2?-1:1));assert.equal(r.action,'juke');assert.equal(r.actionTime,.45);
+    for(let i=0;i<54;i++){s.step(STEP,{z:1,sprint:true});biggestJump=Math.max(biggestJump,Math.hypot(r.vx-last.x,r.vz-last.z));last={x:r.vx,z:r.vz};}
+  }
+  assert.deepEqual(results,[true,true,true]);assert.ok(s.time-start<=1.5);
+  assert.ok(biggestJump<.4,'velocity changed by '+biggestJump+' in one step');assert.ok(r.stamina<1);
+  assert.ok(s.players.every(p=>!('stun' in p)));
+});
+
+test('a juke moves the carrier sideways by half his speed plus 2.5 yd/s and drops forward speed',()=>{
+  const s=openField(),r=s.byId.R;advance(s,1.5,{z:1,sprint:true});
+  const v=speedOf(r);assert.equal(s.juke(1),true);advance(s,.25,{z:1,sprint:true});
+  assert.ok(Math.abs(r.vx-(.5*v+2.5))<.6,'lateral '+r.vx);assert.ok(Math.abs(r.vz-.65*v)<.6,'forward '+r.vz);
+  assert.ok(s.snapshot().players.find(p=>p.id==='R').lean>.5,'leans into the juke');
+});
+
+test('a tired carrier can still juke',()=>{
+  const s=openField(),r=s.byId.R;advance(s,1,{z:1,sprint:true});r.stamina=0;
+  assert.equal(s.juke(-1),true);assert.equal(r.stamina,0);
+});
+
+test('a receiver slows below 70 % of top speed into a 90° break and recovers afterwards',()=>{
+  const s=practice(3);s.setHotRoute('Y','out');s.snap();const y=s.byId.Y,breakAt=y.route[0];
+  let stem=0,atBreak=Infinity,after=0;
+  for(let i=0;i<480;i++){
+    s.step(STEP);const v=speedOf(y),d=Math.hypot(y.x-breakAt.x,y.z-breakAt.z);
+    if(y.routeIndex===0&&d>3)stem=Math.max(stem,v);
+    if(d<1.2)atBreak=Math.min(atBreak,v);
+    if(y.routeIndex===1&&d>3)after=Math.max(after,v);
+  }
+  assert.ok(stem>.8*y.top,'full speed on the stem: '+stem);
+  assert.ok(atBreak<.7*y.top,'speed at the break '+atBreak);
+  assert.ok(after>atBreak+2.5,'recovers to '+after);
+});
+
+test('a pro defender reacts to where the carrier was 0.28 s ago and leads him toward an intercept',()=>{
+  const s=openField(),r=s.byId.R,d=s.byId.SS,history=[];
+  advance(s,.6,{z:1,sprint:true});d.x=r.x+6;d.z=r.z+14;d.vx=d.vz=0;d.turned=true;
+  for(let i=0;i<60;i++){s.step(STEP,{z:1,sprint:true});history.push({t:s.time,z:r.z});}
+  const lag=s.time-d.seen.t;assert.ok(Math.abs(lag-.28)<STEP*1.5,'lag '+lag);
+  const then=history.find(h=>Math.abs(h.t-d.seen.t)<1e-6);assert.ok(then&&Math.abs(then.z-d.seen.z)<1e-6);
+  assert.ok(r.z-d.seen.z>1.5,'the carrier has moved on since');assert.ok(d.aim.z>d.seen.z,'aims ahead of what he saw');
+  for(const [level,latency] of [['rookie',.4],['allpro',.18]])assert.equal(new Simulation(1,{difficulty:level}).byId.FS.latency,latency);
+});
+
+test('a well-timed cutback makes a closing defender overrun; a straight runner is tackled',()=>{
+  const run=cutAt=>{
+    const s=openField(11),r=s.byId.R;advance(s,1.4,{z:1,sprint:true});
+    const d=s.byId.SS;d.x=r.x+7;d.z=r.z+11;d.vx=-3;d.vz=-6;d.turned=true;
+    let cut=false,closest=Infinity;
+    for(let i=0;i<260&&s.phase!=='dead';i++){
+      const gap=Math.hypot(d.x-r.x,d.z-r.z);if(gap<cutAt)cut=true;closest=Math.min(closest,gap);
+      s.step(STEP,cut?{x:1,z:.25,sprint:true}:{z:1,sprint:true});
+    }
+    return {s,closest};
+  };
+  const straight=run(-1);assert.ok(['tackle','dead'].includes(straight.s.phase)&&straight.closest<.95);
+  const cutback=run(5);assert.ok(cutback.closest>.95,'stayed out of reach: '+cutback.closest);assert.equal(cutback.s.phase,'run');
+});
+
+test('a tackle drags 0-3 yards after contact and the rep ends within 1.2 s of contact',()=>{
+  for(const approach of ['head-on','from behind','from the side']){
+    const s=openField(2),r=s.byId.R,d=s.byId.LB2;advance(s,1.2,{z:1,sprint:true});
+    s.random=()=>0;d.turned=true;
+    if(approach==='head-on'){d.x=r.x;d.z=r.z+8;d.vx=0;d.vz=-5;}
+    else if(approach==='from behind'){d.x=r.x+.3;d.z=r.z-2.5;d.vx=0;d.vz=9.4;d.top=d.speed=10;}
+    else {d.x=r.x+6;d.z=r.z+5;d.vx=-6;d.vz=0;}
+    let contact=null;
+    for(let i=0;i<600&&s.phase!=='dead';i++){
+      s.step(STEP,{z:1,sprint:true});
+      if(!contact&&s.phase==='tackle'){contact={t:s.time,z:r.z};assert.equal(r.action,'wrapped');assert.equal(d.action,'tackle');assert.ok(s.drainEvents().includes('tackle'));}
+    }
+    assert.ok(contact,approach+' made contact');assert.equal(s.result.kind,'tackle');
+    const yac=r.z-contact.z;assert.ok(yac>=0&&yac<=3,approach+' yards after contact '+yac);
+    assert.ok(s.result.time-contact.t<=1.2,approach+' ended '+(s.result.time-contact.t)+' s after contact');
+    assert.equal(r.action,'down');assert.ok(Math.abs(s.result.yards-Math.round(r.z-s.spot))<=1);
+  }
+});
+
+test('a missed tackle makes the tackler stumble at 30 % speed and costs the carrier 20 %',()=>{
+  const s=openField(2),r=s.byId.R,d=s.byId.LB2;advance(s,1.2,{z:1,sprint:true});
+  s.random=()=>.999;d.turned=true;d.x=r.x+.2;d.z=r.z+3;d.vx=0;d.vz=-4;
+  let before=null;
+  for(let i=0;i<120&&d.action!=='stumble';i++){before=speedOf(r);s.step(STEP,{z:1,sprint:true});}
+  assert.equal(d.action,'stumble');assert.equal(s.phase,'run');assert.ok(s.drainEvents().includes('broken-tackle'));
+  assert.ok(speedOf(r)<before*.85,'carrier slowed from '+before+' to '+speedOf(r));
+  assert.ok(Math.abs(d.actionTime-.7)<.02);
+  advance(s,.3,{z:1,sprint:true});assert.ok(speedOf(d)<.31*d.top+.1,'stumbling defender is slow');
+  assert.equal(s.phase,'run','one attempt per contact');
+});
+
+test('a sacked quarterback is wrapped behind the line and the sack is counted once',()=>{
+  const s=practice(7);s.snap();advance(s,12);assert.equal(s.result.kind,'sack');assert.equal(s.stats.sacks,1);
+  assert.equal(s.byId.QB.action,'down');assert.ok(s.result.yards<=0);
+});
+
+test('a dropped pass ends the rep incomplete with a drop event and the ball falls loose',()=>{
+  const s=practice(42);s.snap();advance(s,1.8);assert.equal(s.requestThrow('X','touch'),true);
+  s.random=()=>0;let events=[];
+  for(let i=0;i<400&&s.phase!=='dead';i++){s.step(STEP);events.push(...s.drainEvents());}
+  assert.equal(s.result.kind,'incomplete');assert.equal(s.result.label,'Dropped');assert.ok(events.includes('drop'));
+  assert.equal(s.completed,false);assert.equal(s.stats.completions,0);assert.equal(s.carrier,null);
+  for(let i=0;i<240;i++)s.step(STEP);
+  assert.ok(Math.abs(s.ball.y-.1)<1e-9);assert.deepEqual([s.ball.vx,s.ball.vy,s.ball.vz],[0,0,0]);
+});
+
+test('throw timing matches the scene contract and the ball carries its flight velocity',()=>{
+  const s=practice(42);s.snap();advance(s,1.8);const t=s.time;assert.equal(s.requestThrow('X','bullet'),true);
+  assert.equal(s.byId.QB.action,'throw');assert.equal(s.byId.QB.actionTime,.4);
+  let released=null;
+  for(let i=0;i<60&&released===null;i++){s.step(STEP);if(s.phase==='air')released=s.time-t;}
+  assert.ok(Math.abs(released-.23)<STEP*1.5,'released after '+released);
+  assert.ok(Math.abs(s.byId.QB.actionTime-(.4-released))<STEP*1.5,'the throw action is not restarted at release');
+  const b=s.snapshot().ball;assert.ok(Math.hypot(b.vx,b.vz)>20);
+  for(let i=0;i<400&&s.phase==='air';i++)s.step(STEP);
+  if(s.phase==='run'){const held=s.snapshot().ball;assert.deepEqual([held.vx,held.vy,held.vz],[0,0,0]);assert.equal(s.byId[s.carrier].action,'catch');}
+});
+
+test('the snapshot carries speed, lean, backpedal and the tackle phase fields of the scene contract',()=>{
+  const s=openField(),r=s.byId.R;advance(s,1,{z:1,sprint:true});s.juke(1);advance(s,.1,{z:1,sprint:true});
+  const snap=s.snapshot();assert.ok(['presnap','live','air','run','tackle','dead'].includes(snap.phase));
+  for(const key of ['x','y','z','vx','vy','vz'])assert.ok(Number.isFinite(snap.ball[key]),key);
+  assert.deepEqual([snap.ball.vx,snap.ball.vy,snap.ball.vz],[0,0,0],'carried ball has no velocity');
+  for(const p of snap.players){
+    for(const key of ['x','z','vx','vz','facing','speed','lean','actionTime','phase','stamina'])assert.ok(Number.isFinite(p[key]),p.id+' '+key);
+    assert.ok(Math.abs(p.speed-Math.hypot(p.vx,p.vz))<1e-9);assert.ok(p.lean>=-1&&p.lean<=1);assert.equal(typeof p.backpedal,'boolean');
+    assert.ok(p.engaged===null||typeof p.engaged==='string');
+  }
+  assert.equal(snap.players.find(p=>p.id==='R').action,'juke');
+  const pre=practice(1).snapshot();assert.ok(pre.players.every(p=>p.action==='ready'&&p.speed===0));
+  assert.ok(pre.ball.y<.2&&pre.ball.z===35,'the ball lies on the turf at the line before the snap');
+});
+
+test('coverage backs backpedal facing the quarterback, then flip when a receiver threatens them',()=>{
+  const s=new Simulation(5,{offense:'verts',coverage:'cover3'}),cb=s.byId.CB1,qb=s.byId.QB;s.snap();
+  let backpedalled=false,facedQB=true,flippedAt=null;
+  for(let i=0;i<360;i++){
+    s.step(STEP);
+    if(cb.backpedal){backpedalled=true;const toQB=Math.atan2(qb.x-cb.x,qb.z-cb.z);facedQB=facedQB&&Math.abs(Math.atan2(Math.sin(cb.facing-toQB),Math.cos(cb.facing-toQB)))<.35;}
+    if(cb.turned&&flippedAt===null)flippedAt=s.time;
+  }
+  assert.ok(backpedalled&&facedQB);assert.ok(flippedAt>1&&flippedAt<2.8,'flipped at '+flippedAt);
+  assert.ok(Math.abs(cb.facing)<.6,'runs downfield after the flip');assert.ok(cb.z>s.byId.X.z,'stays on top of the go route');
+});
+
+test('the quarterback faces downfield in the pocket and engaged blockers face each other',()=>{
+  const s=practice(7),qb=s.byId.QB;s.snap();advance(s,.5);
+  assert.ok(qb.backpedal,'drops back facing downfield');assert.ok(Math.abs(qb.facing)<1e-6);
+  advance(s,.7);const blocker=s.line.find(o=>o.engaged);assert.ok(blocker,'a lineman is engaged');
+  const d=s.byId[blocker.engaged];assert.equal(d.engaged,blocker.id);assert.equal(blocker.action,'block');
+  const toward=Math.atan2(d.x-blocker.x,d.z-blocker.z),gap=Math.atan2(Math.sin(blocker.facing-toward),Math.cos(blocker.facing-toward));
+  assert.ok(Math.abs(gap)<.3,'blocker squared up');
+  assert.ok(s.requestThrow('A','touch'));advance(s,.1);assert.ok(Math.abs(Math.atan2(s.byId.A.x-qb.x,s.byId.A.z-qb.z)-qb.facing)<.6,'turns to his target to throw');
+});
+
+test('handoffs meet the back at the mesh and both run plays still reach the carrier within 0.8 s',()=>{
+  for(const id of ['zone','stretch'])for(const flip of [false,true]){
+    const s=practice(5);s.config.flip=flip;s.selectPlay(id);s.snap();let gap=null;
+    for(let i=0;i<96&&!s.handoff;i++){s.step(STEP);if(s.handoff)gap=Math.hypot(s.byId.QB.x-s.byId.R.x,s.byId.QB.z-s.byId.R.z);}
+    assert.ok(s.handoff,id);assert.ok(gap<1.3,id+(flip?' flipped':'')+' exchange gap '+gap);assert.equal(s.byId.R.action,'carry');
+  }
+});
+
+test('a safety needs the carrier downed in his own end zone; lining up there is legal',()=>{
+  const s=new Simulation(3,{offense:'mesh',coverage:'cover3',spot:11});s.snap();advance(s,.7);
+  assert.equal(s.phase,'live','quarterback in the end zone after the drop');assert.ok(s.byId.QB.z<=10);
+  const t=new Simulation(3,{offense:'mesh',coverage:'cover3',spot:11});t.snap();advance(t,.5);
+  t.byId.QB.x=27;t.step(STEP);assert.equal(t.result.kind,'safety');
+});
+
+test('an interceptor keeps the ball after the whistle',()=>{
+  const s=practice(4);s.snap();advance(s,.5);s.phase='air';s.carrier=null;s.threw=true;const d=s.byId.FS;
+  s.ball={x:d.x,y:1.4,z:d.z,vx:0,vy:0,vz:0};s.pass={receiver:'X',target:{x:d.x,z:d.z,y:1.4},elapsed:.5,duration:1};s.step(STEP);
+  assert.equal(s.result.kind,'interception');advance(s,1);assert.ok(s.ball.y>1&&Math.hypot(s.ball.x-d.x,s.ball.z-d.z)<.5);
+});
+
+test('after the whistle players pull up, blocks release and the tackled carrier stays down',()=>{
+  const s=practice(7);s.snap();advance(s,12);assert.equal(s.result.kind,'sack');
+  const tackler=s.byId[s.tackler];advance(s,1.5);
+  assert.equal(s.byId.QB.action,'down');assert.equal(tackler.action,'tackle');
+  assert.ok(s.players.every(p=>p.engaged===null));assert.ok(s.players.every(p=>Math.hypot(p.vx,p.vz)<.05),'everyone has stopped');
+  assert.ok(s.players.every(p=>!['cut','juke','throw','catch','block','stumble'].includes(p.action)));
+});
+
+test('a pursuer who cannot close the last yard dives at the carrier',()=>{
+  for(const roll of [0,.999]){
+    const s=openField(2),r=s.byId.R,d=s.byId.FS;advance(s,1.6,{z:1,sprint:true});
+    s.random=()=>roll;d.turned=true;d.x=r.x;d.z=r.z-1.5;d.vx=r.vx;d.vz=r.vz;d.top=r.top;
+    let events=[];
+    for(let i=0;i<60&&!events.some(e=>e==='tackle'||e==='broken-tackle');i++){s.step(STEP,{z:1,sprint:true});events.push(...s.drainEvents());}
+    if(roll===0){assert.ok(events.includes('tackle'),'dive tackle');assert.equal(s.phase,'tackle');assert.equal(d.action,'tackle');}
+    else {assert.ok(events.includes('broken-tackle'),'missed dive');assert.equal(d.action,'stumble');}
+  }
+});
+
+test('a blocked defender comes off his block when the ball carrier runs at him',()=>{
+  const s=practice(5);s.selectPlay('zone');s.snap();advance(s,1);
+  const d=s.defense.find(q=>q.engaged&&q.role==='dl'),r=s.byId.R;assert.ok(d,'a lineman is blocked');
+  r.x=d.x;r.z=d.z-1.4;r.vx=0;r.vz=1;
+  for(let i=0;i<48;i++)s.step(STEP);
+  assert.equal(d.engaged,null,'shed the block');
 });

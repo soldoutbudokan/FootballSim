@@ -1,18 +1,23 @@
 // Distances and route landmarks are in yards, relative to the line of scrimmage.
+// `speed` is each player's top speed in yards/s (sim.js adds the rest of the
+// physical model by role).
 export const RECEIVERS = ['X', 'Y', 'A', 'B', 'R'];
-export const ROUTE_COLORS = ['#6ee7ff', '#ffd16b', '#b6f46c', '#e4a4ff', '#ff9e83'];
+// Receivers 1-5: sky, gold, pink, lavender, coral. Five hues well apart and
+// none of them green, so route art reads on the turf (contrast 2.7-4.4 against
+// #3f6b3a-#4a7a42 grass) and badges read on navy.
+export const ROUTE_COLORS = ['#7ad7ff', '#ffd45e', '#ffa3da', '#cdb8ff', '#ffab85'];
 export const FORMATION = [
-  { id:'QB', number:12, role:'qb', x:0, z:-5, speed:6.5 },
-  { id:'LT', number:72, role:'ol', x:-3.2, z:-.35, speed:4.5 },
-  { id:'LG', number:66, role:'ol', x:-1.6, z:-.35, speed:4.4 },
-  { id:'C', number:60, role:'ol', x:0, z:-.25, speed:4.4 },
-  { id:'RG', number:68, role:'ol', x:1.6, z:-.35, speed:4.4 },
-  { id:'RT', number:75, role:'ol', x:3.2, z:-.35, speed:4.5 },
-  { id:'X', number:11, role:'wr', x:-21, z:0, speed:8.7 },
-  { id:'Y', number:18, role:'wr', x:-10, z:-1.1, speed:8.6 },
-  { id:'A', number:87, role:'te', x:6.4, z:-1.1, speed:7.7 },
-  { id:'B', number:1, role:'wr', x:21, z:0, speed:9 },
-  { id:'R', number:26, role:'rb', x:-3.5, z:-6, speed:8.5 },
+  { id:'QB', number:12, role:'qb', x:0, z:-5, speed:7.6 },
+  { id:'LT', number:72, role:'ol', x:-3.2, z:-.35, speed:7.0 },
+  { id:'LG', number:66, role:'ol', x:-1.6, z:-.35, speed:6.8 },
+  { id:'C', number:60, role:'ol', x:0, z:-.25, speed:6.8 },
+  { id:'RG', number:68, role:'ol', x:1.6, z:-.35, speed:6.8 },
+  { id:'RT', number:75, role:'ol', x:3.2, z:-.35, speed:7.0 },
+  { id:'X', number:11, role:'wr', x:-21, z:0, speed:9.3 },
+  { id:'Y', number:18, role:'wr', x:-10, z:-1.1, speed:9.2 },
+  { id:'A', number:87, role:'te', x:6.4, z:-1.1, speed:8.3 },
+  { id:'B', number:1, role:'wr', x:21, z:0, speed:9.4 },
+  { id:'R', number:26, role:'rb', x:-2.4, z:-5.6, speed:9.0 },
 ];
 export const PLAYS = [
   { id:'mesh', name:'Mesh concept', formation:'GUN · DOUBLES', type:'pass', tag:'SHORT', read:'Read the shallow crossers. Against zone, find the sit route behind the linebackers.', routes:{ X:[[-21,5],[-6,5],[19,5]], Y:[[-10,10],[-4,10]], A:[[6.4,4],[-7,4],[-22,4]], B:[[21,12],[10,24]], R:[[-9,-2],[-16,2],[-21,9]] } },
@@ -22,7 +27,7 @@ export const PLAYS = [
   { id:'drive', name:'Dagger', formation:'GUN · DOUBLES', type:'pass', tag:'INTERMEDIATE', read:'The seam clears the middle. Wait for the deep dig, with the drag as your checkdown.', routes:{ X:[[-21,15],[-5,15],[16,15]], Y:[[-10,15],[-5,42]], A:[[6.4,3],[-6,3],[-22,3]], B:[[21,12],[21,9]], R:[[-8,-1],[-13,5]] } },
   { id:'corners', name:'Smash', formation:'GUN · DOUBLES', type:'pass', tag:'ZONE BEATER', read:'High-low the cornerback. Take the hitch if he sinks; throw the corner if he stays underneath.', routes:{ X:[[-21,6],[-21,4]], Y:[[-10,10],[-22,22]], A:[[6.4,10],[21,23]], B:[[21,6],[21,4]], R:[[0,-2],[0,5]] } },
   { id:'zone', name:'Inside zone', formation:'GUN · DOUBLES', type:'run', tag:'RUN', lane:1.7, read:'Follow the right guard, press the gap, then cut into daylight. Sprint after the line opens.', routes:{ X:[[-21,7]], Y:[[-10,5]], A:[[5,4]], B:[[21,7]], R:[[0,-3],[1.7,1],[2,10],[2,40]] } },
-  { id:'stretch', name:'HB stretch', formation:'GUN · DOUBLES', type:'run', tag:'RUN', lane:-10, read:'Stretch the defense to the left. Cut upfield off the tackle’s outside shoulder.', routes:{ X:[[-21,7]], Y:[[-13,3]], A:[[3,3]], B:[[21,7]], R:[[-6,-4],[-10,-1],[-13,6],[-13,40]] } },
+  { id:'stretch', name:'HB stretch', formation:'GUN · DOUBLES', type:'run', tag:'RUN', lane:10, read:'Stretch the defense to the right. Take the handoff across the quarterback, then cut upfield off the tight end’s outside shoulder.', routes:{ X:[[-21,7]], Y:[[-7,3]], A:[[9,3]], B:[[21,7]], R:[[6,-3.4],[10,-1],[13,6],[13,40]] } },
 ];
 export const COVERAGES = {
   cover3: { label:'Cover 3 sky', description:'Three deep zones · four underneath', rushers:4 },
