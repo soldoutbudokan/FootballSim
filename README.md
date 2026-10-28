@@ -1,81 +1,116 @@
 # FootballSim
 
-An original, offense-only 3D American football practice game for GitHub Pages. Call a play, read a CPU defense, control the quarterback, and take over the ball carrier after a catch or handoff.
+An original, offense-only 3D American football practice game for GitHub Pages. You run reps on an outdoor practice field: call a play, read a CPU defense from a low camera behind the offense, play quarterback, and take over the receiver or running back once he has the ball.
 
 ## Play and publish
 
 Intended Pages address: **https://soldoutbudokan.github.io/FootballSim/**.
 
-One-time repository setup: open **Settings → Pages → Build and deployment → Source → GitHub Actions**. The `Verify FootballSim` workflow runs simulation checks and a Chromium gameplay smoke test. A successful push verification on `main` triggers `Publish GitHub Pages`. After enabling Pages, the publishing workflow can also be run manually from Actions. GitHub Pages is the intended public host; no account or backend is needed to play.
+One-time repository setup: open **Settings → Pages → Build and deployment → Source → GitHub Actions**. The `Verify FootballSim` workflow runs the simulation and graphics tests, the module and asset checks, the release build and a Chromium gameplay test. A successful push verification on `main` triggers `Publish GitHub Pages`, which can also be run by hand from Actions. No account or backend is needed to play.
 
-The release contains all runtime assets, including Three.js 0.180.0 and its MIT license. The build downloads CricSim's renderer from a pinned commit and verifies each file's Git blob hash; subsequent local builds use that verified copy. The published game makes no third-party asset requests. Paths are relative, so it works under `/FootballSim/` and other static subdirectories. The release build versions CSS and the complete JavaScript import graph together to prevent mixed cached releases.
+The release contains every runtime file: Three.js 0.180.0 and its addons, textures, the HDR environment and the interface fonts. All of them are downloaded from pinned commits or tags and hash-verified by `scripts/vendor.mjs`; credits and licences are in `ASSETS.md`. The published game makes no third-party requests. Paths are relative, so it works under `/FootballSim/` or any other static subdirectory, and the build versions CSS and the whole JavaScript import graph together so a browser never mixes two releases.
 
-## Included
+## The practice facility
 
-- 22 articulated players with instanced helmets, facemasks, pads, uniforms and procedural running, blocking, throwing, catching and tackle poses. Photographed grass materials and an HDR reflection environment complement the procedural stadium; asset credits are in `ASSETS.md`.
-- Random offense and defense are selected for each new rep by default. Select a named play to repeat it, or choose **Random every rep** in the playbook/settings to restore random offense.
-- Eight concepts: Mesh, PA Flood, Four Verticals, Quick Slants, Dagger, Smash, Inside Zone and HB Stretch. Flip any play.
-- Pre-snap hot routes (H): choose receiver 1–5, then a streak, slant, drag, in, out, curl, flat or corner. Z opens eight audibles for the current snap. Both preserve drive progress; audibles retain the defensive call.
-- Four CPU defensive looks: Cover 3, Cover 2, 2-man and Cover 0 blitz; optional concealed random coverage. Three difficulty levels. Defensive fronts vary between even, over, under and wide alignments; coverage calls use different corner cushions, safety shells and blitz positions. Two-man keeps two deep safeties, and Cover 0 assigns the five remaining defenders to the five eligible receivers.
-- Acceleration, route landmarks, zone/man pursuit, pass protection, pressure and movement accuracy penalties, ballistic passing, swept catch checks, interceptions, handoffs, sprint stamina, jukes and tackles.
-- Automatic control transfer to the receiver or running back. No defensive player control.
-- Repeat-spot practice hides downs, distance and the first-down line. **Move the chains** enables them, adds a prominent drive display, and tracks gains, first downs, touchdowns and turnover resets.
-- Instant half-speed replay with scrubbing; session passing, rushing, sack, interception and touchdown totals.
-- Broadcast, All-22 and quarterback cameras; afternoon, sunset and stadium-light settings. Keyboard, pointer/touch and standard-mapped gamepad inputs.
-- Synthesized field ambience and snap, catch, whistle and touchdown sounds; opt-in sound control.
+- **Two natural-grass NFL fields** side by side, 120 × 53⅓ yd, with 4-inch lines, 8-inch goal lines, a 6 ft white border, hash marks at the NFL inbound lines (70 ft 9 in from each sideline), sideline ticks, numbers every 10 yards 12 yards in from the sideline with direction arrows, yellow gooseneck goal posts and orange pylons. No midfield logo and no end-zone lettering. The turf is a desaturated natural green with 5-yard mowing stripes, worn grass between the hashes, and paint that lets the grass show through.
+- **Around the field:** a two-storey team building with a glass front and a deep roof overhang behind the offense, a green windscreen fence on chain-link posts, four practice light poles, a scaffold film tower, a scissor lift with a camera platform, a small aluminium bleacher at the 50, and sideline equipment (two-man sled, cones, ball cart, water station, trainer's tent, tackling dummies, benches, a play clock on a trailer) with a few staff figures. Beyond the fence are trees, gentle terrain, a parking lot and a few low buildings. There is no stadium, crowd, skyline or scoreboard.
+- **Sky and light:** the three.js physically based `Sky` with procedural clouds drives the sun and the fog colour. *Afternoon* uses an HDR environment for reflections; *Golden hour* has a low warm sun and long shadows; *Under the lights* uses four pole-light banks with visible pools, the nearest one casting shadows. ACES tone mapping with an exposure per preset.
+- **Shadows:** a tight shadow frustum (about 48 × 48 yd) follows the ball and the controlled player each frame; every player also has a soft contact shadow. Instanced grass tufts with a cheap wind sway grow around the camera on the low views.
+
+## Athletes
+
+Twenty-two procedural athletes built around a 6 ft 2 in frame (linemen taller and 25 % wider): a helmet shell with jaw flaps and ear holes, facemask, chin strap and a few visors, shoulder pads under the jersey, numbers front and back, pants with knee pads, socks, cleats, gloves, towels and tape. Each rig is driven by inverse kinematics and skinned on the GPU, one merged mesh per material for the whole squad.
+
+The team is a fictional navy-and-silver club: navy helmets with a silver stripe, the offense in navy practice jerseys, the defense in white, and the quarterback in the red non-contact jersey.
+
+Animation is procedural and driven by the simulation: stride length and cadence follow speed, the body leans with acceleration and banks into turns, defensive backs backpedal and flip their hips, linemen and backs set in their stances, the quarterback drops, sets and throws through a full motion (the ball leaves the hand 0.23 s into the 0.4 s throw), receivers reach for the ball where it will arrive, carriers tuck it high and tight, and cuts, jukes, blocks, wrap tackles, stumbles and falls each have their own pose. The practice ball is a prolate spheroid with laces and stripes that spirals nose-first along its flight.
+
+## Movement and play
+
+The simulation runs at a fixed 120 Hz, in yards and seconds, on a seeded random number generator.
+
+- **Momentum.** Every player has a top speed, an acceleration curve, braking and lateral grip for his position (receivers and corners about 9.3 yd/s, backs and safeties 9.0, linebackers and tight ends about 8.3, the quarterback 7.6, linemen about 7). Acceleration tapers toward top speed, sideways force is limited by grip, so a fast runner turns on a wide arc and a sharp cut needs him to slow down first. A sprinting back needs about 0.6 s to stop and drifts 2–3 yd forward before he can reverse.
+- **Cuts and jukes.** A change of direction over about 55° at speed is an automatic plant-and-cut: the runner brakes in proportion to the angle, plants and drives out. Q/E jukes are hard lateral plants that need some speed; they chain every 0.45 s and each one costs speed and a little stamina. There is no stun: defenders are beaten by their own momentum and reaction time.
+- **Routes.** Receivers run their stems at full speed and slow into each break according to its angle (a 90° out is taken at about 40 % of top speed), then accelerate out. Throws are aimed with the same movement model, so leading a receiver works.
+- **Defense.** Each defender reacts to where the ball carrier was a moment ago (0.40 s at Rookie, 0.28 s at Pro, 0.18 s at All-pro) and aims at an intercept point, so a well-timed cutback makes a pursuer overrun. Cover 3, Cover 2, 2-man and Cover 0 blitz keep their zone and match rules; backs backpedal facing the quarterback until a receiver threatens them deep, then flip. Linemen engage in pass protection and run blocking and shed blocks when the runner comes close.
+- **Tackling.** A free defender within reach gets one tackle attempt whose odds depend on relative speed, approach angle and whether the carrier has just cut. A tackle wraps the runner and drags him down over 0–2 yards of real yards after contact; a miss leaves the tackler stumbling and costs the carrier some speed. Pursuers who cannot close the last yard dive. Passes can be dropped, more often when contested or when a bullet is thrown from close range. Sacks, interceptions, out of bounds, touchdowns and safeties end the rep.
+- **Practice tools.** Eight concepts (Mesh, PA Flood, Four Verticals, Quick Slants, Dagger, Smash, Inside Zone, HB Stretch) in a shotgun doubles set, each of which can be flipped. Random offense and defense every rep by default; choose a play to repeat it. Pre-snap hot routes (streak, slant, drag, in, out, curl, flat, corner) for any of the five receivers and audibles to any play. Disguised or called coverages, varied fronts and three difficulty levels (defensive reaction time, speed and ball reaction). Repeat-spot reps, or **Move the chains** with downs, distance and a first-down line. Instant half-speed replay with scrubbing, and session totals.
+
+## Front end
+
+The title screen sits over a slow cinematic pass across the facility: the FOOTBALLSIM wordmark, a vertical **Practice / Playbook / Settings / Controls** menu (keyboard, mouse, touch or controller), and a thin bar with the graphics tier, frame rate and input device.
+
+In play, a broadcast-style score bug shows field position and rep (or down, distance and yards to go when moving the chains). Numbered badges ride above the receivers' helmets in their route colours, a pass meter appears beside the quarterback while a throw charges, the play call sits in a small card at the lower left, and each result slides in as a lower-third banner. An optional field strip (Settings, off by default) shows the whole field with the line of scrimmage, the line to gain and every player. Playbook, Hot routes, Audible, Settings, Controls and Paused share one dialog style; Pause can return to the title menu.
+
+Interface type is Barlow Condensed and Barlow (OFL, vendored), with a system-font fallback.
+
+### Cameras
+
+| Camera | View |
+| --- | --- |
+| Game camera (default) | Low behind the offense: about 10.5 yd behind and 5.5 yd above the controlled player, looking 12 yd downfield, 42° lens. It frames the ball and the catch point while a pass is in the air and swings behind the new carrier after a catch or handoff. |
+| Broadcast | Sideline press-box position, following the ball with a long lens that keeps the players a similar size. |
+| All-22 | High end-zone view behind the offense showing all 22 players. |
+
+Replays use a low three-quarter angle that tracks the ball. A camera saved by an older version (`wide`, `qb`) falls back to the game camera.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| Space / Enter | Enter field, snap, next rep |
-| WASD / arrow keys | Move current ball carrier |
+| Arrow keys / W S, Enter / Space | Title menu: move, select |
+| Space / Enter | Snap, next rep |
+| WASD / arrow keys | Move the quarterback or ball carrier |
 | Shift | Sprint |
-| 1 / 2 / 3 / 4 / 5 | Hold and release to pass to the receiver with the matching number |
-| Tap / medium hold / long hold | Lob / touch / bullet |
+| 1 / 2 / 3 / 4 / 5 | Hold and release to pass to that receiver: tap for a lob, hold for touch, hold longer for a bullet |
 | Arrow keys while holding a receiver | Lead the pass |
 | Q / E | Juke left / right |
 | X | Throw away |
 | B | Playbook between reps |
-| H (pre-snap) | Hot routes: receiver 1–5, then the displayed route key |
-| Z (pre-snap) | Audible: choose play 1–8 |
-| F | Enter / exit fullscreen |
-| Tab | Toggle pre-snap route art |
-| C | Cycle camera |
+| H (pre-snap) | Hot routes: receiver 1–5, then the route key |
+| Z (pre-snap) | Audible: play 1–8 |
+| Tab | Toggle pre-snap play art |
+| C | Cycle camera: game, broadcast, all-22 |
 | R | Replay after a rep |
+| F | Fullscreen |
 | Escape / P | Pause |
 
-Controller: left stick moves, RT sprints, A snaps; after the snap A / X / Y / B / RB pass to receivers 1–5. D-pad left/right jukes, Back changes the camera, Start pauses. Touch controls include a movement pad, sprint/juke buttons and receiver buttons. Physical controller behavior depends on the browser's standard gamepad mapping; automated checks do not replace testing a physical controller.
+Controller (standard mapping): left stick moves, RT sprints, A snaps; after the snap A / X / Y / B / RB pass to receivers 1–5. D-pad left/right jukes, Back changes the camera, Start pauses. In menus and dialogs the D-pad moves, A selects and B closes. Touch devices get a movement pad, Sprint and Juke buttons and receiver buttons. Physical controllers depend on the browser's standard gamepad mapping and have only been reviewed in code.
 
 ## Adaptive graphics
 
-The controller follows racer2's physical-pixel budgets and sustained frame-time sampling. Auto starts at Balanced, waits through warmup, and lowers quality after repeated slow windows. Sustained headroom can raise quality. Changes apply between reps. Manual choices stay fixed. Hidden tabs stop rendering and pause gameplay; dialogs suspend simulation and audio. The opening screen renders at 20 fps; play targets 60 fps.
+Auto starts at Balanced, waits through a warm-up, and lowers quality after repeated slow two-second windows; sustained headroom raises it again. Changes apply between reps; a manual choice stays fixed. Hidden tabs stop rendering and pause the game, dialogs suspend the simulation and audio, the title screen renders at 20 fps and play is capped at 60 fps.
 
-| Profile | Pixel budget | Max pixel ratio | Shadow map | Spectators | Grass blades |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Performance | 800,000 | 0.85 | Contact shadows | 900 | 0 |
-| Balanced | 1,500,000 | 1.15 | 1024² | 2,600 | 10,000 |
-| High | 2,500,000 | 1.5 | 2048² | 5,200 | 24,000 |
-| Ultra | 4,200,000 | 2 | 4096² | 7,500 | 40,000 |
+| Profile | Pixel budget | Max pixel ratio | Sun shadow map | Environment detail | Grass tufts | Small details |
+| --- | ---: | ---: | --- | --- | ---: | --- |
+| Performance | 800,000 | 0.85 | none (contact shadows only) | 35 % of the trees, no small sideline props, simple turf shading | 0 | off |
+| Balanced | 1,500,000 | 1.15 | 1024² | 70 % of the trees, full sideline, detailed turf | 9,000 | on |
+| High | 2,500,000 | 1.5 | 2048² | all trees, full sideline, detailed turf | 22,000 | on |
+| Ultra | 4,200,000 | 2 | 4096² | as High | 45,000 | on |
 
-Rendering quality does not alter the fixed 120 Hz simulation. The minimum tier can additionally lower resolution. These are budgets, not promised frame rates. WebGL 2 is required; no 2D fallback is substituted.
+"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). There is no post-processing on any tier. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
 
 ## Scope and realism
 
-This is a playable original browser simulation inspired by professional football practice modes. It does **not** reproduce Madden's photorealistic scanned players, motion-captured animation, licensed teams, commentary or full physics engine. The athletes and stadium are procedural. Blocking, catches and tackles use simplified physical/AI models; there is no motion matching, ragdoll system, fumble/penalty system, defensive possession, special teams or complete NFL ruleset. Throw-away currently ends the rep as an incompletion without an intentional-grounding rule. Its eight concepts use a shotgun doubles personnel grouping. Those limits are explicit rather than presenting this release as AAA-equivalent realism.
+This is an original browser game inspired by the practice modes of modern football games. It is candid about what it is:
+
+- **Everything visual is procedural.** The athletes are built from lofted superellipse tubes and simple primitives and posed by hand-written procedural animation and inverse kinematics; there are no scanned players, motion capture, motion matching or ragdolls. The facility is modelled from simple shapes and generated textures. Grass detail comes from CC0 photographs and the three.js lawn texture, re-tinted by the field shader; the field markings are painted analytically.
+- **The physics is a model, not an engine.** Players are points with momentum, grip and a facing; bodies do not collide except through simple separation, blocking engagement and tackle rules. Tackles, catches, drops and block sheds are resolved with probabilities on top of that model. The numbers are tuned to plausible NFL figures (about 1.7 s ten-yard splits and 5.0 s forty-yard times for a back) but are not measured from real players.
+- **Football is simplified.** Offense only, one shotgun doubles personnel group, eight concepts, four coverage families. No fumbles, penalties, intentional grounding, defensive control, special teams, clock or complete NFL rules. Throw-away simply ends the rep incomplete.
+- **No licensed content.** No NFL teams, league marks, players, commentary or Madden assets.
 
 ## Development
 
-Requires Node 22 or later. Runtime and core tests have no package dependencies. The first development run or build needs network access to retrieve the pinned renderer; subsequent runs use the verified local copy.
+Requires Node 22 or later. The runtime and the core tests have no package dependencies. The first run needs network access to download the pinned third-party files; later runs use the verified local copies.
 
 ```sh
-npm run dev       # http://localhost:8000
+npm run dev       # vendor assets, then http://localhost:8000
 npm test          # deterministic simulation and graphics tests
-npm run check     # syntax, local imports and vendored assets
+npm run check     # syntax and local imports of every module, vendored assets
 npm run build     # standalone .pages-dist release
 ```
 
-Browser checks (separate development-only dependency):
+Browser checks (a development-only dependency):
 
 ```sh
 npm install --no-save --package-lock=false --ignore-scripts playwright@1.56.1
@@ -85,6 +120,8 @@ node scripts/serve.mjs .pages-dist
 node tests/browser.mjs
 ```
 
-The browser test exercises field loading, play selection, passing, handoff, replay, pausing, graphics/settings and mobile layout. Screenshots are uploaded by the verification workflow. Add `?debug=1` for a developer-only `window.footballsim` inspection handle.
+The browser test drives the real UI: title menu, camera fallback and cycling, play selection, hot routes, passing, handoff, replay, pause, settings and the performance tier, Move the chains, audibles, fullscreen, the 390 px phone layout and the return to the menu. It fails on any console error or failed request, and its screenshots are uploaded by the verification workflow. Add `?debug=1` for a developer-only `window.footballsim` handle (`sim`, `view`, `graphics`, `start()`, `snap()`).
 
-All game-specific code and procedural assets were created for this repository. Third-party renderer license: `dist/vendor/THREE-LICENSE.txt`.
+Code layout: `dist/js/sim.js` and `plays.js` (simulation and playbook), `scene.js` with `environment.js` and `env/` (field, facility, sky, lighting, cameras, grass), `athletes.js` with `athletes/` (rigs, skinning, poses, ball), `app.js`, `audio.js`, `index.html` and `style.css` (front end), and `graphics.js` (quality tiers).
+
+All game-specific code and procedural assets were created for this repository. Third-party credits: `ASSETS.md`.
