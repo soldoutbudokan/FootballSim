@@ -294,3 +294,22 @@ test('after the whistle players pull up, blocks release and the tackled carrier 
   assert.ok(s.players.every(p=>p.engaged===null));assert.ok(s.players.every(p=>Math.hypot(p.vx,p.vz)<.05),'everyone has stopped');
   assert.ok(s.players.every(p=>!['cut','juke','throw','catch','block','stumble'].includes(p.action)));
 });
+
+test('a pursuer who cannot close the last yard dives at the carrier',()=>{
+  for(const roll of [0,.999]){
+    const s=openField(2),r=s.byId.R,d=s.byId.FS;advance(s,1.6,{z:1,sprint:true});
+    s.random=()=>roll;d.turned=true;d.x=r.x;d.z=r.z-1.5;d.vx=r.vx;d.vz=r.vz;d.top=r.top;
+    let events=[];
+    for(let i=0;i<60&&!events.some(e=>e==='tackle'||e==='broken-tackle');i++){s.step(STEP,{z:1,sprint:true});events.push(...s.drainEvents());}
+    if(roll===0){assert.ok(events.includes('tackle'),'dive tackle');assert.equal(s.phase,'tackle');assert.equal(d.action,'tackle');}
+    else {assert.ok(events.includes('broken-tackle'),'missed dive');assert.equal(d.action,'stumble');}
+  }
+});
+
+test('a blocked defender comes off his block when the ball carrier runs at him',()=>{
+  const s=practice(5);s.selectPlay('zone');s.snap();advance(s,1);
+  const d=s.defense.find(q=>q.engaged&&q.role==='dl'),r=s.byId.R;assert.ok(d,'a lineman is blocked');
+  r.x=d.x;r.z=d.z-1.4;r.vx=0;r.vz=1;
+  for(let i=0;i<48;i++)s.step(STEP);
+  assert.equal(d.engaged,null,'shed the block');
+});

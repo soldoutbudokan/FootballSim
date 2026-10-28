@@ -78,6 +78,8 @@ const JUKE = { plant: 0.25, action: 0.45, keep: 0.65, cost: 0.05, minSpeed: 2 };
 const SPRINT_DRAIN = 1 / 9;            // a full tank lasts nine seconds of sprinting
 const RECOVERY = 0.12;
 const REACH = 0.95;                    // tackling reach, yards
+const DIVE_REACH = 1.7;                // a diving tackle from behind
+const SHED_RANGE = 1.6, SHED_TIME = 0.3;  // a blocked man reads the ball carrier
 const WRAP_KEEP = 0.8;
 const TACKLE_DECEL = 12, GANG_DECEL = 6, TACKLE_HOLD = 0.9;
 const STUMBLE_TIME = 0.7, STUMBLE_SPEED = 0.3, BROKEN_KEEP = 0.8;
@@ -86,7 +88,7 @@ const CATCH_GRACE = 0.35;
 const MESH_REACH = 1.25;               // QB to back, body centres, at the exchange              // a new carrier runs on through the catch
 const GET_OFF = { ol: 0.06, qb: 0, rb: 0.1, wr: 0.18, te: 0.18, dl: 0.2, lb: 0.28, cb: 0.28, s: 0.28 };
 const DIFFICULTY = {
-  rookie: { latency: 0.40, speed: 0.94, ballReaction: 0.58 },
+  rookie: { latency: 0.40, speed: 0.97, ballReaction: 0.58 },
   pro: { latency: 0.28, speed: 1.0, ballReaction: 0.32 },
   allpro: { latency: 0.18, speed: 1.04, ballReaction: 0.18 },
 };
@@ -577,6 +579,7 @@ export class Simulation {
   planBlocking() {
     const run = this.play.type === 'run', guard = this.guardPoint();
     if (this.time < GET_OFF.ol) return;
+    this.readTheBall();
     const assigned = this.assignBlocks();
     for (const o of this.line) {
       const d = assigned.get(o.id);
@@ -591,6 +594,18 @@ export class Simulation {
       else target = { x: d.x, z: Math.min(this.spot - 0.7, d.z - 0.8) };
       o.want = seekWant(o, target, speedCap(o, run ? 0.85 : 0.5));
       o.sprinting = false;
+    }
+  }
+
+  // A blocked defender comes off his block when the ball carrier gets close:
+  // SHED_TIME to disengage, so a back hitting the hole cleanly is past him,
+  // and one dancing beside the block is not.
+  readTheBall() {
+    const c = this.byId[this.carrier];
+    if (!c) return;
+    const bonus = this.play.type === 'run' ? 0.9 : 0;
+    for (const d of this.defense) {
+      if (dist(d, c) < SHED_RANGE) d.shed = Math.min(d.shed, this.time + SHED_TIME - bonus);
     }
   }
 
@@ -935,14 +950,34 @@ export class Simulation {
   }
 
   // Contact (plan 4.3): every free defender within reach gets one attempt.
+  // A pursuer who cannot close the last yard leaves his feet instead: one
+  // diving attempt from up to DIVE_REACH, at lower odds the farther he dives.
   tryTackles(c) {
-    const reach = this.defense
-      .filter(d => !d.engaged && d.action !== 'stumble' && dist(d, c) < REACH)
-      .sort((a, b) => dist(a, c) - dist(b, c));
+    const free = this.defense.filter(d => !d.engaged && d.action !== 'stumble');
+    const reach = free.filter(d => dist(d, c) < REACH).sort((a, b) => dist(a, c) - dist(b, c));
     for (const d of reach) {
       if (this.random() < this.tackleChance(d, c)) { this.startTackle(d, c); return; }
       this.brokenTackle(d, c);
     }
+    for (const d of free) {
+      const gap = dist(d, c);
+      if (gap < REACH || gap > DIVE_REACH || !this.chasing(d, c) || this.closingSpeed(d, c) > 0.5) continue;
+      const stretch = (gap - REACH) / (DIVE_REACH - REACH);
+      if (this.random() < this.tackleChance(d, c) * (0.75 - 0.3 * stretch)) { this.startTackle(d, c); return; }
+      this.brokenTackle(d, c);
+    }
+  }
+
+  // Running at the carrier (not past or away from him).
+  chasing(d, c) {
+    const speed = Math.hypot(d.vx, d.vz), gap = Math.max(1e-6, dist(c, d));
+    return d.turned && speed > 3 && (d.vx * (c.x - d.x) + d.vz * (c.z - d.z)) / (speed * gap) > 0.64;
+  }
+
+  // How fast the gap between a defender and the carrier is shrinking.
+  closingSpeed(d, c) {
+    const gap = Math.max(1e-6, dist(c, d));
+    return ((d.vx - c.vx) * (c.x - d.x) + (d.vz - c.vz) * (c.z - d.z)) / gap;
   }
 
   tackleChance(d, c) {
@@ -951,8 +986,9 @@ export class Simulation {
     const ax = ds > 1 ? d.vx / ds : c.x - d.x, az = ds > 1 ? d.vz / ds : c.z - d.z;
     const an = Math.hypot(ax, az) || 1;
     const angle = cs > 0.5 ? Math.acos(clamp((ax * c.vx + az * c.vz) / (an * cs), -1, 1)) : Math.PI / 2;
+    // How fast the defender himself is coming in, toward the carrier.
     const gap = Math.max(1e-6, dist(c, d));
-    const closing = ((d.vx - c.vx) * (c.x - d.x) + (d.vz - c.vz) * (c.z - d.z)) / gap;
+    const closing = (d.vx * (c.x - d.x) + d.vz * (c.z - d.z)) / gap;
     const advantage = clamp((ds - cs) / 3, -1.5, 1.5);
     const shaken = this.time - c.lastMoveAt < 0.3 && angle > 60 * DEG ? 1 : 0;
     const overrun = closing > cs + 2 && angle > 70 * DEG ? 1 : 0;
