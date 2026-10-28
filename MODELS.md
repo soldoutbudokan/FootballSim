@@ -130,6 +130,13 @@ material, numbers are drawn on the chest and back, following the torso.
 - Clips: 30 fps is plenty. Mixamo "Without Skin" FBX files are 0.2 to 1 MB
   each; clips embedded in `player.glb` share one skeleton and are smaller.
 
+For reference, the 49 000-triangle development stand-in renders 22 players
+for about the same frame cost as the procedural athletes: at the balanced
+profile the whole frame draws 344 000 to 378 000 triangles in 246 to 274
+draw calls (procedural: 326 000 in 261 to 285), at performance 170 000 in
+about 220 to 245 (procedural: 231 000 in 232 to 256). Animating all 22
+costs 4 to 7 ms of script per frame on a slow shared CPU.
+
 ## Licence
 
 Ship only a model and clips whose licence allows distributing them inside the

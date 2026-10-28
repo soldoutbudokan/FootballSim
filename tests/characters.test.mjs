@@ -9,7 +9,7 @@ import { analyseGait, strideRate, targetCadence, blendSpace1D, CADENCE_RANGE } f
 import { planAnimation, locomotionPoints, derive, visualAction, stanceFor, ActionClock, approachWeights, estimateLean, THROW_RELEASE } from '../dist/js/characters/blend.js';
 import { uniformFor, slotForMaterial, recolourMode, classifyRegions, REGIONS, COLORS, SKIN_TONES } from '../dist/js/characters/palette.js';
 import { clusterVertices, remapTriangles, gather } from '../dist/js/characters/lod.js';
-import { athletesChoice, CHARACTER_MODEL_URL, DEV_CHARACTER_URL } from '../dist/js/characters/choose.js';
+import { athletesChoice, athletesParam, modelPublished, readModelIndex, CHARACTER_MODEL_URL, DEV_CHARACTER_URL } from '../dist/js/characters/choose.js';
 
 const near = (actual, expected, tolerance, message) =>
   assert.ok(Math.abs(actual - expected) <= tolerance, `${message ?? ''} expected ${expected} ± ${tolerance}, got ${actual}`);
@@ -445,4 +445,24 @@ test('the athletes layer is chosen from the URL and whether a model is published
   assert.deepEqual(athletesChoice('?athletes=dev', false), { kind: 'skinned', modelUrl: DEV_CHARACTER_URL, dev: true });
   assert.deepEqual(athletesChoice('?athletes=nonsense', false), { kind: 'procedural' });
   assert.equal(athletesChoice('?athletes=auto', true).kind, 'skinned');
+});
+
+test('the model probe reads the committed index and HEADs the model it names', async () => {
+  const requests = [];
+  const site = files => async (url, init = {}) => {
+    requests.push((init.method || 'GET') + ' ' + url);
+    if (!(url in files)) return { ok: false, status: 404 };
+    return { ok: true, status: 200, json: async () => files[url] };
+  };
+  const fetchIndex = site({ './models/index.json': { model: 'player.fbx', clips: ['clips/run.fbx', 'clips/throw.glb', 'clips/notes.txt'] } });
+  const index = await readModelIndex(undefined, fetchIndex);
+  assert.deepEqual(index, { modelUrl: './models/player.fbx', clipUrls: { run: './models/clips/run.fbx', throw: './models/clips/throw.glb' } });
+  assert.equal(await modelPublished(index.modelUrl, site({ './models/player.fbx': {} })), true);
+  assert.equal(await modelPublished(undefined, site({})), false);
+  assert.ok(requests.includes('HEAD ./models/player.glb'), 'defaults to player.glb');
+  assert.equal(await modelPublished(undefined, async () => { throw new Error('offline'); }), false);
+  assert.equal(await readModelIndex(undefined, site({})), null);
+  assert.equal(athletesChoice('', true, index.modelUrl).modelUrl, './models/player.fbx');
+  assert.equal(athletesParam('?athletes=DEV'), 'dev');
+  assert.equal(athletesParam('not a query %%'), 'auto');
 });

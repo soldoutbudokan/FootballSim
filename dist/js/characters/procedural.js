@@ -172,8 +172,11 @@ export function lookAt(rig, target, w) {
   const d = target.clone().sub(head);
   const yaw = Math.max(-1.1, Math.min(1.1, Math.atan2(d.x, d.z)));
   const pitch = Math.max(-0.45, Math.min(0.7, Math.atan2(d.y, Math.hypot(d.x, d.z))));
-  rig.turn('Neck', AXIS.y, yaw * 0.4 * w);
-  rig.turn('Head', AXIS.y, yaw * 0.6 * w);
+  // The upper spine takes a little of the turn so the shoulders open to the
+  // ball; neck and head do the rest.
+  rig.turn('Spine2', AXIS.y, yaw * 0.2 * w);
+  rig.turn('Neck', AXIS.y, yaw * 0.32 * w);
+  rig.turn('Head', AXIS.y, yaw * 0.48 * w);
   rig.turn('Neck', AXIS.x, -pitch * 0.4 * w);
   rig.turn('Head', AXIS.x, -pitch * 0.6 * w);
 }
