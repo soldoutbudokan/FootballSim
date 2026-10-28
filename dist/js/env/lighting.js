@@ -19,17 +19,19 @@ export const PRESETS = {
     poles: 0, windows: 0.45, lamps: 0,
   },
   sunset: {
-    sun: { elevation: 7, azimuth: 292, color: '#ffae66', intensity: 3.4 },
-    hemisphere: { sky: '#b0bad8', ground: '#5a4a34', intensity: 1.0 },
-    environment: { source: 'sky', intensity: 1.0 },
-    exposure: 1.4,
-    fog: '#d2b79c', fogDensity: 0.0021,
+    // Golden hour: a low, deep orange sun with long shadows, a dimmer cool
+    // fill from the darkening sky, warm haze, lights coming on indoors.
+    sun: { elevation: 5, azimuth: 292, color: '#ff8c42', intensity: 3.3 },
+    hemisphere: { sky: '#959ac0', ground: '#5a4230', intensity: 0.75 },
+    environment: { source: 'sky', intensity: 0.8 },
+    exposure: 1.12,
+    fog: '#c98d5e', fogDensity: 0.0026,
     sky: {
-      turbidity: 6.5, rayleigh: 2.4, mieCoefficient: 0.006, mieDirectionalG: 0.86, gain: 0.34, saturation: 1.2,
-      cloudCoverage: 0.58, cloudSoftness: 0.24, cloudOpacity: 0.85, cloudLit: '#ffc59a', cloudShade: '#6d6475',
-      cloudBrightness: 1.05, hazeHeight: 0.06, night: false,
+      turbidity: 8, rayleigh: 3.2, mieCoefficient: 0.008, mieDirectionalG: 0.88, gain: 0.4, saturation: 1.35,
+      cloudCoverage: 0.58, cloudSoftness: 0.24, cloudOpacity: 0.85, cloudLit: '#ff9e62', cloudShade: '#5b4b60',
+      cloudBrightness: 1.0, hazeHeight: 0.07, night: false,
     },
-    poles: 0, windows: 0.45, lamps: 0.15,
+    poles: 0, windows: 0.7, lamps: 0.3,
   },
   night: {
     // The directional light stands in for the dominant (north-west) pole bank:
