@@ -1,7 +1,7 @@
 import { Simulation, STEP, GOAL } from './sim.js';
 import { PLAYS, FORMATION, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES } from './plays.js';
 import { FieldScene } from './scene.js';
-import { AdaptiveGraphics } from './graphics.js';
+import { AdaptiveGraphics, PROFILES } from './graphics.js';
 import { FieldAudio } from './audio.js';
 
 // FootballSim front end: title menu, broadcast HUD, dialogs and the game loop.
@@ -39,6 +39,7 @@ function loadPrefs() {
   if (!CAMERAS.some(c => c.id === prefs.camera)) prefs.camera = 'game';
   if (!LIGHTING.some(l => l.id === prefs.lighting)) prefs.lighting = 'day';
   if (!PASS_STYLES.includes(prefs.passStyle)) prefs.passStyle = 'timing';
+  if (prefs.graphics !== 'auto' && !PROFILES.some(profile => profile.id === prefs.graphics)) prefs.graphics = 'auto';
   prefs.fieldStrip = prefs.fieldStrip === true;
   return prefs;
 }
@@ -85,6 +86,17 @@ function fieldPosition(z) {
 function downAndDistance() {
   const goal = sim.spot + sim.toGo >= GOAL;
   return DOWN_NAMES[sim.down] + ' & ' + (goal ? 'GOAL' : sim.toGo);
+}
+
+// The HUD refreshes ten times a second; writing only changed values keeps style and paint work near zero.
+function setText(id, value) {
+  const el = $(id);
+  if (el.textContent !== value) el.textContent = value;
+}
+
+function setHidden(id, hidden) {
+  const el = $(id);
+  if (el.hidden !== hidden) el.hidden = hidden;
 }
 
 function cameraLabel(id) { return CAMERAS.find(c => c.id === id)?.label || CAMERAS[0].label; }
@@ -545,33 +557,36 @@ function renderHUD() {
 
   // Score bug: practice shows field position and rep; drive mode shows down and distance.
   const goal = sim.spot + sim.toGo >= GOAL;
-  $('practice-label').hidden = drive;
-  $('rep-cell').hidden = drive;
-  $('down-distance').hidden = !drive;
-  $('to-go-cell').hidden = !drive;
-  $('down-distance').textContent = downAndDistance();
-  $('drive-detail').textContent = goal ? 'GOAL TO GO' : sim.toGo + ' YDS TO GO';
-  $('field-position').textContent = fieldPosition(sim.spot);
-  $('rep-number').textContent = String(sim.stats.reps + (pre ? 1 : 0)).padStart(2, '0');
-  $('coverage-label').textContent = sim.config.coverage === 'random' && pre ? 'Disguised' : COVERAGES[sim.coverage].label;
+  setHidden('practice-label', drive);
+  setHidden('rep-cell', drive);
+  setHidden('down-distance', !drive);
+  setHidden('to-go-cell', !drive);
+  setText('down-distance', downAndDistance());
+  setText('drive-detail', goal ? 'GOAL TO GO' : sim.toGo + ' YDS TO GO');
+  setText('field-position', fieldPosition(sim.spot));
+  setText('rep-number', String(sim.stats.reps + (pre ? 1 : 0)).padStart(2, '0'));
+  setText('coverage-label', sim.config.coverage === 'random' && pre ? 'Disguised' : COVERAGES[sim.coverage].label);
 
   // Play call card and actions.
-  $('presnap-adjustments').hidden = !pre || !!replay;
-  $('hot-routes-open').disabled = run;
-  $('hot-routes-open').title = run ? 'Call a pass play to set hot routes' : 'Hot routes · H';
-  $('read-tip').hidden = !pre;
-  $('snap').hidden = !pre;
-  $('throw-away').hidden = !passing;
-  $('targets').hidden = (!pre && !passing) || run || !!replay;
-  $('result').hidden = !dead || !!replay;
-  $('touch-controls').hidden = !isTouch || !live || !!replay;
-  $('minimap').hidden = !prefs.fieldStrip || !!replay;
+  setHidden('presnap-adjustments', !pre || !!replay);
+  if ($('hot-routes-open').disabled !== run) {
+    $('hot-routes-open').disabled = run;
+    $('hot-routes-open').title = run ? 'Call a pass play to set hot routes' : 'Hot routes · H';
+  }
+  setHidden('read-tip', !pre);
+  setHidden('snap', !pre);
+  setHidden('throw-away', !passing);
+  setHidden('targets', (!pre && !passing) || run || !!replay);
+  setHidden('result', !dead || !!replay);
+  setHidden('touch-controls', !isTouch || !live || !!replay);
+  setHidden('minimap', !prefs.fieldStrip || !!replay);
 
   const p = sim.byId[sim.carrier || sim.selected];
-  $('player-role').textContent = p.role.toUpperCase() + ' ' + p.number;
-  $('stamina-fill').style.width = p.stamina * 100 + '%';
+  setText('player-role', p.role.toUpperCase() + ' ' + p.number);
+  const stamina = Math.round(p.stamina * 100) + '%';
+  if ($('stamina-fill').style.width !== stamina) $('stamina-fill').style.width = stamina;
   $('stamina-fill').parentElement.classList.toggle('low', p.stamina < .25);
-  $('player-state').textContent = playerState(p, pre);
+  setText('player-state', playerState(p, pre));
 
   if (dead && sim.result) renderResult(sim.result, drive);
 }
@@ -591,10 +606,10 @@ function renderResult(r, drive) {
   const banner = $('result');
   banner.classList.toggle('good', good);
   banner.classList.toggle('bad', bad && !good);
-  $('result-yards').textContent = r.yards > 0 ? '+' + r.yards : r.yards < 0 ? '−' + Math.abs(r.yards) : '0';
-  $('result-tag').textContent = tag;
-  $('result-title').textContent = r.label;
-  $('result-detail').textContent = r.time.toFixed(1) + ' SEC · ' + sim.stats.completions + '/' + sim.stats.attempts + ' PASSING';
+  setText('result-yards', r.yards > 0 ? '+' + r.yards : r.yards < 0 ? '−' + Math.abs(r.yards) : '0');
+  setText('result-tag', tag);
+  setText('result-title', r.label);
+  setText('result-detail', r.time.toFixed(1) + ' SEC · ' + sim.stats.completions + '/' + sim.stats.attempts + ' PASSING');
 }
 
 // The field strip: the whole field drawn left to right with the line of scrimmage and line to gain.
@@ -632,9 +647,10 @@ function positionMarkers(state) {
   for (const id of RECEIVERS) {
     const el = markers[id];
     const p = visible && state.players.find(q => q.id === id);
-    if (!p) { el.hidden = true; continue; }
-    const s = view.project(p.x, 2.55, p.z);
-    el.hidden = !s.visible;
+    const s = p && view.project(p.x, 2.55, p.z);
+    const hidden = !s || !s.visible;
+    if (el.hidden !== hidden) el.hidden = hidden;
+    if (hidden) continue;
     el.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px) translate(-50%, -100%)`;
   }
 }
@@ -645,7 +661,7 @@ function updatePassMeter(state, now) {
   const seconds = (now - charge.started) / 1000;
   const style = passStyleFor(seconds);
   $('charge-fill').style.height = Math.min(100, seconds / .6 * 100) + '%';
-  $('charge-label').textContent = style;
+  setText('charge-label', style);
   $('charge').classList.toggle('bullet', style === 'bullet');
   const qb = state.players.find(p => p.id === 'QB');
   if (!qb) return;
