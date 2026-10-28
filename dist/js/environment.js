@@ -70,6 +70,7 @@ export class Environment {
     this.grass = new GrassTufts(scene, this.turf.userData.uniforms);
     this.time = 0;
     this.shadowFocus = new THREE.Vector3(0, 0, -30);
+    this.shadowTarget = new THREE.Vector3();
     this.root.updateMatrixWorld(true);
     // Glass reflects the sky more strongly than the global environment level.
     this.lighting.onEnvironment = (texture, preset) => {
@@ -144,8 +145,8 @@ export class Environment {
     // also reaches the south goal post and the front of the team building.
     const anchor = this.actionPoint(state);
     const target = menu
-      ? new THREE.Vector3(-6, 0, sceneZ(state.spot - 12))
-      : new THREE.Vector3(anchor.x * 0.6, 0, sceneZ(anchor.z + 7));
+      ? this.shadowTarget.set(-6, 0, sceneZ(state.spot - 12))
+      : this.shadowTarget.set(anchor.x * 0.6, 0, sceneZ(anchor.z + 7));
     this.lighting.setShadowSize(menu ? 110 : 48);
     const k = 1 - Math.exp(-dt * 10);
     this.shadowFocus.lerp(target, menu ? 1 : k);

@@ -88,7 +88,7 @@ export function buildTeamBuilding(parent, shadows) {
   const B = LAYOUT.building;
   const batch = new StaticBatch('team-building');
   const dark = materials.darkMetal(), concrete = materials.concrete(), silver = materials.silver();
-  const panel = new THREE.MeshStandardMaterial({ color: '#4a5159', roughness: 0.5, metalness: 0.55, map: panelTexture() });
+  const panel = new THREE.MeshStandardMaterial({ color: '#5d656d', roughness: 0.5, metalness: 0.45, map: panelTexture() });
   panel.map.wrapS = panel.map.wrapT = THREE.RepeatWrapping;
   const roof = standard('#5a5f63', 0.85, 0.1);
   const glass = new THREE.MeshStandardMaterial({

@@ -51,6 +51,7 @@ export const PRESETS = {
 const SHADOW_SIZE = 48;   // yards covered by the sun's shadow map during play
 const POLE_CONE = 33;     // half-angle in degrees of each pole bank's beam
 const UP = new THREE.Vector3(0, 1, 0);
+const TMP_RIGHT = new THREE.Vector3(), TMP_UP = new THREE.Vector3();
 
 // Spot-light shadow aimed at the action instead of down the cone axis, so the
 // dominant pole bank's shadow map spends its texels on the play (the same
@@ -243,8 +244,8 @@ export class Lighting {
   followFocus(point, immediate = false) {
     this.focus.copy(point);
     const d = this.sunDirection;
-    const right = new THREE.Vector3().crossVectors(UP, d).normalize();
-    const up = new THREE.Vector3().crossVectors(d, right);
+    const right = TMP_RIGHT.crossVectors(UP, d).normalize();
+    const up = TMP_UP.crossVectors(d, right);
     const texel = this.shadowSize / this.sun.shadow.mapSize.x;
     const a = Math.round(point.dot(right) / texel) * texel;
     const b = Math.round(point.dot(up) / texel) * texel;
