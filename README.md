@@ -85,12 +85,12 @@ Auto starts at Balanced, waits through a warm-up, and lowers quality after repea
 
 | Profile | Pixel budget | Max pixel ratio | Sun shadow map | Environment detail | Grass tufts | Small details |
 | --- | ---: | ---: | --- | --- | ---: | --- |
-| Performance | 800,000 | 0.85 | none (contact shadows only) | 35 % of the trees with single-sided leaf cards, no small sideline props, simple turf shading | 0 | off |
-| Balanced | 1,500,000 | 1.15 | 1024² | 70 % of the trees with single-sided leaf cards, full sideline, detailed turf | 9,000 | on |
-| High | 2,500,000 | 1.5 | 2048² | all trees with double-sided, alpha-to-coverage leaf cards, full sideline, detailed turf | 22,000 | on |
+| Performance | 800,000 | 0.85 | none (contact shadows only) | 35 % of the trees with single-sided leaf cards, no small sideline props, simple turf shading, athletes beyond 20 yd at reduced detail | 0 | off |
+| Balanced | 1,500,000 | 1.15 | 1024² | 70 % of the trees with single-sided leaf cards, full sideline, detailed turf without anisotropic filtering, athletes beyond 30 yd at reduced detail | 9,000 | on |
+| High | 2,500,000 | 1.5 | 2048² | all trees with double-sided, alpha-to-coverage leaf cards, full sideline, detailed turf with 8x anisotropic filtering, full-detail athletes | 22,000 | on |
 | Ultra | 4,200,000 | 2 | 4096² | as High | 45,000 | on |
 
-"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). There is no post-processing on any tier. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
+"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). Reduced-detail athletes (about 2,400 instead of 8,400 triangles, no small details) are drawn from a second set of meshes on the same skeletons, chosen per athlete by distance from the camera. There is no post-processing on any tier. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
 
 ## Scope and realism
 

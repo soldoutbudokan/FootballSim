@@ -1,6 +1,6 @@
 import * as THREE from '../vendor/three.module.js';
 import { ContactShadows, FIELD, noiseTexture, sceneZ } from './env/common.js';
-import { buildGoalPost, buildGround, buildPylons, createTurfMaterial, lineOverlay, setTurfQuality } from './env/field.js';
+import { buildGoalPost, buildGround, buildPylons, createTurfMaterial, lineOverlay, setTurfFiltering, setTurfQuality } from './env/field.js';
 import { buildFence, buildFilmTower, buildLampGlow, buildLightPoles, buildTeamBuilding } from './env/facility.js';
 import { buildSidelineProps } from './env/props.js';
 import { GROUND_RADIUS, buildHorizonBuildings, buildParking, buildTerrain, buildTreeLine, buildTrees } from './env/landscape.js';
@@ -86,7 +86,7 @@ export class Environment {
 
   loadTextures() {
     const loader = new THREE.TextureLoader(this.assetManager);
-    const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    const anisotropy = this.maxAnisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     const tiled = (url, srgb) => {
       const texture = loader.load(url);
       texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -129,6 +129,11 @@ export class Environment {
     }
     this.sideline.detail.visible = level >= 1;
     setTurfQuality(this.turf, level >= 1);
+    // Anisotropic filtering of the turf is close to free on a GPU but the
+    // dearest part of the turf on a software renderer (about a fifth of a
+    // Balanced frame on SwiftShader), so it is kept from High up. The paint is
+    // analytic, so the lines stay sharp without it.
+    setTurfFiltering(this.turf, full ? this.maxAnisotropy : 1);
     this.grass.setCount(profile.grass || 0);
   }
 

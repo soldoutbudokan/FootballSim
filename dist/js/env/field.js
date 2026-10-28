@@ -197,7 +197,17 @@ float fieldPaint(vec2 p, vec2 fw) {
   float inside = step(0.0, cell.x) * step(cell.x, 1.0) * step(0.0, cell.y) * step(cell.y, 1.0);
   float value = 5.0 - abs(5.0 - kn);      // 1..5 -> 10..50
   vec2 atlas = vec2((value - 1.0 + (17.0 + cell.x * 266.0) / 300.0) / 5.0, (16.0 + cell.y * 168.0) / 200.0);
+#ifdef TURF_ANISO
   paint = max(paint, texture2D(turfNumbers, atlas).a * inside);
+#else
+  // Without anisotropic filtering: the mip level follows the footprint's
+  // short axis (at most 4x sharper than its long one), which keeps distant
+  // numbers legible for a little aliasing along the long axis.
+  vec2 atlasDx = dFdx(atlas), atlasDy = dFdy(atlas);
+  float major = max(length(atlasDx), length(atlasDy)), minor = min(length(atlasDx), length(atlasDy));
+  float sharpen = max(major * 0.25, minor) / max(major, 1e-6);
+  paint = max(paint, textureGrad(turfNumbers, atlas, atlasDx * sharpen, atlasDy * sharpen).a * inside);
+#endif
 
   // Directional arrows beside every number except the 50, toward the nearer goal.
   float goalward = kn < 5.0 ? -1.0 : 1.0;
@@ -286,6 +296,7 @@ export function createTurfMaterial(textures) {
   };
   const material = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.94, metalness: 0 });
   material.defines.TURF_HQ = '';
+  material.defines.TURF_ANISO = '';
   material.userData.uniforms = uniforms;
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, uniforms);
@@ -309,8 +320,26 @@ export function createTurfMaterial(textures) {
     `);
     shader.fragmentShader = fragment;
   };
-  material.customProgramCacheKey = () => 'turf-v1-' + ('TURF_HQ' in material.defines ? 'hq' : 'lq');
+  material.customProgramCacheKey = () => 'turf-v2-' + ('TURF_HQ' in material.defines ? 'hq' : 'lq') + ('TURF_ANISO' in material.defines ? '-af' : '');
   return material;
+}
+
+// Anisotropic filtering of every turf texture on (High up) or off. Off, the
+// yard numbers pick their mip level in the shader instead (TURF_ANISO).
+export function setTurfFiltering(material, anisotropy) {
+  const uniforms = material.userData.uniforms;
+  for (const key of ['turfGrass', 'turfDirt', 'turfNormal', 'turfNumbers']) {
+    const texture = uniforms[key]?.value;
+    if (!texture?.isTexture || texture.anisotropy === anisotropy) continue;
+    texture.anisotropy = anisotropy;
+    // Before an image arrives its first upload applies the setting.
+    if (texture.image) texture.needsUpdate = true;
+  }
+  const on = anisotropy > 1, has = 'TURF_ANISO' in material.defines;
+  if (on === has) return;
+  if (on) material.defines.TURF_ANISO = '';
+  else delete material.defines.TURF_ANISO;
+  material.needsUpdate = true;
 }
 
 export function setTurfQuality(material, high) {
