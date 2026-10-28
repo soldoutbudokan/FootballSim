@@ -1,10 +1,14 @@
 // Following racer2: physical-pixel budgets, warmup, sustained-load sampling.
 // The simulation always runs at 120 Hz, independently of these visual budgets.
+//   shadow: sun shadow-map size (0 = no shadow maps; contact shadows only)
+//   props:  environment detail level 0..3 (trees, small sideline props, turf detail)
+//   grass:  grass tufts around the camera (0 = none)
+//   detail: small animated details (goal-post ribbons) and athlete detail
 export const PROFILES = [
-  { id:'performance', label:'Performance', pixels:800000, dpr:.85, shadow:0, crowd:900, grass:0, detail:false },
-  { id:'balanced', label:'Balanced', pixels:1500000, dpr:1.15, shadow:1024, crowd:2600, grass:10000, detail:true },
-  { id:'high', label:'High', pixels:2500000, dpr:1.5, shadow:2048, crowd:5200, grass:24000, detail:true },
-  { id:'ultra', label:'Ultra', pixels:4200000, dpr:2, shadow:4096, crowd:7500, grass:40000, detail:true },
+  { id:'performance', label:'Performance', pixels:800000, dpr:.85, shadow:0, props:0, grass:0, detail:false },
+  { id:'balanced', label:'Balanced', pixels:1500000, dpr:1.15, shadow:1024, props:1, grass:9000, detail:true },
+  { id:'high', label:'High', pixels:2500000, dpr:1.5, shadow:2048, props:2, grass:22000, detail:true },
+  { id:'ultra', label:'Ultra', pixels:4200000, dpr:2, shadow:4096, props:3, grass:45000, detail:true },
 ];
 export function pixelRatio(w,h,dpr,profile,scale=1) {
   return Math.max(1/Math.max(1,w,h), Math.min(dpr,profile.dpr,Math.sqrt(profile.pixels/Math.max(1,w*h)))*scale);

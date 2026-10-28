@@ -1,0 +1,6 @@
+{
+  "source": "Three.js r180 example addons pinned to the r180 tag; SHA-256 verified. Imports of 'three' are rewritten to the local renderer copy.",
+  "files": [
+    { "dest": "dist/vendor/Sky.js", "url": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/objects/Sky.js", "sha256": "a19982b69e496e52d4cd7072029f0a8e5277203cbebf2277a23267e90b705640", "replace": [["from 'three'", "from './three.module.js'"]] }
+  ]
+}
