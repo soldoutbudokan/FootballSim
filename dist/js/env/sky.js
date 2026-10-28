@@ -8,6 +8,7 @@ import { noiseTexture } from './common.js';
 
 const EXTRA_UNIFORMS = /* glsl */`
 uniform float skyGain;
+uniform float skySaturation;
 uniform sampler2D cloudMap;
 uniform vec2 cloudOffset;
 uniform float cloudCoverage;
@@ -25,6 +26,9 @@ float skyHash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) 
 
 const COMPOSE = /* glsl */`
 vec3 col = retColor * skyGain;
+// The analytic model washes out toward white once tone mapped; restore the
+// saturation of a clear sky (1 = unchanged).
+col = max(mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, skySaturation), 0.0);
 float up = max(direction.y, 0.0);
 
 // Night: replace the (black) Preetham sky with a deep gradient and stars.
@@ -73,6 +77,7 @@ export class SkyDome {
     this.uniforms = material.uniforms;
     Object.assign(this.uniforms, {
       skyGain: { value: 0.5 },
+      skySaturation: { value: 1 },
       cloudMap: { value: noiseTexture(256, 4242, 6, 6) },
       cloudOffset: { value: new THREE.Vector2(0.13, 0.41) },
       cloudCoverage: { value: 0.55 },
@@ -109,6 +114,7 @@ export class SkyDome {
     u.mieCoefficient.value = s.mieCoefficient;
     u.mieDirectionalG.value = s.mieDirectionalG;
     u.skyGain.value = s.gain;
+    u.skySaturation.value = s.saturation ?? 1;
     u.cloudCoverage.value = s.cloudCoverage;
     u.cloudSoftness.value = s.cloudSoftness;
     u.cloudOpacity.value = s.cloudOpacity;

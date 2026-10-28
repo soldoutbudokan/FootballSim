@@ -7,14 +7,14 @@ import { HDRLoader } from '../../vendor/HDRLoader.js';
 export const PRESETS = {
   day: {
     sun: { elevation: 47, azimuth: 222, color: '#fff1de', intensity: 3.0 },
-    hemisphere: { sky: '#c6daf5', ground: '#55603a', intensity: 0.4 },
-    environment: { source: 'hdr', intensity: 0.5 },
+    hemisphere: { sky: '#c6daf5', ground: '#55603a', intensity: 0.34 },
+    environment: { source: 'hdr', intensity: 0.45 },
     exposure: 0.85,
-    fog: '#c9d6df', fogDensity: 0.0017,
+    fog: '#bccddb', fogDensity: 0.0017,
     sky: {
-      turbidity: 2.0, rayleigh: 3.0, mieCoefficient: 0.0022, mieDirectionalG: 0.8, gain: 0.26,
-      cloudCoverage: 0.6, cloudSoftness: 0.17, cloudOpacity: 0.9, cloudLit: '#ffffff', cloudShade: '#a4adb8',
-      cloudBrightness: 1.35, hazeHeight: 0.07, night: false,
+      turbidity: 2.0, rayleigh: 3.0, mieCoefficient: 0.0022, mieDirectionalG: 0.8, gain: 0.26, saturation: 1.7,
+      cloudCoverage: 0.64, cloudSoftness: 0.17, cloudOpacity: 0.9, cloudLit: '#ffffff', cloudShade: '#a4adb8',
+      cloudBrightness: 1.35, hazeHeight: 0.05, night: false,
     },
     poles: 0, windows: 0.45, lamps: 0,
   },
@@ -25,7 +25,7 @@ export const PRESETS = {
     exposure: 1.4,
     fog: '#d2b79c', fogDensity: 0.0021,
     sky: {
-      turbidity: 6.5, rayleigh: 2.4, mieCoefficient: 0.006, mieDirectionalG: 0.86, gain: 0.34,
+      turbidity: 6.5, rayleigh: 2.4, mieCoefficient: 0.006, mieDirectionalG: 0.86, gain: 0.34, saturation: 1.2,
       cloudCoverage: 0.58, cloudSoftness: 0.24, cloudOpacity: 0.85, cloudLit: '#ffc59a', cloudShade: '#6d6475',
       cloudBrightness: 1.05, hazeHeight: 0.06, night: false,
     },
@@ -35,21 +35,21 @@ export const PRESETS = {
     // The directional light stands in for the dominant (north-west) pole bank:
     // it is the one shadow-casting light. The four spot lights add the pools.
     sun: { elevation: 52, azimuth: 300, color: '#e4ecff', intensity: 0.4, skyElevation: -9 },
-    hemisphere: { sky: '#2b3c5c', ground: '#0b100a', intensity: 0.22 },
+    hemisphere: { sky: '#2b3c5c', ground: '#0b100a', intensity: 0.26 },
     environment: { source: 'sky', intensity: 1.0 },
-    exposure: 1.05,
+    exposure: 1.15,
     fog: '#121a24', fogDensity: 0.0042,
     sky: {
       turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieDirectionalG: 0.8, gain: 0.3,
       cloudCoverage: 0.6, cloudSoftness: 0.3, cloudOpacity: 0.7, cloudLit: '#3a4252', cloudShade: '#171c25',
       cloudBrightness: 0.06, hazeHeight: 0.1, night: true,
     },
-    poles: 3400, windows: 1.0, lamps: 1,
+    poles: 3800, windows: 1.0, lamps: 1,
   },
 };
 
 const SHADOW_SIZE = 48;   // yards covered by the sun's shadow map during play
-const POLE_CONE = 27;     // half-angle in degrees of each pole bank's beam
+const POLE_CONE = 33;     // half-angle in degrees of each pole bank's beam
 const UP = new THREE.Vector3(0, 1, 0);
 
 // Spot-light shadow aimed at the action instead of down the cone axis, so the
@@ -113,7 +113,7 @@ export class Lighting {
   // Pole lights: `heads` are {position, aim} in scene coordinates.
   addPoleLights(heads) {
     for (const head of heads) {
-      const spot = new THREE.SpotLight('#eef3ff', 0, 0, THREE.MathUtils.degToRad(POLE_CONE), 0.65, 2);
+      const spot = new THREE.SpotLight('#eef3ff', 0, 0, THREE.MathUtils.degToRad(POLE_CONE), 0.7, 2);
       spot.position.copy(head.position);
       spot.target.position.copy(head.aim);
       spot.visible = false;

@@ -240,8 +240,9 @@ export function buildLightPoles(parent, shadows) {
   const H = LAYOUT.poleHeight;
   for (const pole of LAYOUT.poles) {
     const x = pole.x, z = sceneZ(pole.z);
-    // Aim at a point on the main field between the hashes and the near numbers.
-    const aim = new THREE.Vector3(pole.x < 0 ? -7 : 7, 0, sceneZ(pole.z < 60 ? 36 : 84));
+    // Aim inside the near hash, a little toward the near goal line, so the
+    // four wide beams overlap into an even field with brighter pools.
+    const aim = new THREE.Vector3(pole.x < 0 ? -5 : 5, 0, sceneZ(pole.z < 60 ? 30 : 90));
     const toAim = aim.clone().sub(new THREE.Vector3(x, H, z));
     const yaw = Math.atan2(-toAim.z, toAim.x);
     batch.block(concrete, x, 0, z, 1.1, 0.35, 1.1);

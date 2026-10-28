@@ -276,8 +276,8 @@ export function createTurfMaterial(textures) {
     turfNormal: { value: textures.normal },
     // Mean linear colour of the lawn photograph (used to normalise it).
     turfMean: { value: new THREE.Vector3(0.130, 0.244, 0.018) },
-    turfColor: { value: new THREE.Color('#30552b') },
-    turfRough: { value: new THREE.Color('#4d6030') },
+    turfColor: { value: new THREE.Color('#2e5127') },
+    turfRough: { value: new THREE.Color('#4a5c2e') },
     turfDirtTint: { value: new THREE.Color('#d8c8b0') },
     turfPaint: { value: new THREE.Color('#f2f1ea') },
     turfStripe: { value: 0.025 },

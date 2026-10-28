@@ -84,7 +84,8 @@ export class GrassTufts {
     const index = new Uint32Array(MAX_TUFTS * 12);
     for (let t = 0; t < MAX_TUFTS; t++) {
       const x = random() * TILE, z = random() * TILE;
-      const height = 0.07 + random() * 0.07, width = 0.2 + random() * 0.12, yaw = random() * Math.PI;
+      // Blades 1.8-3.6 in tall: a mown practice field, not a meadow.
+      const height = 0.05 + random() * 0.05, width = 0.17 + random() * 0.1, yaw = random() * Math.PI;
       const shade = random();
       for (let card = 0; card < 2; card++) {
         for (let k = 0; k < 4; k++) {
