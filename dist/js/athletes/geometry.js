@@ -48,7 +48,10 @@ function weldSeam(geometry, rows, cols) {
 }
 
 // `ao(v, t)` optionally bakes ambient occlusion into vertex colours, with v
-// the height along the loft (0 = bottom) and t the angle around it (0 = +X).
+// running from the first key (0) to the last (1) and t the angle around the
+// loft (0 = +X). Keys may run up or down (limbs are authored from the joint
+// downwards); `capTop` and `capBottom` always mean the upper and lower end,
+// and faces always point outwards.
 export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom = true, flipU = false, ao = null } = {}) {
   const rings = interpolateRings(keys, subdiv);
   const positions = [], uvs = [], indices = [], colors = [];
@@ -78,8 +81,14 @@ export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom =
       if (up) indices.push(centre, b, a); else indices.push(centre, a, b);
     }
   };
-  if (capBottom) cap(rings[0], 0, false);
-  if (capTop) cap(rings[rings.length - 1], (rings.length - 1) * cols, true);
+  // Built as if the keys ascend; a descending loft is flipped inside out
+  // afterwards, which turns its first-ring cap into the top one.
+  const descending = y1 < y0;
+  if (descending ? capTop : capBottom) cap(rings[0], 0, false);
+  if (descending ? capBottom : capTop) cap(rings[rings.length - 1], (rings.length - 1) * cols, true);
+  if (descending) {
+    for (let i = 0; i < indices.length; i += 3) { const t = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = t; }
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
@@ -320,14 +329,29 @@ export function football() {
   return g;
 }
 
+// Laces on top of the ball: a lace strip along the seam that follows the
+// curve of the ball, crossed by eight stitches, each tilted to the surface.
 export function footballLaces() {
-  const parts = [];
-  const stitch = (z, w, l, h) => {
-    const box = new THREE.BoxGeometry(w, h, l);
-    box.translate(0, ballRadiusAt(z) + h * 0.3, z);
+  const parts = [], lift = 0.0025;
+  const surface = z => ballRadiusAt(z) + lift;
+  const points = [];
+  for (let i = 0; i <= 12; i++) {
+    const z = -0.07 + 0.14 * i / 12;
+    points.push(new THREE.Vector3(0, surface(z), z));
+  }
+  const strip = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 24, 0.0042, 5, false);
+  strip.scale(1.25, 0.8, 1);
+  parts.push(strip);
+  for (let i = 0; i < 8; i++) {
+    const z = -0.056 + i * 0.016, slope = (surface(z + 0.002) - surface(z - 0.002)) / 0.004;
+    const box = new THREE.BoxGeometry(0.032, 0.0055, 0.0055);
+    // Bend the stitch around the ball's girth.
+    const p = box.attributes.position;
+    for (let k = 0; k < p.count; k++) p.setY(k, p.getY(k) - 2.6 * p.getX(k) ** 2);
+    box.computeVertexNormals();
+    box.rotateX(-Math.atan(slope));
+    box.translate(0, surface(z) + 0.0012, z);
     parts.push(box);
-  };
-  stitch(0, 0.009, 0.14, 0.006);
-  for (let i = 0; i < 8; i++) stitch(-0.056 + i * 0.016, 0.034, 0.006, 0.007);
+  }
   return mergeGeometries(parts);
 }

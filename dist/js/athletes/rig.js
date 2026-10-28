@@ -303,8 +303,10 @@ export class Rig {
       body(shin, geometry.sock, { scale: [limb, d.k, limb], color: TEAM.sock, surface: SURFACE.sock, uv: plain, blend: [[thigh, 0.09, { side: -1, radius: 0.03 }], [foot, 0.05]] });
       body(foot, geometry.cleat, { scale: [1, d.k, d.k], color: look.cleat, surface: SURFACE.cleat, uv: plain, blend: [[shin, 0.04]] });
 
-      body(upper, geometry.upperArm, { scale: [limb, d.k, limb], color: armColor, surface: armSurface, uv: plain, blend: [['chest', 0.08], [fore, 0.06, { side: -1, radius: 0.025 }]] });
-      body(upper, geometry.sleeve, { scale: [limb ** 0.7, d.k, limb ** 0.7], color: jersey, uv: plain, blend: [['chest', 0.08]] });
+      // The shoulder is a ball joint that also twists, which linear blending
+      // pinches; the sleeve top tucks rigidly under the shoulder pad instead.
+      body(upper, geometry.upperArm, { scale: [limb, d.k, limb], color: armColor, surface: armSurface, uv: plain, blend: [[fore, 0.06, { side: -1, radius: 0.025 }]] });
+      body(upper, geometry.sleeve, { scale: [limb ** 0.7, d.k, limb ** 0.7], color: jersey, uv: plain });
       body(fore, geometry.forearm, { scale: [limb, d.k, limb], color: armColor, surface: armSurface, uv: plain, blend: [[upper, 0.06, { side: -1, radius: 0.025 }], [hand, 0.03]] });
       if (look.tape) body(fore, geometry.tape, { scale: [limb, d.k, limb], color: '#f3f2ec', surface: SURFACE.tape, uv: plain, blend: [[hand, 0.03]], detail: true });
       body(hand, i === 0 ? geometry.gloveL : geometry.gloveR, { scale: [limb ** 0.5, d.k, limb ** 0.5], color: look.glove, surface: SURFACE.glove, uv: plain, blend: [[fore, 0.03]] });

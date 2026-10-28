@@ -66,11 +66,13 @@ export function applyStance(anim, pose, p, ctx) {
       break;
     }
     case 'center': {
-      pose.pelvis.set(0, 0.68 * k, -0.1);
-      pose.hips.set(0.66, 0, 0);
-      pose.spine.set(0.62 + breathe, 0, 0);
+      // The simulation puts him a quarter yard behind the ball; his stance
+      // sits further back so the ball is out in front, under his facemask.
+      pose.pelvis.set(0, 0.68 * k, -0.34);
+      pose.hips.set(0.7, 0, 0);
+      pose.spine.set(0.66 + breathe, 0, 0);
       pose.head.set(0.1, 0, 0);
-      feet(0.29, -0.02, -0.29, -0.06);
+      feet(0.29, -0.26, -0.29, -0.3);
       anim.prepareChest(pose);
       // Right hand on the ball on the ground in front of him.
       _ball.set(ctx.ball.x, 0.12, -ctx.ball.z);
