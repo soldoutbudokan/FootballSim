@@ -535,10 +535,23 @@ function renderPlayCounts() {
 }
 
 // ---------- HUD ----------
+// The controlled player's state line. Every simulation phase has an entry
+// (null: decided by his action and movement below), and so does every
+// action (plan 3.4; null: decided by movement). Unknown values fall through.
+const PHASE_STATES = { presnap: 'READY', live: null, air: 'PASS AWAY', run: null, tackle: 'WRAPPED', dead: null };
+const ACTION_STATES = {
+  ready: 'READY', run: null, cut: null, juke: 'JUKE', block: 'ENGAGED', throw: 'THROWING', catch: 'CATCH',
+  carry: null, wrapped: 'WRAPPED', tackle: 'TACKLING', down: 'DOWN', stumble: 'STUMBLING',
+};
+// After the whistle: how the rep ended for him.
+const DEAD_STATES = { tackle: 'DOWN', sack: 'DOWN', safety: 'DOWN', out: 'OUT OF BOUNDS', touchdown: 'TOUCHDOWN', incomplete: 'INCOMPLETE', interception: 'INTERCEPTED', timeout: 'REP OVER' };
+
 function playerState(p, pre) {
-  if (pre) return 'READY';
-  if (sim.crossedLine) return 'RUN ONLY';
-  if (sim.phase === 'air') return 'PASS AWAY';
+  const phase = pre ? 'presnap' : sim.phase;
+  if (phase === 'dead') return p.action === 'down' ? 'DOWN' : DEAD_STATES[sim.result?.kind] || 'WHISTLE';
+  if (PHASE_STATES[phase]) return PHASE_STATES[phase];
+  if (ACTION_STATES[p.action]) return ACTION_STATES[p.action];
+  if (sim.crossedLine && p.id === 'QB') return 'RUN ONLY';
   if (p.stamina < .25) return 'FATIGUED';
   return Math.hypot(p.vx, p.vz) > 1 ? 'ON THE MOVE' : 'FEET SET';
 }
