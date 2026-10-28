@@ -22,6 +22,8 @@ const LIGHTING = [
   { id: 'night', label: 'Under the lights' },
 ];
 const PASS_STYLES = ['timing', 'bullet', 'touch', 'lob'];
+// Keep tap/hold selection, meter fill and its tick marks on the same scale.
+const PASS_CHARGE = { touch: 0.12, bullet: 0.24, full: 0.30 };
 const DOWN_NAMES = ['', '1ST', '2ND', '3RD', '4TH'];
 // Gamepad buttons that pass to receivers 1-5 after the snap: A, X, Y, B, RB.
 const PASS_BUTTONS = [0, 2, 3, 1, 5];
@@ -289,7 +291,7 @@ function beginCharge(index) {
 
 function passStyleFor(seconds) {
   if (prefs.passStyle !== 'timing') return prefs.passStyle;
-  return seconds < .17 ? 'lob' : seconds < .43 ? 'touch' : 'bullet';
+  return seconds < PASS_CHARGE.touch ? 'lob' : seconds < PASS_CHARGE.bullet ? 'touch' : 'bullet';
 }
 
 function releaseCharge(index) {
@@ -691,7 +693,7 @@ function updatePassMeter(state, now) {
   if (!charge) return;
   const seconds = (now - charge.started) / 1000;
   const style = passStyleFor(seconds);
-  $('charge-fill').style.height = Math.min(100, seconds / .6 * 100) + '%';
+  $('charge-fill').style.height = Math.min(100, seconds / PASS_CHARGE.full * 100) + '%';
   setText('charge-label', style);
   $('charge').classList.toggle('bullet', style === 'bullet');
   const qb = state.players.find(p => p.id === 'QB');
@@ -703,6 +705,9 @@ function updatePassMeter(state, now) {
 
 // ---------- Static UI setup ----------
 function buildTargets() {
+  const meterTicks = $('charge').querySelectorAll('.meter-tick');
+  meterTicks[0].style.bottom = PASS_CHARGE.touch / PASS_CHARGE.full * 100 + '%';
+  meterTicks[1].style.bottom = PASS_CHARGE.bullet / PASS_CHARGE.full * 100 + '%';
   RECEIVERS.forEach((id, i) => {
     const key = String(i + 1);
     const b = button('target-button', `<strong>${key}</strong>`);

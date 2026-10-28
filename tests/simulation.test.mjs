@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {Simulation,STEP,GRAVITY,flightVelocity,nearestOnSegment} from '../dist/js/sim.js';
 import {PLAYS} from '../dist/js/plays.js';
 function advance(s,seconds,input={}){for(let i=0;i<Math.round(seconds/STEP);i++)s.step(STEP,input);}
-function practice(seed){return new Simulation(seed,{offense:'mesh',coverage:'cover3'});}
+function practice(seed){return new Simulation(seed,{offense:'mesh',coverage:'cover3',difficulty:'pro',mode:'reps'});}
 test('practice contains an 11-player offense and an 11-player CPU defense',()=>{const s=practice(1);assert.equal(s.players.length,22);assert.equal(s.players.filter(p=>p.team==='offense').length,11);assert.equal(new Set(s.players.map(p=>p.id)).size,22);assert.equal(s.carrier,'QB');});
 test('ballistic solution reaches a receiver at the requested flight time',()=>{for(const t of [.5,1,2.5]){const from={x:1,y:1.85,z:30},to={x:22,y:1.6,z:61},v=flightVelocity(from,to,t);assert.ok(Math.abs(from.x+v.x*t-to.x)<1e-9);assert.ok(Math.abs(from.z+v.z*t-to.z)<1e-9);assert.ok(Math.abs(from.y+v.y*t-.5*GRAVITY*t*t-to.y)<1e-9);}});
 test('swept ball collision detects a fast pass between simulation positions',()=>{const p=nearestOnSegment({x:0,z:0,y:1},{x:2,z:2,y:2},{x:1,z:1});assert.equal(p.t,.5);assert.equal(p.y,1.5);});
@@ -26,14 +26,27 @@ test('juke cooldown and stamina prevent unlimited moves',()=>{
   assert.equal(s.juke(1),true);assert.equal(s.juke(1),false);assert.ok(s.byId.QB.stamina<1);
 });
 
-test('default practice draws offense and defense again for each new rep',()=>{
+test('new sessions default to All-pro drives with random calls and honor explicit options',()=>{
+  const s=new Simulation(2026);
+  assert.equal(s.config.mode,'drive');assert.equal(s.config.difficulty,'allpro');
+  assert.equal(s.config.offense,'random');assert.equal(s.config.coverage,'random');
+  assert.equal(s.byId.FS.latency,.18);
+  s.snap();s.finish('Tackled',4,'tackle');s.next();
+  assert.equal(s.spot,39);assert.equal(s.down,2);assert.equal(s.toGo,6);
+  const custom=new Simulation(2026,{offense:'zone',coverage:'man',difficulty:'rookie',mode:'reps'});
+  assert.equal(custom.play.id,'zone');assert.equal(custom.coverage,'man');
+  assert.equal(custom.config.difficulty,'rookie');assert.equal(custom.byId.FS.latency,.4);
+  custom.snap();custom.finish('Tackled',4,'tackle');custom.next();
+  assert.equal(custom.spot,35);assert.equal(custom.down,1);assert.equal(custom.toGo,10);
+});
+test('default drives draw offense and defense again for each down',()=>{
   const s=new Simulation(2026),offenses=new Set(),defenses=new Set();
-  assert.equal(s.config.offense,'random');assert.equal(s.config.coverage,'random');assert.equal(s.config.mode,'reps');
-  for(let i=0;i<PLAYS.length*15;i++){offenses.add(s.play.id);defenses.add(s.coverage);s.snap();s.finish('Incomplete',0,'incomplete');assert.equal(s.next(),true);}
+  assert.equal(s.config.offense,'random');assert.equal(s.config.coverage,'random');assert.equal(s.config.mode,'drive');
+  for(let i=0;i<PLAYS.length*15;i++){offenses.add(s.play.id);defenses.add(s.coverage);s.snap();s.finish('Incomplete',0,'incomplete');assert.equal(s.next(),true);assert.equal(s.down,(i+1)%4+1);}
   assert.equal(offenses.size,PLAYS.length);assert.equal(defenses.size,4);assert.equal(s.spot,35);assert.equal(s.down,1);
 });
 test('fixed calls repeat until random offense is restored',()=>{
-  const s=new Simulation(13);s.configure({offense:'zone',coverage:'man'});
+  const s=new Simulation(13,{difficulty:'pro',mode:'reps'});s.configure({offense:'zone',coverage:'man'});
   for(let i=0;i<10;i++){assert.equal(s.play.id,'zone');assert.equal(s.coverage,'man');s.snap();s.finish('Tackled',3,'tackle');s.next();}
   assert.equal(s.selectPlay('random'),true);const offenses=new Set();
   for(let i=0;i<40;i++){offenses.add(s.play.id);assert.equal(s.coverage,'man');s.snap();s.finish('Tackled',3,'tackle');s.next();}
@@ -41,7 +54,7 @@ test('fixed calls repeat until random offense is restored',()=>{
   s.selectPlay('corners');for(let i=0;i<5;i++){assert.equal(s.play.id,'corners');s.snap();s.finish('Incomplete',0,'incomplete');s.next();}
 });
 test('resetting, flipping and selecting plays preserve a drive series',()=>{
-  const s=new Simulation(19);s.configure({mode:'drive'});s.snap();s.finish('Tackled',4,'tackle');s.next();
+  const s=new Simulation(19,{difficulty:'pro',mode:'drive'});s.snap();s.finish('Tackled',4,'tackle');s.next();
   const play=s.play.id,coverage=s.coverage;s.config.flip=true;s.reset();
   assert.equal(s.play.id,play);assert.equal(s.coverage,coverage);assert.equal(s.down,2);assert.equal(s.toGo,6);assert.equal(s.spot,39);
   for(const choice of ['mesh','random']){s.selectPlay(choice);assert.equal(s.down,2);assert.equal(s.toGo,6);assert.equal(s.spot,39);}
@@ -60,21 +73,21 @@ test('hot routes mirror with the play and can be restored',()=>{
   assert.equal(s.setHotRoute('QB','streak'),false);assert.equal(s.setHotRoute('X','invalid'),false);s.selectPlay('zone');assert.equal(s.setHotRoute('X','streak'),false);
 });
 test('audibles preserve the drive and defense, clear hot routes, and apply only to this snap',()=>{
-  const s=new Simulation(10,{offense:'mesh',coverage:'man',mode:'drive'});s.snap();s.finish('Tackled',3,'tackle');s.next();s.setHotRoute('A','flat');
+  const s=new Simulation(10,{offense:'mesh',coverage:'man',difficulty:'pro',mode:'drive'});s.snap();s.finish('Tackled',3,'tackle');s.next();s.setHotRoute('A','flat');
   const defense=s.players.filter(p=>p.team==='defense').map(p=>[p.id,p.x,p.z]);
   assert.equal(s.audible('slants'),true);assert.equal(s.play.id,'slants');assert.equal(s.config.offense,'mesh');assert.equal(s.coverage,'man');assert.equal(s.down,2);assert.equal(s.toGo,7);assert.equal(s.spot,38);assert.deepEqual(s.hotRoutes,{});
   assert.deepEqual(s.players.filter(p=>p.team==='defense').map(p=>[p.id,p.x,p.z]),defense);
   s.snap();assert.equal(s.audible('zone'),false);s.finish('Incomplete',0,'incomplete');s.next();assert.equal(s.play.id,'mesh');assert.equal(s.down,3);assert.equal(s.toGo,7);
 });
 test('coverage calls use distinct safety shells, cushions and blitz positions',()=>{
-  const make=coverage=>new Simulation(31,{offense:'mesh',coverage}),three=make('cover3'),two=make('cover2'),man=make('man'),blitz=make('blitz');
+  const make=coverage=>new Simulation(31,{offense:'mesh',coverage,difficulty:'pro',mode:'reps'}),three=make('cover3'),two=make('cover2'),man=make('man'),blitz=make('blitz');
   assert.ok(Math.abs(three.byId.FS.x)<1);assert.ok(three.byId.SS.z-three.spot<10);assert.ok(Math.abs(two.byId.FS.x)>10);assert.ok(two.byId.SS.z-two.spot>16);
   assert.ok(three.byId.CB1.z-three.spot>7);assert.ok(two.byId.CB1.z-two.spot<5);assert.ok(man.byId.CB1.z-man.spot<3);
   assert.ok(blitz.byId.LB1.z-blitz.spot<2);assert.ok(blitz.byId.LB2.z-blitz.spot<2);assert.ok(blitz.players.filter(p=>p.team==='defense').every(p=>p.z-blitz.spot<6));
   man.snap();advance(man,.8);assert.ok(man.byId.FS.z-man.spot>18);assert.ok(man.byId.SS.z-man.spot>18);
 });
 test('the same defensive call varies its front between reps and stays set during adjustments',()=>{
-  const s=new Simulation(91,{offense:'mesh',coverage:'cover3'}),fronts=new Set(),positions=new Set();
+  const s=new Simulation(91,{offense:'mesh',coverage:'cover3',difficulty:'pro',mode:'reps'}),fronts=new Set(),positions=new Set();
   for(let i=0;i<30;i++){fronts.add(s.defensiveFront);positions.add(s.byId.DE1.x);const x=s.byId.DE1.x;s.setHotRoute('X','curl');s.reset();assert.equal(s.byId.DE1.x,x);s.snap();s.finish('Incomplete',0,'incomplete');s.next();}
   assert.equal(fronts.size,4);assert.ok(positions.size>4);
 });
@@ -84,7 +97,7 @@ test('the same defensive call varies its front between reps and stays set during
 
 // A back running free: the zone handoff is done and the defense is moved far away.
 function openField(seed=1){
-  const s=new Simulation(seed,{offense:'zone',coverage:'cover3'});
+  const s=new Simulation(seed,{offense:'zone',coverage:'cover3',difficulty:'pro',mode:'reps'});
   s.snap();advance(s,.8,{z:1});
   for(const d of s.defense){d.x=d.x<0?-26:26;d.z=s.spot+45;d.vx=d.vz=0;}
   return s;
@@ -245,7 +258,7 @@ test('the snapshot carries speed, lean, backpedal and the tackle phase fields of
 });
 
 test('coverage backs backpedal facing the quarterback, then flip when a receiver threatens them',()=>{
-  const s=new Simulation(5,{offense:'verts',coverage:'cover3'}),cb=s.byId.CB1,qb=s.byId.QB;s.snap();
+  const s=new Simulation(5,{offense:'verts',coverage:'cover3',difficulty:'pro',mode:'reps'}),cb=s.byId.CB1,qb=s.byId.QB;s.snap();
   let backpedalled=false,facedQB=true,flippedAt=null;
   for(let i=0;i<360;i++){
     s.step(STEP);
@@ -275,9 +288,9 @@ test('handoffs meet the back at the mesh and both run plays still reach the carr
 });
 
 test('a safety needs the carrier downed in his own end zone; lining up there is legal',()=>{
-  const s=new Simulation(3,{offense:'mesh',coverage:'cover3',spot:11});s.snap();advance(s,.7);
+  const s=new Simulation(3,{offense:'mesh',coverage:'cover3',spot:11,difficulty:'pro',mode:'reps'});s.snap();advance(s,.7);
   assert.equal(s.phase,'live','quarterback in the end zone after the drop');assert.ok(s.byId.QB.z<=10);
-  const t=new Simulation(3,{offense:'mesh',coverage:'cover3',spot:11});t.snap();advance(t,.5);
+  const t=new Simulation(3,{offense:'mesh',coverage:'cover3',spot:11,difficulty:'pro',mode:'reps'});t.snap();advance(t,.5);
   t.byId.QB.x=27;t.step(STEP);assert.equal(t.result.kind,'safety');
 });
 
@@ -329,7 +342,7 @@ test('trailing pursuers shade to their own side of the carrier while they are st
 test('after a tackle the other defenders pull up beside the pile instead of lining up behind it', () => {
   let reps = 0;
   for (let seed = 1; seed <= 40; seed++) for (const play of ['zone', 'stretch']) {
-    const s = new Simulation(seed, { offense: play, coverage: 'random' });
+    const s = new Simulation(seed, { offense: play, coverage: 'random', difficulty: 'pro', mode: 'reps' });
     s.snap();
     // Who was still coming when the carrier was wrapped up (not blocked, not
     // already at arm's length).

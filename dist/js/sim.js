@@ -374,7 +374,7 @@ function routeWant(p, cap) {
 export class Simulation {
   constructor(seed = Date.now(), options = {}) {
     this.random = seededRandom(seed);
-    this.config = { spot: 35, offense: 'random', coverage: 'random', difficulty: 'pro', mode: 'reps', flip: false, ...options };
+    this.config = { spot: 35, offense: 'random', coverage: 'random', difficulty: 'allpro', mode: 'drive', flip: false, ...options };
     this.stats = { reps: 0, attempts: 0, completions: 0, yards: 0, passing: 0, rushing: 0, td: 0, ints: 0, sacks: 0 };
     this.spot = clamp(Number(this.config.spot) || 35, 11, 105);
     this.down = 1; this.toGo = Math.min(10, GOAL - this.spot);

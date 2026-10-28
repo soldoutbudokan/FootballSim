@@ -62,9 +62,14 @@ try {
   assert.equal(await visible('#welcome'), false);
   assert.equal(await page.locator('#offense').inputValue(), 'random');
   assert.equal(await page.locator('#coverage').inputValue(), 'random');
-  assert.equal(await visible('#down-distance'), false);
-  assert.equal(await visible('#to-go-cell'), false);
-  assert.equal(await game(() => window.footballsim.view.firstDown.visible), false);
+  assert.equal(await page.locator('#difficulty').inputValue(), 'allpro');
+  assert.equal(await page.locator('#practice-mode').inputValue(), 'drive');
+  assert.equal(await sim('config.difficulty'), 'allpro');
+  assert.equal(await sim('config.mode'), 'drive');
+  assert.equal(await visible('#down-distance'), true);
+  assert.equal(await page.locator('#down-distance').innerText(), '1ST & 10');
+  assert.equal(await visible('#to-go-cell'), true);
+  assert.equal(await game(() => window.footballsim.view.firstDown.visible), true);
   await shot('02-presnap');
 
   // Camera cycling: game -> broadcast -> all22 -> game.
@@ -106,6 +111,8 @@ try {
   await page.locator('#settings-open').click();
   await page.locator('#graphics').selectOption('performance');
   await page.locator('#coverage').selectOption('cover3');
+  await page.locator('#difficulty').selectOption('pro');
+  await page.locator('#practice-mode').selectOption('reps');
   await page.locator('#apply-settings').click();
   assert.equal(await sim('play.id'), 'mesh');
 
@@ -118,13 +125,27 @@ try {
   await shot('08-hot-routes');
   await page.getByRole('button', { name: 'Close hot routes', exact: true }).click();
 
-  // Pass: snap, hold receiver 1 briefly, release.
+  // Pass: a quarter-second hold must already select a bullet. Keep this input
+  // interval exact even on slow CI renderers, then let the real throw play out.
   await page.getByRole('button', { name: 'Snap ball' }).click();
   await waitFor(() => window.footballsim.sim.time > 1.5);
-  await page.keyboard.down('1');
-  await page.waitForTimeout(250);
-  await page.keyboard.up('1');
+  const chargedStyle = await game(() => {
+    const original = Object.getOwnPropertyDescriptor(performance, 'now');
+    let now = performance.now();
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => now });
+    try {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', code: 'Digit1', bubbles: true }));
+      now += 250;
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: '1', code: 'Digit1', bubbles: true }));
+      return window.footballsim.sim.throwIntent?.style;
+    } finally {
+      if (original) Object.defineProperty(performance, 'now', original);
+      else delete performance.now;
+    }
+  });
+  assert.equal(chargedStyle, 'bullet');
   await waitFor(() => window.footballsim.sim.stats.attempts === 1);
+  assert.equal(await sim('pass.style'), 'bullet');
   await waitFor(() => window.footballsim.sim.phase === 'dead');
   assert.equal(await visible('#result'), true);
   await shot('04-pass-result');
