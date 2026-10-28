@@ -107,7 +107,7 @@ export class Squad {
 // ---------------------------------------------------------------------------
 // Body types. Proportions follow a 6 ft 2 in athlete (H = 2.06 yd): head and
 // helmet about 0.135 H, shoulder-to-hip 0.31 H, hip-to-ground 0.50 H,
-// shoulder-to-wrist 0.36 H. Linemen are taller with a 25 % wider torso.
+// shoulder-to-wrist 0.36 H. Linemen are taller with a broader torso and more upper-leg mass.
 
 export const BODY_TYPES = {
   ol: { height: 2.12, torso: 1.29, limb: 1.24, belly: 1.2 },
@@ -178,7 +178,7 @@ export function createGeometries({ low = false } = {}) {
   });
   return {
     pelvis: loft([
-      { y: -0.094, w: 0.04, d: 0.045, z: -0.01 }, { y: -0.074, w: 0.145, d: 0.1, z: -0.016 }, { y: -0.03, w: 0.194, d: 0.12, z: -0.02 },
+      { y: -0.055, w: 0.045, d: 0.048, z: -0.008 }, { y: -0.035, w: 0.142, d: 0.091, z: -0.009 }, { y: 0.0, w: 0.189, d: 0.117, z: -0.012 },
       { y: 0.03, w: 0.202, d: 0.129, z: -0.012 }, { y: 0.1, w: 0.195, d: 0.126, z: -0.004 }, { y: 0.17, w: 0.187, d: 0.128 },
     ], { ...L(24, 3), ao: AO.pelvis }),
     // The jersey is tucked in: its hem stays well inside the pants, whose top
@@ -188,11 +188,12 @@ export function createGeometries({ low = false } = {}) {
       { y: -0.035, w: 0.165, d: 0.111 }, { y: 0.04, w: 0.174, d: 0.12 }, { y: 0.14, w: 0.193, d: 0.136 }, { y: 0.27, w: 0.206, d: 0.142 },
     ], { ...L(16, 2), capTop: false, capBottom: false, ao: AO.abdomen }),
     chest: loft([
-      { y: -0.06, w: 0.212, d: 0.146, n: 2.2 }, { y: 0.04, w: 0.224, d: 0.153, n: 2.3 }, { y: 0.14, w: 0.244, d: 0.16, n: 2.45 },
-      { y: 0.205, w: 0.26, d: 0.165, n: 2.6 }, { y: 0.255, w: 0.268, d: 0.166, n: 2.7 }, { y: 0.3, w: 0.254, d: 0.158, n: 2.6 },
-      { y: 0.335, w: 0.22, d: 0.14, n: 2.4 }, { y: 0.36, w: 0.165, d: 0.115, n: 2.2 }, { y: 0.377, w: 0.105, d: 0.088 },
-      { y: 0.383, w: 0.072, d: 0.068 },
-    ], { ...L(22, 2), capBottom: false, flipU: true, ao: AO.chest }),
+      { y: -0.06, w: 0.206, d: 0.143, n: 2.1 }, { y: 0.04, w: 0.22, d: 0.153, n: 2.1 },
+      { y: 0.14, w: 0.239, d: 0.163, n: 2.15 }, { y: 0.205, w: 0.253, d: 0.164, n: 2.15 },
+      { y: 0.255, w: 0.252, d: 0.15, n: 2.1 }, { y: 0.3, w: 0.222, d: 0.136 },
+      { y: 0.335, w: 0.174, d: 0.114 }, { y: 0.36, w: 0.125, d: 0.089 },
+      { y: 0.377, w: 0.083, d: 0.07 }, { y: 0.383, w: 0.068, d: 0.065 },
+    ], { ...L(24, 2), capBottom: false, flipU: true, ao: AO.chest }),
     neck: loft([{ y: 0.3, w: 0.073, d: 0.068 }, { y: 0.47, w: 0.063, d: 0.062 }], { ...L(12, 2), capBottom: false, ao: AO.neck }),
     // One pant leg from inside the pelvis, over the knee pad, to the cuff
     // below the knee; it is skinned across the knee so it bends as one piece.
@@ -208,15 +209,17 @@ export function createGeometries({ low = false } = {}) {
       { y: -0.24, w: 0.064, d: 0.067 }, { y: -0.32, w: 0.051, d: 0.052 }, { y: -0.37, w: 0.046, d: 0.048 }, { y: -0.4, w: 0.039, d: 0.04 },
     ], { ...L(12, 2), capTop: false, capBottom: false, ao: AO.upperArm }),
     sleeve: loft([
-      { y: 0.075, w: 0.071, d: 0.079 }, { y: 0.025, w: 0.098, d: 0.102, n: 2.3 },
-      { y: -0.055, w: 0.103, d: 0.104, n: 2.4 }, { y: -0.12, w: 0.094, d: 0.095, n: 2.2 },
+      { y: 0.082, w: 0.038, d: 0.054 }, { y: 0.045, w: 0.078, d: 0.09 },
+      { y: 0.0, w: 0.099, d: 0.103 }, { y: -0.055, w: 0.101, d: 0.103 }, { y: -0.12, w: 0.09, d: 0.092 },
       { y: -0.18, w: 0.081, d: 0.084 }, { y: -0.2, w: 0.079, d: 0.082 },
     ], { ...L(12, 2), capBottom: false, ao: AO.sleeve }),
     cuff: loft([{ y: -0.176, w: 0.083, d: 0.086 }, { y: -0.191, w: 0.0815, d: 0.0845 }], { ...L(12, 1), capTop: false, capBottom: false }),
     forearm: loft([
-      { y: 0.035, w: 0.04, d: 0.042 }, { y: -0.01, w: 0.049, d: 0.049 }, { y: -0.06, w: 0.057, d: 0.055 }, { y: -0.15, w: 0.05, d: 0.045 }, { y: -0.23, w: 0.038, d: 0.035 },
-      { y: -0.33, w: 0.031, d: 0.026 }, { y: -0.36, w: 0.029, d: 0.024 },
-    ], { ...L(10, 2), capTop: false, capBottom: false, ao: AO.forearm }),
+      { y: 0.035, w: 0.042, d: 0.044 }, { y: -0.012, w: 0.051, d: 0.05, z: -0.002 },
+      { y: -0.07, w: 0.06, d: 0.056, z: -0.004 }, { y: -0.13, w: 0.056, d: 0.051, z: -0.003 },
+      { y: -0.2, w: 0.046, d: 0.041 }, { y: -0.27, w: 0.034, d: 0.03, z: 0.002 },
+      { y: -0.33, w: 0.03, d: 0.026, z: 0.002 }, { y: -0.36, w: 0.03, d: 0.025 },
+    ], { ...L(14, 2), capTop: false, capBottom: false, ao: AO.forearm }),
     tape: loft([{ y: -0.255, w: 0.039, d: 0.034 }, { y: -0.335, w: 0.034, d: 0.029 }], { ...L(10, 1), capTop: false, capBottom: false }),
     gloveL: glove({ low }),
     gloveR: mirrorX(glove({ low })),
@@ -368,7 +371,7 @@ export class Rig {
     if (look.towel) body('pelvis', geometry.towel, { pos: [-0.1 * torso, 0.12 * d.k, 0.126 * depth], rot: [-0.1, 0.25, 0.04], color: '#f5f5f2', surface: SURFACE.towel, uv: plain, blend: [['thigh1', 0.1]], detail: true });
 
     // Head: face under the helmet; shell, facemask, strap and visor.
-    const shell = [0, HELMET_CENTRE, 0], helmetScale = [1.08, 1.08, 1.08];
+    const shell = [0, HELMET_CENTRE, 0], headSize = 1.1 * (1 + (torso - 1) * 0.2), helmetScale = [headSize, headSize, headSize];
     body('head', geometry.face, { pos: [0, HELMET_CENTRE - 0.052, 0.022], scale: helmetScale, color: look.skin, surface: SURFACE.skin, uv: plain });
     body('head', geometry.faceDetails, { pos: [0, HELMET_CENTRE - 0.052, 0.022], scale: helmetScale, surface: SURFACE.skin, uv: plain, detail: true });
     helmet('head', geometry.helmet, { pos: shell, scale: helmetScale, surface: SURFACE.shell, uv: (u, v) => [u, 0.2 + 0.8 * v] });

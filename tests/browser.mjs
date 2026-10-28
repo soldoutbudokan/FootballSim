@@ -23,7 +23,7 @@ page.setDefaultTimeout(60000);
 const modelProbe = u => /\/models\/player\.(glb|fbx)$/.test(new URL(u || 'http://x/').pathname);
 page.on('pageerror', e => errors.push(e.message));
 page.on('response', r => { if (r.status() >= 400 && !(r.request().method() === 'HEAD' && modelProbe(r.url()))) errors.push(r.status() + ' ' + r.url()); });
-page.on('console', m => { if (m.type() === 'error' && !modelProbe(m.location()?.url)) errors.push(m.text()); });
+page.on('console', m => { if (m.type() === 'error' && !modelProbe(m.location()?.url)) errors.push(m.text() + ' ' + (m.location()?.url || '')); });
 
 const game = fn => page.evaluate(fn);
 const sim = expression => page.evaluate(`window.footballsim.sim.${expression}`);

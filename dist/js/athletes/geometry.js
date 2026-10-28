@@ -51,7 +51,8 @@ function weldSeam(geometry, rows, cols) {
 // running from the first key (0) to the last (1) and t the angle around the
 // loft (0 = +X). Keys may run up or down (limbs are authored from the joint
 // downwards); `capTop` and `capBottom` always mean the upper and lower end,
-// and faces always point outwards.
+// and faces always point outwards. A partial arc builds a fitted cloth panel
+// (such as a pant stripe); unlike a full tube, its two edges are not welded.
 export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom = true, flipU = false, ao = null, arcStart = 0, arcLength = TAU } = {}) {
   const rings = interpolateRings(keys, subdiv);
   const positions = [], uvs = [], indices = [], colors = [];
@@ -300,19 +301,23 @@ export function faceDetails() {
 
 // Left glove: palm faces +X, thumb on the -Z side, fingers along -Y.
 export function glove({ low = false } = {}) {
-  const detail = low ? { radial: 6, subdiv: 1 } : { radial: 8, subdiv: 2 };
+  const detail = low ? { radial: 6, subdiv: 1 } : { radial: 10, subdiv: 2 };
+  // Relaxed cupped hand: a broad palm, visible knuckles and softly curled
+  // fingers. The palm has real thickness so it does not disappear edge-on.
   const hand = loft([
-    { y: 0.012, w: 0.02, d: 0.03 },
-    { y: -0.02, w: 0.024, d: 0.039 },
-    { y: -0.07, w: 0.024, d: 0.045, n: 2.4 },
-    { y: -0.115, w: 0.02, d: 0.043, n: 2.6 },
-    { y: -0.165, w: 0.016, d: 0.037, n: 2.4 },
-    { y: -0.188, w: 0.009, d: 0.024 },
+    { y: 0.012, w: 0.026, d: 0.029 },
+    { y: -0.018, w: 0.03, d: 0.041 },
+    { y: -0.056, w: 0.033, d: 0.05, n: 2.3 },
+    { y: -0.096, w: 0.033, d: 0.049, x: 0.003, n: 2.5 },
+    { y: -0.133, w: 0.029, d: 0.043, x: 0.011, n: 2.3 },
+    { y: -0.158, w: 0.022, d: 0.036, x: 0.019 },
+    { y: -0.174, w: 0.01, d: 0.024, x: 0.024 },
   ], detail);
   const thumb = loft([
-    { y: 0, w: 0.014, d: 0.016 }, { y: -0.04, w: 0.012, d: 0.013 }, { y: -0.068, w: 0.006, d: 0.007 },
+    { y: 0, w: 0.017, d: 0.018 }, { y: -0.035, w: 0.014, d: 0.016 },
+    { y: -0.062, w: 0.01, d: 0.011 }, { y: -0.074, w: 0.005, d: 0.007 },
   ], detail);
-  thumb.rotateX(-0.55); thumb.rotateZ(-0.25); thumb.translate(0.01, -0.035, -0.035);
+  thumb.rotateX(-0.55); thumb.rotateZ(-0.38); thumb.translate(0.014, -0.028, -0.039);
   const g = mergeGeometries([hand, thumb]);
   g.computeVertexNormals();
   return g;

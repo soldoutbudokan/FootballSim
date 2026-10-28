@@ -3,8 +3,12 @@
 export async function captureModels(page) {
   const base = new URL('.', page.url()).href;
   // Stop the game loop before constructing a small, deterministic studio scene.
-  await page.goto(new URL('models/index.json', base).href);
-  await page.setContent('<!doctype html><html><head><style>body{margin:0;background:#d5dce0;font:14px system-ui;color:#172c40}canvas{display:block}#label{position:fixed;left:36px;top:26px;font-size:18px;font-weight:600;letter-spacing:.08em}</style></head><body><div id="label">PLAYER MODELS · FULL DETAIL</div></body></html>');
+  const studio = new URL('__model-studio__.html', base).href;
+  await page.route(studio, route => route.fulfill({
+    contentType: 'text/html',
+    body: '<!doctype html><html><head><link rel="icon" href="./icon.svg"><style>body{margin:0;background:#d5dce0;font:14px system-ui;color:#172c40}canvas{display:block}#label{position:fixed;left:36px;top:26px;font-size:18px;font-weight:600;letter-spacing:.08em}</style></head><body><div id="label">PLAYER MODELS · FULL DETAIL</div></body></html>',
+  }));
+  await page.goto(studio);
   await page.evaluate(async base => {
     const THREE = await import(new URL('vendor/three.module.js', base).href);
     const { Squad, Rig, createGeometries } = await import(new URL('js/athletes/rig.js', base).href);
@@ -46,7 +50,7 @@ export async function captureModels(page) {
     });
     squad.commit();
     const camera = new THREE.PerspectiveCamera(30, width / height, 0.05, 100);
-    camera.position.set(2.5, 2.65, 10); camera.lookAt(0, 1.02, 0);
+    camera.position.set(2.1, 2.3, 8.4); camera.lookAt(0, 1.02, 0);
     renderer.render(scene, camera);
     window.modelStudio = { renderer, scene, camera, squad };
   }, base);

@@ -160,9 +160,9 @@ function assignPursuitAngles(d, k) {
   };
 }
 
-function createPlayer(spec, team, spot, flip, speedScale = 1) {
+function createPlayer(spec, team, spot, flip) {
   const body = BODY[spec.role];
-  const x = flip ? -spec.x : spec.x, z = spot + spec.z, top = spec.speed * speedScale;
+  const x = flip ? -spec.x : spec.x, z = spot + spec.z, top = spec.speed;
   return {
     ...spec, team, x, z, y: 0, vx: 0, vz: 0,
     facing: team === 'offense' ? 0 : Math.PI,
@@ -662,6 +662,7 @@ export class Simulation {
   // A gap scheme pulls its backside guard behind the line before he leads
   // through the called gap. The other four linemen cover his vacated matchup.
   pullBlock(o) {
+    if ((o.pullStage || 0) >= 2) return false;
     const side = this.config.flip ? -1 : 1, lane = this.play.lane * side;
     o.pullStage ||= 0;
     const target = o.pullStage === 0 ? { x: o.start.x, z: this.spot - 1.9 } : { x: lane, z: this.spot - 1.9 };
