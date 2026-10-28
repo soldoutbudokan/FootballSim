@@ -14,10 +14,33 @@ const extension = url => String(url).split(/[?#]/)[0].split('.').pop().toLowerCa
 export async function loadCharacterFile(url, manager) {
   if (extension(url) === 'fbx') {
     const group = await new FBXLoader(manager).loadAsync(url);
+    mergeDuplicateBones(group);
     return { scene: group, animations: group.animations || [], url };
   }
   const gltf = await new GLTFLoader(manager).loadAsync(url);
   return { scene: gltf.scene || gltf.scenes[0], animations: gltf.animations || [], url };
+}
+
+// FBXLoader gives a bone shared by several skinned meshes one copy per mesh,
+// each copy nested (with an identity transform) under the next. Mixamo
+// characters have two meshes (surface and joints), so every joint would be
+// two nodes and only the outer one is animated. Bind every mesh to the
+// outermost copy and drop the rest, so each joint is a single node. The bind
+// matrices stay valid: the copies always share their world transform.
+export function mergeDuplicateBones(root) {
+  const isCopy = b => b.isBone && b.parent?.isBone && b.parent.name === b.name;
+  const outerOf = b => { let o = b; while (isCopy(o)) o = o.parent; return o; };
+  const copies = [];
+  root.traverse(o => { if (isCopy(o)) copies.push(o); });
+  if (!copies.length) return 0;
+  root.traverse(o => { if (o.isSkinnedMesh) o.skeleton.bones = o.skeleton.bones.map(outerOf); });
+  for (const copy of copies) {
+    const outer = outerOf(copy);
+    for (const child of [...copy.children]) if (!isCopy(child)) outer.add(child);
+  }
+  for (const copy of copies) copy.removeFromParent();
+  root.updateMatrixWorld(true);
+  return copies.length;
 }
 
 // Bones of a loaded scene and their canonical mapping.
