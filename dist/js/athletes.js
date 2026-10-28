@@ -86,7 +86,7 @@ export class Athletes {
     let holderId = null;
     if (!presnap && state.phase !== 'air') {
       holderId = state.carrier || null;
-      if (!holderId && dead) holderId = state.players.find(p => p.action === 'catch')?.id ?? null;
+      if (!holderId && dead) holderId = this.deadBallHolder(state);
     }
     const qb = this.byId.get(this.qbId);
     const b = state.ball;
@@ -105,6 +105,20 @@ export class Athletes {
     this.lastPhase = state.phase;
     this.anticipateCatches(ctx);
     return ctx;
+  }
+
+  // After the whistle with no carrier (an interception) the simulation keeps
+  // the ball, motionless, in a player's hands. A dropped or incomplete ball
+  // is moving or on the turf, so nobody holds it.
+  deadBallHolder(state) {
+    const b = state.ball;
+    if (b.y < 0.8 || Math.hypot(b.vx || 0, b.vy || 0, b.vz || 0) > 0.01) return null;
+    let best = null, gap = 0.6;
+    for (const p of state.players) {
+      const d = Math.hypot(p.x - b.x, p.z - b.z);
+      if (d < gap) { gap = d; best = p.id; }
+    }
+    return best;
   }
 
   // While the ball is in the air, every eligible player gets the point and
