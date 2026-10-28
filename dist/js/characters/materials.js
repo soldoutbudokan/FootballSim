@@ -75,7 +75,19 @@ export class UniformMaterials {
     this.cache = new Map();
     const entries = asset.rig.meshes.flatMap(mesh => (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).map(m => ({ materialName: m.name, meshName: mesh.name })));
     this.mode = recolourMode(entries);
+    // A named number area gets each player's number as its texture (and the
+    // chest/back decals are not added).
+    this.numberSlot = this.mode === 'materials' && entries.some(e => slotForMaterial(e.materialName, e.meshName) === 'number');
     if (this.mode === 'regions') this.regions = this.computeRegions();
+  }
+
+  // The per-player number material (not cached: one per player).
+  numberMaterial(source, map) {
+    const m = toStandard(source);
+    m.map = map; m.color.set('#ffffff');
+    Object.assign(m, FINISH.number);
+    m.needsUpdate = true;
+    return m;
   }
 
   // One cached material per (source material, slot, colour).
@@ -117,12 +129,14 @@ export class UniformMaterials {
   }
 
   // Dresses one cloned player: every skinned mesh gets its uniform.
-  dress(clone, uniform) {
+  //   numberMap: () => texture with the player's number (number slot only)
+  dress(clone, uniform, numberMap = null) {
     clone.traverse(node => {
       if (!node.isSkinnedMesh) return;
       const list = Array.isArray(node.material) ? node.material : [node.material];
       const dressed = list.map(m => {
         const slot = this.mode === 'regions' ? null : slotForMaterial(m.name, node.name);
+        if (slot === 'number' && numberMap) return this.numberMaterial(m, numberMap());
         return this.material(m, slot, slot ? uniform[slot] || '#ffffff' : '#ffffff');
       });
       node.material = Array.isArray(node.material) ? dressed : dressed[0];

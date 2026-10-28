@@ -11,7 +11,7 @@
 // loaders are imported only when a model is actually loaded, so the
 // procedural game downloads nothing extra.
 import { PlaceholderAthletes, controlledPlayer, removeLayer } from './placeholders.js';
-import { athletesChoice, needsProbe, modelPublished } from './choose.js';
+import { athletesChoice, athletesParam, needsProbe, modelPublished, readModelIndex } from './choose.js';
 
 // The release build appends ?v=<hash> to static imports; carry it over to the
 // dynamic one so the pipeline is cache-busted with the rest of the release.
@@ -49,8 +49,13 @@ export class AthletesLayer {
 
   async choose() {
     const search = this.options.search ?? (globalThis.location?.search || '');
-    const published = needsProbe(search) ? await modelPublished(undefined, this.options.fetch) : false;
-    const choice = athletesChoice(search, published);
+    const param = athletesParam(search);
+    // The index (committed, so this never 404s) names the model file and any
+    // separate clip files; the HEAD request tells whether the model is there.
+    const index = param === 'procedural' || param === 'dev' ? null : await readModelIndex(undefined, this.options.fetch);
+    const modelUrl = index?.modelUrl;
+    const published = needsProbe(search) ? await modelPublished(modelUrl, this.options.fetch) : false;
+    const choice = athletesChoice(search, published, modelUrl);
     this.choice = choice;
     if (choice.kind !== 'skinned') {
       this.status = 'procedural';
@@ -60,7 +65,8 @@ export class AthletesLayer {
     this.status = 'loading';
     const { createSkinnedAthletes } = await loadPipeline();
     const layer = await createSkinnedAthletes(this.scene, this.players, {
-      modelUrl: choice.modelUrl, dev: choice.dev, quality: this.profile, camera: this.options.camera, ...(this.options.skinned || {}),
+      modelUrl: choice.modelUrl, clipUrls: choice.dev ? undefined : index?.clipUrls, dev: choice.dev,
+      quality: this.profile, camera: this.options.camera, ...(this.options.skinned || {}),
     });
     this.swap(layer, 'skinned');
     this.status = 'ready';

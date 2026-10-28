@@ -11,6 +11,22 @@ function canvas(w, h) {
 
 // ---- jersey numbers -------------------------------------------------------
 
+// A player's number on a jersey-coloured square, for a model whose number
+// area is its own material ("Number", UVs covering 0..1).
+export function numberTexture(number, color, background) {
+  const c = canvas(256, 256);
+  const g = c.getContext('2d');
+  g.fillStyle = background; g.fillRect(0, 0, 256, 256);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = `800 ${String(number).length > 1 ? 196 : 210}px "Barlow Condensed", "Arial Narrow", Arial, sans-serif`;
+  g.lineWidth = 8; g.strokeStyle = 'rgba(0,0,0,0.18)'; g.strokeText(String(number), 128, 136);
+  g.fillStyle = color; g.fillText(String(number), 128, 136);
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
 // One texture holding every player's number (cells of 128 x 128) in their
 // team's number colour, so all plates share one material.
 export class NumberAtlas {
@@ -48,14 +64,26 @@ export class NumberAtlas {
     const quads = [];
     for (const side of ['front', 'back']) {
       const p = placement[side];
-      const q = new THREE.PlaneGeometry(p.width, p.height);
+      const q = new THREE.PlaneGeometry(p.width, p.height, p.cols ? p.cols - 1 : 1, p.rows ? p.rows - 1 : 1);
       const uv = q.attributes.uv;
       for (let i = 0; i < uv.count; i++) {
-        uv.setXY(i, uv.getX(i) ? cell.u1 : cell.u0, uv.getY(i) ? cell.v1 : cell.v0);
+        uv.setXY(i, cell.u0 + uv.getX(i) * (cell.u1 - cell.u0), cell.v0 + uv.getY(i) * (cell.v1 - cell.v0));
       }
       // Front faces +z (a reader in front sees it unmirrored); back faces -z.
       if (side === 'back') q.rotateY(Math.PI);
-      q.translate(0, p.y, p.z);
+      // Follow the torso: each vertex sits just off the measured surface.
+      const pos = q.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        let z = p.z;
+        if (p.field) {
+          const c = Math.round((pos.getX(i) / p.width + 0.5) * (p.cols - 1));
+          const r = Math.round((pos.getY(i) / p.height + 0.5) * (p.rows - 1));
+          z = p.field[Math.min(p.rows - 1, Math.max(0, r)) * p.cols + Math.min(p.cols - 1, Math.max(0, c))] + p.sign * 0.014;
+        }
+        pos.setZ(i, z);
+      }
+      q.translate(0, p.y, 0);
+      q.computeVertexNormals();
       quads.push(q);
     }
     return mergeGeometries(quads);
@@ -63,28 +91,41 @@ export class NumberAtlas {
 }
 
 // Where the numbers sit on the torso, measured from the rest-pose vertices
-// (character space): the chest's front and back surfaces at number height.
+// (character space): sized from the shoulder width (about 8 in tall on the
+// chest and 10 in on the back for a 6 ft 2 in player), and shaped to the
+// chest: `field` is a small height map of the torso's front (back) surface
+// under the plate, so the plate follows the curve instead of floating in
+// front of it.
+const GRID = [8, 6]; // plate segments across and down
 export function numberPlacement(vertices, joints) {
   const chest = joints.Spine2 || joints.Spine1 || joints.Spine;
   const neck = joints.Neck || [0, chest[1] + 0.2, 0];
   const hips = joints.Hips;
   const top = neck[1] - 0.06, bottom = hips[1] + (neck[1] - hips[1]) * 0.42;
-  const frontY = bottom + (top - bottom) * 0.48, backY = bottom + (top - bottom) * 0.58;
-  const surface = (y, sign) => {
-    let best = sign > 0 ? -Infinity : Infinity;
+  const shoulders = joints.LeftArm && joints.RightArm ? Math.abs(joints.LeftArm[0] - joints.RightArm[0]) : (top - bottom) * 1.4;
+  const plate = (y, width, height, sign) => {
+    const [nx, ny] = GRID, cols = nx + 1, rows = ny + 1;
+    const field = new Float32Array(cols * rows).fill(sign > 0 ? -Infinity : Infinity);
+    const reach = Math.max(width / nx, height / ny) * 0.9;
     for (const data of vertices.values()) {
       for (let i = 0; i < data.length; i += 3) {
-        if (Math.abs(data[i]) > 0.07 || Math.abs(data[i + 1] - y) > 0.05) continue;
-        const z = data[i + 2];
-        if (sign > 0 ? z > best : z < best) best = z;
+        const x = data[i], vy = data[i + 1], z = data[i + 2];
+        if (Math.abs(x) > width / 2 + reach || Math.abs(vy - y) > height / 2 + reach || (z - chest[2]) * sign < 0) continue;
+        const c = Math.round((x / width + 0.5) * nx), r = Math.round(((vy - y) / height + 0.5) * ny);
+        if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+        const k = r * cols + c;
+        if (sign > 0 ? z > field[k] : z < field[k]) field[k] = z;
       }
     }
-    return Number.isFinite(best) ? best : chest[2] + sign * 0.14;
+    // Grid points with no vertex near them take the centre's value.
+    const centre = field[Math.floor(rows / 2) * cols + Math.floor(cols / 2)];
+    const fallback = Number.isFinite(centre) ? centre : chest[2] + sign * 0.14;
+    for (let k = 0; k < field.length; k++) if (!Number.isFinite(field[k])) field[k] = fallback;
+    return { y, width, height, sign, field, cols, rows, z: fallback + sign * 0.012 };
   };
-  const span = top - bottom;
   return {
-    front: { y: frontY, z: surface(frontY, 1) + 0.012, width: span * 0.62, height: span * 0.5 },
-    back: { y: backY, z: surface(backY, -1) - 0.012, width: span * 0.78, height: span * 0.62 },
+    front: plate(bottom + (top - bottom) * 0.5, shoulders * 0.62, shoulders * 0.4, 1),
+    back: plate(bottom + (top - bottom) * 0.56, shoulders * 0.74, shoulders * 0.5, -1),
   };
 }
 

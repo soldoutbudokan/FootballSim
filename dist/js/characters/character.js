@@ -9,6 +9,7 @@ import { planAnimation, ActionClock, approachWeights, estimateLean, ACTION_DURAT
 import { PoseRig } from './pose.js';
 import * as P from './procedural.js';
 import { uniformFor } from './palette.js';
+import { numberTexture } from './props.js';
 import { STANDARD_HEIGHT } from './rig.js';
 
 // Linemen stand 2.12 yd and ~8 % wider (non-uniform scale on the root).
@@ -38,7 +39,9 @@ export class Character {
     this.meshes = [];
     this.body.traverse(o => { if (o.isSkinnedMesh) this.meshes.push(o); });
     this.addLods(asset);
-    shared.materials.dress(this.body, this.uniform);
+    let numberMap = null;
+    const numberFor = () => (numberMap ||= numberTexture(spec.number ?? '', this.uniform.number, this.uniform.jersey));
+    shared.materials.dress(this.body, this.uniform, numberFor);
     for (const m of this.meshes) {
       m.frustumCulled = false; // posed limbs leave the rest-pose bounds; 22 players are always near the camera
       m.receiveShadow = true;
@@ -50,7 +53,7 @@ export class Character {
     this.restLocal = Object.entries(this.bones).map(([c, b]) => ({ b, q: b.quaternion.clone(), p: b.position.clone() }));
     this.pose = new PoseRig(this.bones, shared.base, shared.rest);
 
-    if (shared.atlas && this.bones.Spine2) {
+    if (shared.atlas && this.bones.Spine2 && !shared.materials.numberSlot) {
       const plates = new THREE.Mesh(shared.atlas.plates(spec.id, shared.placement).applyMatrix4(shared.spineInverse), shared.atlas.material);
       plates.name = 'numbers';
       plates.castShadow = false;
