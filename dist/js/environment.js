@@ -116,6 +116,17 @@ export class Environment {
     this.lighting.setQuality(profile);
     const level = profile.props ?? 1;
     this.trees.setCount([0.35, 0.7, 1, 1][Math.min(3, level)]);
+    // Leaf cards are double-sided with alpha to coverage from High up. Below
+    // that, back-facing cards are culled and the cut-out is a plain alpha
+    // test: that halves the leaf overdraw, which dominates the fill cost of
+    // the tree belts, and barely changes how they look.
+    const leaves = this.trees.mesh.material, full = level >= 2;
+    const side = full ? THREE.DoubleSide : THREE.FrontSide;
+    if (leaves.side !== side || leaves.alphaToCoverage !== full) {
+      leaves.side = side;
+      leaves.alphaToCoverage = full;
+      leaves.needsUpdate = true;
+    }
     this.sideline.detail.visible = level >= 1;
     setTurfQuality(this.turf, level >= 1);
     this.grass.setCount(profile.grass || 0);
