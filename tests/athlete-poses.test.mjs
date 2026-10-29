@@ -67,19 +67,24 @@ poseTest('engaged blockers and rushers keep helmets and pads apart with the hand
 });
 
 poseTest('on a pass play unengaged linemen sit in a pass set and coverage players crouch', () => {
-  const r = rep(2, { offense: 'mesh', coverage: 'cover3' });
   const set = [], cover = [];
-  play(r, 2.5, s => {
-    if (s.time < 0.6) return;
-    for (const p of s.players) {
-      const rig = r.athletes.rigs.get(p.id), anim = r.athletes.animators.get(p.id), role = rig.spec.role;
-      if (anim.action !== 'run') continue;
-      const drop = rig.dims.hipY - rig.world.pelvis.y;
-      // Hands up in front of the chest, not hanging at the sides.
-      if (role === 'ol' && p.speed < 3) set.push({ drop, hands: rig.world.hands.every(h => h.y > rig.world.chest.y - 0.05) });
-      if (['cb', 's', 'lb'].includes(role) && p.speed < 1) cover.push(drop);
-    }
-  });
+  // Sample where a posture has blended fully in: a beaten lineman eases back
+  // into his set, and zone defenders match and help, so few stand still for long.
+  for (const [seed, offense, coverage] of [[2, 'mesh', 'cover3'], [3, 'curlflat', 'cover2'], [4, 'spacing', 'cover3']]) {
+    const r = rep(seed, { offense, coverage });
+    play(r, 3.5, s => {
+      if (s.time < 0.6) return;
+      for (const p of s.players) {
+        const rig = r.athletes.rigs.get(p.id), anim = r.athletes.animators.get(p.id), role = rig.spec.role;
+        // Settled frames only: no crossfade from the last action still running.
+        if (anim.action !== 'run' || anim.blend < 1) continue;
+        const drop = rig.dims.hipY - rig.world.pelvis.y;
+        // Hands up in front of the chest, not hanging at the sides.
+        if (role === 'ol' && p.speed < 3 && anim.postures.set > 0.95) set.push({ drop, hands: rig.world.hands.every(h => h.y > rig.world.chest.y - 0.05) });
+        if (['cb', 's', 'lb'].includes(role) && p.speed < 1 && anim.postures.cover > 0.95) cover.push(drop);
+      }
+    });
+  }
   assert.ok(set.length > 20 && cover.length > 5, `samples ${set.length} / ${cover.length}`);
   assert.ok(set.every(s => s.drop > 0.1), 'linemen bend their knees in the set');
   assert.ok(set.filter(s => s.hands).length / set.length > 0.9, 'linemen keep their hands up');
