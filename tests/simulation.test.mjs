@@ -372,3 +372,117 @@ test('after a tackle the other defenders pull up beside the pile instead of lini
   }
   assert.ok(reps > 50, 'enough tackled reps: ' + reps);
 });
+
+// Pass rush. An idle quarterback drops and stands until he is wrapped up;
+// the log keeps block wins, beaten blockers (and when each next locks up
+// with a rusher) and the nearest rusher's distance at 1, 2 and 3 s.
+const gapOf = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+function rushRep(seed, coverage = 'cover3', input = () => ({})) {
+  const s = new Simulation(seed, { offense: 'mesh', coverage, difficulty: 'pro', mode: 'reps' });
+  s.snap();
+  const rushers = s.defense.slice(0, coverage === 'blitz' ? 6 : 4), blockers = [...s.line, s.byId.R];
+  const log = { wins: [], beaten: [], nearest: {}, sackAt: null }, seen = new Map(blockers.map(o => [o.id, o.beatenUntil]));
+  for (let i = 0; i < 1500 && s.phase === 'live'; i++) {
+    s.step(STEP, input(s));
+    if (s.drainEvents().includes('block-win')) log.wins.push(s.time);
+    for (const o of blockers) if (o.beatenUntil !== seen.get(o.id)) { seen.set(o.id, o.beatenUntil); log.beaten.push({ id: o.id, until: o.beatenUntil, relocked: null }); }
+    for (const b of log.beaten) if (b.relocked === null && s.byId[b.id].lock) b.relocked = s.time;
+    for (const t of [1, 2, 3]) if (Math.abs(s.time - t) < STEP / 2) log.nearest[t] = Math.min(...rushers.map(d => gapOf(d, s.byId.QB)));
+  }
+  if (s.phase === 'tackle') log.sackAt = s.time;
+  return { s, rushers, log };
+}
+const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+
+test('the pocket forms, then collapses as the rushers drive their blockers back', () => {
+  const nearest = { 1: [], 2: [], 3: [] };
+  for (let seed = 1; seed <= 12; seed++) {
+    const { s, log } = rushRep(seed);
+    for (const t of [1, 2, 3]) if (log.nearest[t] !== undefined) nearest[t].push(log.nearest[t]);
+    const lt = s.setPoint(s.byId.LT), lg = s.setPoint(s.byId.LG);
+    assert.ok(lt.z < lg.z - 0.5 && lt.x < s.byId.LT.start.x - 0.5, 'the tackle kicks back and out, the guard sets short');
+  }
+  assert.ok(mean(nearest[1]) > 5.5, 'a pocket at 1 s: ' + mean(nearest[1]));
+  assert.ok(mean(nearest[2]) < mean(nearest[1]) - 0.8, 'smaller at 2 s: ' + mean(nearest[2]));
+  assert.ok(mean(nearest[3]) < mean(nearest[2]) - 0.8, 'smaller again at 3 s: ' + mean(nearest[3]));
+});
+
+test('block wins are spread in time and fixed by the seed; nobody is sacked at once', () => {
+  const first = [];
+  for (let seed = 1; seed <= 16; seed++) {
+    const { log } = rushRep(seed);
+    assert.ok(log.wins.length > 0, seed + ': some rusher wins his rep');
+    assert.ok(log.sackAt === null || log.sackAt > 2, seed + ': sacked at ' + log.sackAt);
+    first.push(log.wins[0]);
+  }
+  first.sort((a, b) => a - b);
+  assert.ok(first[0] > 0.9 && first[15] < 5, 'first wins ' + first);
+  assert.ok(first[12] - first[3] > 0.6, 'spread across seeds: ' + first);
+  assert.ok(new Set(first.map(t => t.toFixed(3))).size > 12, 'each seed its own rep');
+  assert.deepEqual(rushRep(5).log.wins, rushRep(5).log.wins, 'the same seed gives the same wins');
+});
+
+test('the back picks up a free blitzer, and runs his route when nobody comes', () => {
+  let picked = 0;
+  for (let seed = 1; seed <= 8; seed++) {
+    let blocked = false;
+    const { log } = rushRep(seed, 'blitz', s => { blocked ||= !!s.byId.R.lock; return {}; });
+    if (blocked) picked++;
+    assert.ok(log.sackAt === null || log.sackAt > 2.1, seed + ': six rushers on five linemen and a back, sacked at ' + log.sackAt);
+  }
+  assert.ok(picked >= 7, 'the back blocked a blitzer in ' + picked + '/8');
+  const s = new Simulation(3, { offense: 'mesh', coverage: 'cover3', difficulty: 'pro', mode: 'reps' }), r = s.byId.R;
+  s.snap();
+  for (let i = 0; i < 300; i++) { s.step(STEP); assert.equal(r.engaged, null, 'four rushers: the back is not needed'); }
+  assert.ok(r.released && gapOf(r, r.start) > 5, 'he released into his route');
+});
+
+test('a scrambling quarterback is chased at speed, with the edge on his side keeping contain', () => {
+  let outside = 0, reps = 0;
+  for (let seed = 1; seed <= 10; seed++) {
+    const s = new Simulation(seed, { offense: 'mesh', coverage: 'cover3', difficulty: 'pro', mode: 'reps' }), qb = s.byId.QB;
+    s.snap();
+    const rushers = s.defense.slice(0, 4), edge = rushers.reduce((a, b) => (b.start.x > a.start.x ? b : a));
+    let out = null;
+    for (let i = 0; i < 600 && s.phase === 'live' && (out === null || s.time - out < 0.6); i++) {
+      s.step(STEP, s.time > 1.2 ? { x: 1, z: -0.15 } : {});
+      if (out === null && qb.x > 4.4) out = s.time;
+    }
+    if (s.phase !== 'live' || out === null) continue;
+    reps++;
+    const speed = mean(rushers.map(d => Math.hypot(d.vx, d.vz)));
+    assert.ok(speed > 3.5, `${seed}: the rush chases at ${speed.toFixed(1)} yd/s`);
+    assert.ok(rushers.filter(d => d.engaged).length <= 2, `${seed}: rushers come off their blocks`);
+    if (edge.x > qb.x) outside++;
+  }
+  assert.ok(reps >= 8, 'scrambles ' + reps);
+  assert.ok(outside >= reps - 2, `the edge kept outside the quarterback in ${outside}/${reps}`);
+});
+
+test('a beaten blocker stumbles for a moment, then can pick up a rusher again', () => {
+  let beaten = 0, again = 0;
+  for (let seed = 1; seed <= 10; seed++) {
+    const { log } = rushRep(seed);
+    for (const b of log.beaten) {
+      beaten++;
+      if (b.relocked === null) continue;
+      again++;
+      assert.ok(b.relocked >= b.until - 1e-9, `${seed}: ${b.id} blocked again only after recovering`);
+    }
+  }
+  assert.ok(beaten > 10, `beaten ${beaten}, blocking again ${again}`);
+  // Hold the winner still 4 yd in front of the quarterback and put the man he
+  // beat back in front of him: no block while he stumbles, a block once he
+  // has recovered.
+  const s = practice(4);s.snap();
+  for (let i = 0; i < 1200 && !s.drainEvents().includes('block-win'); i++) s.step(STEP);
+  const o = s.line.find(o => o.beatenUntil > s.time), d = s.defense.find(d => d.wonAt === s.time), qb = s.byId.QB;
+  assert.ok(o && d, 'a rusher beat his blocker');
+  const hold = () => {
+    Object.assign(d, { x: qb.x + 1, z: qb.z + 4, vx: 0, vz: 0, juke: null });
+    const spot = s.squarePoint(d);Object.assign(o, { x: spot.x, z: spot.z, vx: 0, vz: 0 });
+  };
+  while (s.time < o.beatenUntil - 2 * STEP) { hold();s.step(STEP);assert.equal(o.lock, null, 'no block while beaten');assert.equal(o.action, 'stumble'); }
+  for (let i = 0; i < 12 && !o.lock; i++) { hold();s.step(STEP); }
+  assert.equal(o.lock, d.id, 'recovered, he picks the rusher up again');assert.equal(d.engaged, o.id);
+});

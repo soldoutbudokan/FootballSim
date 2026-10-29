@@ -102,9 +102,44 @@ const MESH_REACH = 1.25;               // QB to back, body centres, at the excha
 const GET_OFF = { ol: 0.06, qb: 0, rb: 0.1, wr: 0.18, te: 0.18, dl: 0.2, lb: 0.28, cb: 0.28, s: 0.28 };
 const DIFFICULTY = {
   // Difficulty changes reads and anticipation, never bodies or catching odds.
-  rookie: { latency: 0.40, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06 },
-  pro: { latency: 0.28, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13 },
-  allpro: { latency: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20 },
+  // `contain`: yards outside a scrambling quarterback the edge rusher on his
+  // side keeps (rush lane discipline).
+  rookie: { latency: 0.40, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06, contain: 0.3 },
+  pro: { latency: 0.28, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, contain: 1.0 },
+  allpro: { latency: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, contain: 1.5 },
+};
+// Pass protection (the pocket). Tackles kick-slide back and out, guards and
+// the centre set short (`kick` yd out, `depth` yd behind the line), and each
+// blocker meets his rusher in the lane: the spot `square` yd from the rusher
+// toward the quarterback, no more than `reach` yd either side of his set.
+// A blocker within `engage` yd of a rusher, and nearer the quarterback than
+// he is, locks up with him; a pair more than `part` yd apart comes unlocked.
+// Locked, the rusher drives the blocker back at the matchup's push speed and
+// wins the rep at a hazard rate of win × (t / ramp)³ per second, t the time
+// since the snap, so pressure builds while the quarterback holds the ball.
+// A spare lineman within `helpRange` yd scales it by `help`; a quarterback
+// out of the pocket (`box` yd wide of the centre) or within `close` yd of the
+// rusher adds `loose`. The winner rips past at `rip` yd/s, `slip` yd to the
+// side he won for each yard toward the quarterback, then aims up to `lean`
+// yd to that side of the quarterback for `burst` s. Nobody can pick him up
+// for `clear` s, and the beaten blocker stumbles for `beaten` s. Ends lined
+// up more than `edge` yd wide rush the arc (aiming `arc` yd outside the
+// quarterback per yard still to go, at most `arcMax`); the others push the
+// A and B gaps (within `gap` yd of the centre). The back checks for a free
+// rusher until `pickup` s after the snap and blocks him if one comes; using
+// him costs `backCost` yd in the protection count, so the line goes first.
+const POCKET = {
+  tackle: { kick: 0.9, depth: 2.0, reach: 2.4 }, guard: { kick: 0.15, depth: 1.2, reach: 2.2 }, centre: { kick: 0, depth: 1.1, reach: 2.4 },
+  square: 0.95, engage: 1.3, part: 2.2, ramp: 2.5, help: 0.5, helpRange: 1.6, box: 4.4, close: 2, loose: 4,
+  beaten: 0.5, clear: 0.3, burst: 0.5, lean: 1.2, rip: 5.5, slip: 0.8, edge: 3.5, arc: 0.6, arcMax: 4.2, gap: 2.4, pickup: 1.2, backCost: 2,
+};
+// Pass-rush matchups: `push` is how fast the pair gives ground (yd/s), `win`
+// the base hazard (per second) and `outside` the share of wins taken on the
+// rusher's outside shoulder.
+const MATCHUP = {
+  edge: { push: 0.75, win: 0.3, outside: 0.7 },    // an end on a tackle: slow to collapse, likelier to win
+  inside: { push: 1.1, win: 0.2, outside: 0.5 },  // a tackle or blitzer on a guard or centre: a steady push
+  back: { push: 1.6, win: 0.8, outside: 0.5 },    // anyone on a back: he gives ground fast
 };
 
 const DEFENSE = [
@@ -176,6 +211,9 @@ function createPlayer(spec, team, spot, flip) {
     // Coverage: `turned` is false while a defender still faces the quarterback.
     turned: team === 'offense', flip: 0,
     latency: 0, seen: null, aim: null, ballRead: 0, ballAware: false, ballSightAt: -9,
+    // Pass protection: `lock` is the partner in a pass-rush rep (it outlasts
+    // a step, unlike `engaged`); a rusher wins once `have` reaches `need`.
+    lock: null, assignment: null, need: 0, have: 0, wonAt: -9, winSide: 0, beatenUntil: -9, pickup: null, released: false,
   };
 }
 
@@ -578,7 +616,7 @@ export class Simulation {
     this.time += dt;
     this.tickActions(dt);
     if (this.phase !== 'tackle') this.planController(input);
-    this.planBlocking();
+    this.planBlocking(dt);
     this.planReceivers();
     this.planHandoff();
     this.planDefense(dt);
@@ -630,12 +668,17 @@ export class Simulation {
     if (p.id === 'QB' && this.time < 0.6 && amount < 0.05) p.want = seekWant(p, { x: p.x, z: this.spot - 6.5 }, 0.5 * p.top);
   }
 
-  // Pass protection and run blocking share one engagement model: each lineman
-  // takes a defender (see assignBlocks), and the pair locks up until the
-  // defender's shed time. Locked defenders drive toward the ball slowly.
-  planBlocking() {
+  // While the quarterback holds a called pass, the line protects the pocket
+  // (see protect). Otherwise (run plays, and after a catch or a scramble over
+  // the line) each lineman takes a defender (see assignBlocks) and the pair
+  // locks up until the defender's shed time; locked defenders drive toward
+  // the ball slowly.
+  planBlocking(dt = STEP) {
     const run = this.play.type === 'run', guard = this.guardPoint();
+    this.byId.R.pickup = null;
     if (this.time < GET_OFF.ol) return;
+    if (this.inPocket()) { this.protect(dt); return; }
+    for (const p of this.players) p.lock = null;
     this.readTheBall();
     const assigned = this.assignBlocks();
     for (const o of this.line) {
@@ -657,6 +700,199 @@ export class Simulation {
       o.want = seekWant(o, target, speedCap(o, run ? 0.85 : 0.5));
       o.sprinting = false;
     }
+  }
+
+  // A called pass while the quarterback still holds the ball behind the line
+  // or has just let it go.
+  inPocket() {
+    return this.play.type !== 'run' && !this.pursuing() && (this.phase === 'live' || this.phase === 'air');
+  }
+
+  pursuing() {
+    return this.phase === 'run' || this.phase === 'tackle' || this.crossedLine || (this.play.type === 'run' && this.time > 0.8);
+  }
+
+  rushers() { return this.defense.slice(0, COVERAGES[this.coverage].rushers); }
+
+  pocketX() { return this.byId.C ? this.byId.C.start.x : 0; }
+
+  // The quarterback has left the pocket sideways.
+  scrambling() { return this.carrier === 'QB' && Math.abs(this.byId.QB.x - this.pocketX()) > POCKET.box; }
+
+  // Where a rusher lined up: his side of the centre, and whether he is an end
+  // outside the tackles.
+  rushSide(d) {
+    const off = d.start.x - this.pocketX();
+    return { off, side: Math.sign(off) || 1, edge: Math.abs(off) > POCKET.edge };
+  }
+
+  matchup(o, d) {
+    return o.role === 'rb' ? MATCHUP.back : this.rushSide(d).edge ? MATCHUP.edge : MATCHUP.inside;
+  }
+
+  // Where a lineman sets: tackles kick back and out, guards and centre short.
+  setPoint(o) {
+    const off = o.start.x - this.pocketX(), a = Math.abs(off);
+    const set = a > 2.4 ? POCKET.tackle : a > 0.8 ? POCKET.guard : POCKET.centre;
+    return { x: o.start.x + Math.sign(off) * set.kick, z: this.spot - set.depth, reach: set.reach };
+  }
+
+  // The spot between a rusher and the quarterback where a blocker squares up.
+  squarePoint(d, extra = 0) {
+    const qb = this.byId.QB, away = scaled(qb.x - d.x, qb.z - d.z, POCKET.square + extra);
+    return { x: d.x + away.x, z: d.z + away.z };
+  }
+
+  // Pass protection. Pairs already locked fight it out first (contest); then
+  // the free blockers (linemen who are neither locked nor beaten, and the
+  // back while he checks) are matched to the free rushers (assignProtection)
+  // and lock up with them on contact. A spare lineman picks up any free
+  // rusher who comes within reach.
+  protect(dt) {
+    const rushers = this.rushers(), rb = this.byId.R;
+    for (const d of rushers) if (d.lock) this.contest(this.byId[d.lock], d, dt);
+    const catching = this.phase === 'air' && this.pass.receiver === 'R';
+    if (catching && rb.lock) { this.byId[rb.lock].lock = null; rb.lock = null; }
+    const back = rb.start.z < this.spot - 3 && this.carrier !== 'R' && !catching && !rb.released;
+    const blockers = this.line.filter(o => !o.lock && this.time >= o.beatenUntil);
+    if (back && !rb.lock && this.time >= rb.beatenUntil) blockers.push(rb);
+    const free = rushers.filter(d => !d.lock);
+    const plan = this.assignProtection(blockers, free);
+    for (const o of [...this.line, rb]) if (!blockers.includes(o)) o.assignment = o.lock;
+    for (const o of blockers) {
+      const d = plan.get(o.id);
+      o.assignment = d ? d.id : null;
+      if (d && this.canLock(o, d)) this.lock(o, d);
+    }
+    for (const o of blockers) {
+      if (o.lock || o.assignment) continue;
+      const d = free.find(q => !q.lock && this.canLock(o, q));
+      if (d) this.lock(o, d);
+    }
+    // The back blocks only once he has a man; with none by the end of his
+    // check he releases into his route for good.
+    if (back && !rb.lock && !rb.assignment && this.time >= POCKET.pickup) rb.released = true;
+    for (const o of this.line) this.passSet(o, rushers);
+    if (back && (rb.lock || rb.assignment)) { this.passSet(rb, rushers); rb.pickup = rb.lock || rb.assignment; }
+  }
+
+  // One blocker's step in protection: locked, stay square between the rusher
+  // and the quarterback, giving ground as the rusher pushes; assigned, meet
+  // him in his lane from the set point; spare, sit behind the nearest block
+  // ready to help; beaten, recover toward the quarterback.
+  passSet(o, rushers) {
+    o.sprinting = false;
+    const back = o.role === 'rb', set = back ? null : this.setPoint(o);
+    if (o.lock) {
+      const d = this.byId[o.lock];
+      this.engage(o, d);
+      o.want = trackWant(o, this.squarePoint(d), { x: d.vx, z: d.vz }, speedCap(o, 0.7));
+      return;
+    }
+    const d = o.assignment ? this.byId[o.assignment] : null;
+    if (d) {
+      const lane = this.squarePoint(d);
+      const target = back ? { x: lane.x, z: Math.min(lane.z, this.spot - 1) }
+        : { x: clamp(lane.x, set.x - set.reach, set.x + set.reach), z: Math.min(set.z, lane.z) };
+      o.want = seekWant(o, target, speedCap(o, back ? 0.85 : 0.6));
+      return;
+    }
+    if (back) return;
+    if (this.time < o.beatenUntil) { o.want = seekWant(o, { x: set.x, z: set.z - 0.6 }, speedCap(o, 0.7)); return; }
+    let near = null;
+    for (const q of rushers) if (!near || dist(q, set) < dist(near, set)) near = q;
+    const behind = near && dist(near, set) < 4 ? this.squarePoint(near, 1) : set;
+    o.want = seekWant(o, { x: clamp(behind.x, set.x - set.reach, set.x + set.reach), z: Math.min(set.z, behind.z) }, speedCap(o, 0.6));
+  }
+
+  // A blocker can only take on a rusher he is in front of (nearer the
+  // quarterback): a beaten man must get back between them first.
+  canLock(o, d) {
+    const qb = this.byId.QB;
+    return dist(o, d) < POCKET.engage && this.time - d.wonAt >= POCKET.clear && dist(o, qb) < dist(d, qb);
+  }
+
+  // Blocker and rusher lock up. The rusher draws how much pressure it takes
+  // him to win this rep (an exponential threshold, so wins are spread in time
+  // and fixed by the seed) and the side he will win on.
+  lock(o, d) {
+    o.lock = d.id; d.lock = o.id; o.assignment = d.id;
+    const m = this.matchup(o, d), { side } = this.rushSide(d);
+    d.need = -Math.log(1 - this.random()); d.have = 0;
+    d.winSide = side * (this.random() < m.outside ? 1 : -1);
+    d.vx *= 0.8; d.vz *= 0.8;
+  }
+
+  // A locked rep. Pressure builds with the time since the snap; a spare
+  // lineman beside the block slows it, and a rusher at the quarterback or a
+  // quarterback out of the pocket speeds it. The winner beats his blocker,
+  // who stumbles and cannot block for a moment.
+  contest(o, d, dt) {
+    if (!o || dist(o, d) > POCKET.part) { if (o) o.lock = null; d.lock = null; return; }
+    const qb = this.byId.QB, m = this.matchup(o, d);
+    let rate = m.win * (this.time / POCKET.ramp) ** 3;
+    if (this.line.some(h => h !== o && !h.lock && !h.assignment && this.time >= h.beatenUntil && dist(h, d) < POCKET.helpRange)) rate *= POCKET.help;
+    if (this.scrambling() || dist(d, qb) < POCKET.close) rate += POCKET.loose;
+    d.have += rate * dt;
+    if (d.have < d.need) return;
+    o.lock = d.lock = null; o.assignment = null;
+    o.beatenUntil = this.time + POCKET.beaten; o.action = 'stumble'; o.actionTime = POCKET.beaten;
+    o.vx *= STUMBLE_SPEED; o.vz *= STUMBLE_SPEED;
+    // The rip or swim: over a quarter second (the juke blend) the rusher
+    // goes from his push to `rip` yd/s past the blocker's shoulder.
+    const toQB = scaled(qb.x - d.x, qb.z - d.z, 1), past = scaled(toQB.x + d.winSide * POCKET.slip, toQB.z, POCKET.rip);
+    d.juke = { t: 0, from: { x: d.vx, z: d.vz }, to: past };
+    d.wonAt = this.time;
+    this.events.push('block-win');
+  }
+
+  // Protection: block the most dangerous rushers, those who would reach the
+  // quarterback first, so the one left free is the farthest; among those
+  // choices take the shortest trips (so the line slides toward an overload),
+  // keep last step's man, and use the back only when the line runs out.
+  // Exact search over every matching (at most six blockers and six rushers).
+  assignProtection(blockers, rushers) {
+    const qb = this.byId.QB, n = blockers.length, k = rushers.length, full = 1 << k;
+    const plan = new Map();
+    if (!n || !k) return plan;
+    const cost = blockers.map(o => rushers.map(d => dist(o, this.squarePoint(d)) - (o.assignment === d.id ? 1 : 0) + (o.role === 'rb' ? POCKET.backCost : 0)));
+    // Leaving a rusher free costs far more than any trip, and more the sooner
+    // he would arrive (about 2 yd of trips per yard nearer the quarterback).
+    const free = rushers.map(d => 100 - 14 * dist(d, qb) / d.top);
+    const best = Array.from({ length: n + 1 }, () => new Float64Array(full));
+    const pick = Array.from({ length: n }, () => new Int8Array(full));
+    for (let mask = 0; mask < full; mask++) for (let j = 0; j < k; j++) if (!(mask & 1 << j)) best[n][mask] += free[j];
+    for (let i = n - 1; i >= 0; i--) for (let mask = 0; mask < full; mask++) {
+      let b = best[i + 1][mask], choice = -1;
+      for (let j = 0; j < k; j++) {
+        if (mask & 1 << j) continue;
+        const c = cost[i][j] + best[i + 1][mask | 1 << j];
+        if (c < b - 1e-9) { b = c; choice = j; }
+      }
+      best[i][mask] = b; pick[i][mask] = choice;
+    }
+    for (let i = 0, mask = 0; i < n; i++) {
+      const j = pick[i][mask];
+      if (j >= 0) { plan.set(blockers[i].id, rushers[j]); mask |= 1 << j; }
+    }
+    return plan;
+  }
+
+  // Where a rusher aims, as a lateral shade (yd, + toward +x) off the
+  // quarterback: an end rushes the arc outside the tackle, bending in as he
+  // reaches the quarterback's depth; an inside man pushes his gap; a rusher
+  // who just won goes past his blocker on that side, then straight in. On a
+  // scramble the end on that side contains (keeps outside leverage) and the
+  // others chase.
+  rushShade(d) {
+    const qb = this.byId.QB, x0 = this.pocketX(), { off, side, edge } = this.rushSide(d);
+    if (this.scrambling()) return edge && Math.sign(qb.x - x0) === side ? side * this.skill.contain : 0;
+    const since = this.time - d.wonAt;
+    if (since < POCKET.burst) return d.winSide * POCKET.lean * (1 - since / POCKET.burst);
+    if (d.wonAt > 0) return 0;
+    const depth = Math.max(0, d.z - qb.z);
+    if (edge) return side * Math.min(POCKET.arcMax, POCKET.arc * depth);
+    return (x0 + clamp(off, -POCKET.gap, POCKET.gap) - qb.x) * clamp(depth / 8, 0, 1);
   }
 
   // A gap scheme pulls its backside guard behind the line before he leads
@@ -725,6 +961,8 @@ export class Simulation {
         p.want = meetWant(p, this.pass.target, (this.pass.duration || 0) - this.pass.elapsed, speedCap(p));
         continue;
       }
+      // A back who picked up a blitzer stays in to block (see protect).
+      if (p.pickup) { p.sprinting = false; continue; }
       // On runs, and once a pass is caught, the other receivers block.
       const blocking = (run && id !== 'R') || (this.completed && this.phase !== 'air');
       if (blocking && this.blockDownfield(p)) continue;
@@ -776,8 +1014,8 @@ export class Simulation {
       if (pursuit) { this.turnHips(d); d.want = this.pursue(d, this.carrier || 'R', speedCap(d), 0, d.leverage); return; }
       if (i < rushers) {
         d.turned = true;
-        const edge = i === 0 || i === 3 ? Math.sign(d.start.x) * 1.5 * Math.max(0, 1 - this.time * 0.35) : 0;
-        d.want = this.pursue(d, 'QB', speedCap(d, 0.92), edge);
+        // Rush lanes (rushShade); flat out once the quarterback scrambles.
+        d.want = this.pursue(d, 'QB', speedCap(d, this.scrambling() ? 1 : 0.92), this.rushShade(d));
         return;
       }
       const cover = this.cover(d, i);
@@ -796,11 +1034,20 @@ export class Simulation {
     });
   }
 
-  // A blocked defender keeps driving toward the ball at a walking pace.
+  // A blocked defender keeps driving toward the ball. In pass protection the
+  // rusher drives his blocker back along his rush lane at the matchup's push
+  // speed and the pair slides with the quarterback; elsewhere he leans toward
+  // the ball at a walking pace.
   drivePast(d) {
+    d.sprinting = false;
+    if (d.lock) {
+      const o = this.byId[d.lock], qb = this.byId.QB;
+      const push = scaled(qb.x + this.rushShade(d) - d.x, qb.z - d.z, this.matchup(o, d).push);
+      d.want = { x: push.x + qb.vx * 0.85, z: push.z };
+      return;
+    }
     const goal = this.guardPoint(), run = this.play.type === 'run' || this.phase === 'run';
     d.want = scaled(goal.x - d.x, goal.z - d.z, run ? 0.3 : 0.6);
-    d.sprinting = false;
   }
 
   // Pursuit with reaction latency (plan 4.3): aim from where the target was
@@ -988,6 +1235,9 @@ export class Simulation {
     const qb = this.byId.QB, live = this.phase === 'live' || this.phase === 'air';
     if (this.phase === 'dead') return speed > 0.5 ? Math.atan2(p.vx, p.vz) : p.facing;
     if (p.engaged && this.byId[p.engaged]) return toward(this.byId[p.engaged]);
+    // Pass blockers kick-slide facing their man (or downfield), never turning
+    // their backs on the rush.
+    if ((p.role === 'ol' || p.pickup) && this.inPocket()) return p.assignment && this.byId[p.assignment] ? toward(this.byId[p.assignment]) : 0;
     if (this.tackle && p.id === this.tackle.tackler) return toward(this.byId[this.carrier]);
     if (p.id === 'QB' && live && !this.crossedLine && p.z < this.spot && speed < 3.5) {
       if (this.play.type === 'run' && !this.handoff) return toward(this.byId.R);
