@@ -73,6 +73,7 @@ const FLIP_TIME = 0.25;                // lateral grip is halved while flipping
 const BACKPEDAL_SPEED = 0.65;          // share of top speed, moving away from facing
 const CUSHION = 3;                     // yards a receiver may close before the flip
 const MAX_BACKPEDAL = 7;               // yards of backpedal before a back must open up
+const WIDE_THREAT = 5;                 // yards across to a vertical that also turns him
 const SHUFFLE_SPEED = 0.88;
 const JUKE = { plant: 0.25, action: 0.45, keep: 0.65, cost: 0.05, minSpeed: 2 };
 const SPRINT_DRAIN = 1 / 9;            // a full tank lasts nine seconds of sprinting
@@ -103,10 +104,13 @@ const GET_OFF = { ol: 0.06, qb: 0, rb: 0.1, wr: 0.18, te: 0.18, dl: 0.2, lb: 0.2
 const DIFFICULTY = {
   // Difficulty changes reads and anticipation, never bodies or catching odds.
   // `contain`: yards outside a scrambling quarterback the edge rusher on his
-  // side keeps (rush lane discipline).
-  rookie: { latency: 0.40, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06, contain: 0.3 },
-  pro: { latency: 0.28, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, contain: 1.0 },
-  allpro: { latency: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, contain: 1.5 },
+  // side keeps (rush lane discipline). `carry`: yards past the line where an
+  // underneath defender gives up a vertical he is carrying when no deep man
+  // has taken it. `help`: how far a defender with an empty zone leans toward
+  // the most open receiver near him (share of the way from his landmark).
+  rookie: { latency: 0.40, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06, contain: 0.3, carry: 16, help: 0.2 },
+  pro: { latency: 0.28, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, contain: 1.0, carry: 21, help: 0.45 },
+  allpro: { latency: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, contain: 1.5, carry: Infinity, help: 0.7 },
 };
 // Pass protection (the pocket). Tackles kick-slide back and out, guards and
 // the centre set short (`kick` yd out, `depth` yd behind the line), and each
@@ -164,9 +168,26 @@ const MAN = {
   blitz: ['', '', 'Y', 'X', 'B', 'R', 'A'],
   base: ['Y', 'R', 'A', 'X', 'B', 'Y', 'A'],
 };
+// Zone landmarks [x, depth past the line] for defenders 4..10. A landmark
+// deeper than 20 yd is a deep zone. Cover 3: curl/flat, two hooks and the
+// strong safety's curl/flat underneath, three deep thirds. Cover 2: two hooks,
+// the middle hole and the corners' flats underneath, two deep halves.
 const ZONES = {
-  cover3: [[-11, 7], [0, 9], [11, 7], [-19, 23], [19, 23], [0, 26], [7, 12]],
+  cover3: [[-13, 7], [-4, 9], [5, 9], [-19, 23], [19, 23], [0, 26], [13, 7]],
   cover2: [[-8, 11], [0, 12], [8, 11], [-23, 5], [23, 5], [-12, 25], [12, 25]],
+};
+// Pattern-matching zones (see planCoverage). Yards and yards past the line.
+const COVER = {
+  window: 8.5, stick: 2,   // an underneath man matches within `window` yd across his landmark; his own man gets `stick` yd more room and is `stick` yd cheaper
+  flat: 3,                 // a curl/flat man takes a receiver in his flat first: `flat` yd cheaper
+  carryAt: 7,              // a matched receiver going upfield past this depth is carried like man coverage
+  vertical: 6, deep: 15,   // a deep threat: past `vertical` yd and going upfield, or past `deep` yd
+  split: 12,               // Cover 3 deep thirds split this far either side of the ball, so the middle owns the seams
+  top: 1, over: 8, topWidth: 4,  // a deep man is on top: `top` to `over` yd deeper and within `topWidth` yd across
+  close: 3,                // a carrier or man defender within this of his receiver counts as help
+  cushion: 1, cushionSpeed: 0.1, floor: 8,  // on top: `cushion` + `cushionSpeed` × his speed deeper, never shallower than `floor`
+  reach: 14, open: 2.5, keep: 1.5,  // help: the most open man within `reach` yd (open: no other defender within `open`), keeping his choice by `keep` yd
+  shade: 0.35,             // an empty deep zone shades this share of the way toward the vertical beside it
 };
 
 function defensiveAlignment(coverage, front, random) {
@@ -214,6 +235,10 @@ function createPlayer(spec, team, spot, flip) {
     // Pass protection: `lock` is the partner in a pass-rush rep (it outlasts
     // a step, unlike `engaged`); a rusher wins once `have` reaches `need`.
     lock: null, assignment: null, need: 0, have: 0, wonAt: -9, winSide: 0, beatenUntil: -9, pickup: null, released: false,
+    // Zone coverage (planCoverage): `job` is this step's task, `match` the
+    // receiver he has, `carrying` whether he runs with him upfield, `handed`
+    // the vertical he passed to a deep man, `helpOn` the open man he leans to.
+    job: null, match: null, carrying: false, handed: null, helpOn: null,
   };
 }
 
@@ -443,7 +468,7 @@ export class Simulation {
     this.selected = 'QB'; this.carrier = 'QB'; this.jukeCooldown = 0;
     this.recording = []; this.recordClock = 0;
     this.completed = false; this.threw = false; this.events = [];
-    this.catchAt = 0; this.possessionAt = 0;
+    this.catchAt = 0; this.possessionAt = 0; this.coverPlanAt = -1; this.coverSeen = {};
     if (newCalls) {
       this.play = this.config.offense === 'random'
         ? PLAYS[Math.floor(this.random() * PLAYS.length)]
@@ -1018,14 +1043,16 @@ export class Simulation {
         d.want = this.pursue(d, 'QB', speedCap(d, this.scrambling() ? 1 : 0.92), this.rushShade(d));
         return;
       }
-      const cover = this.cover(d, i);
+      const cover = this.cover(d);
       if (this.phase === 'air' && d.ballAware) {
         const flight = this.readFlight(d);
         // Stay in coverage when the pass is elsewhere. The read is an estimate
         // from the visible ball, not access to the quarterback's chosen target.
         if (dist(d, flight.target) < Math.min(15, d.top * flight.remaining + 3)) {
           this.turnHips(d);
-          d.want = meetWant(d, flight.target, flight.remaining, speedCap(d));
+          // Brake into the spot: arrive under control instead of running past it.
+          const want = meetWant(d, flight.target, flight.remaining, speedCap(d));
+          d.want = scaled(want.x, want.z, Math.min(Math.hypot(want.x, want.z), Math.sqrt(1.6 * d.brake * dist(d, flight.target))));
           return;
         }
       }
@@ -1114,39 +1141,198 @@ export class Simulation {
     return behind + rel;
   }
 
-  // Zone and man coverage on the receivers as this defender perceives them.
-  cover(d, i) {
-    const cap = speedCap(d);
-    const ids = this.coverage === 'blitz' ? MAN.blitz : MAN.base;
-    if (this.coverage === 'blitz' || (this.coverage === 'man' && i < 9)) {
-      const seen = this.estimate(ids[i - 4], d.latency);
-      const target = { x: seen.x + seen.vx * this.skill.routeLead, z: seen.z + 1.2 + seen.vz * this.skill.routeLead };
-      return { want: trackWant(d, target, { x: seen.vx, z: seen.vz }, cap), threat: seen };
+  // Pattern-matching coverage, planned once a step for every coverage
+  // defender from the receivers as the defense sees them (`latency` seconds
+  // late, carried forward), so difficulty still works through reaction time.
+  // Each defender gets a `job` (see cover):
+  //   man    trail one receiver: man coverage, or a vertical he carries;
+  //   zone   sit on the receiver he matched in his underneath zone;
+  //   top    stay on top of the one deep threat in his deep zone;
+  //   split  midpoint two deep threats, leaning to the one nobody carries;
+  //   lean   move from an anchor toward an open man or a nearby vertical;
+  //   spot   hold his landmark.
+  // Deep men own every vertical in their zone. Underneath men are matched
+  // one receiver each, nearest landmark first, keeping last step's man unless
+  // another is clearly nearer. A matched receiver who goes upfield is carried
+  // until a deep man has him (or past the difficulty's carry depth); only then
+  // is he handed off. A man with nobody to match helps on the open receiver.
+  planCoverage() {
+    this.coverPlanAt = this.time;
+    const spot = this.spot, skill = this.skill, flip = this.config.flip ? -1 : 1;
+    const first = COVERAGES[this.coverage]?.rushers ?? 4;
+    const seen = this.coverSeen = {};
+    for (const id of RECEIVERS) if (!this.byId[id].pickup && this.carrier !== id) seen[id] = this.estimate(id, skill.latency);
+    const ids = Object.keys(seen), order = id => RECEIVERS.indexOf(id);
+    const upfield = r => r.vz > 2.5 && r.vz > Math.abs(r.vx) * 0.8;
+    const men = [], deeps = [], unders = [];
+    const manIds = this.coverage === 'blitz' ? MAN.blitz : MAN.base;
+    this.defense.forEach((d, i) => {
+      if (i < first) return;
+      if (this.coverage === 'blitz' || (this.coverage === 'man' && i < 9)) { men.push({ d, id: manIds[i - 4] }); return; }
+      let x, depth;
+      if (this.coverage === 'man') [x, depth] = [i === 9 ? -12 : 12, 24];
+      else [x, depth] = (ZONES[this.coverage] || ZONES.cover3)[i - 4];
+      const zone = { d, x: x * flip, z: Math.min(115, spot + depth), depth, job: null };
+      (depth > 20 ? deeps : unders).push(zone);
+    });
+    // A receiver is carried (by an underneath man last step, or manned) when
+    // his man is within `close` yd of him.
+    const near = (d, id) => dist(d, seen[id]) < COVER.close;
+    const carried = id => unders.some(u => u.d.carrying && u.d.match === id && near(u.d, id)) || men.some(m => m.id === id && near(m.d, id));
+
+    // Deep zones: thirds (split wide, so the middle owns the seams) or halves.
+    // A vertical stays with last step's deep man while within 2 yd of his zone.
+    deeps.sort((a, b) => a.x - b.x);
+    const edges = deeps.length === 3 ? [-COVER.split, COVER.split] : deeps.length === 2 ? [0] : [];
+    deeps.forEach((z, k) => { z.lo = k ? edges[k - 1] : -Infinity; z.hi = k < edges.length ? edges[k] : Infinity; z.threats = []; });
+    // A deep threat stays one while he is still going upfield near that depth.
+    const wasDeep = id => deeps.some(z => z.d.job?.threats?.includes(id));
+    const vertical = (r, id) => r.z > spot + COVER.deep || (r.z > spot + COVER.vertical && upfield(r)) || (wasDeep(id) && r.z > spot + COVER.vertical - 1 && r.vz > 0);
+    for (const id of ids) {
+      const r = seen[id];
+      if (!vertical(r, id)) continue;
+      const owner = deeps.find(z => z.d.job?.threats?.includes(id) && r.x > z.lo - 2 && r.x < z.hi + 2) || deeps.find(z => r.x >= z.lo && r.x < z.hi);
+      if (owner) owner.threats.push(id);
     }
-    let zx, depth;
-    if (this.coverage === 'man') { zx = (i === 9 ? -12 : 12) * (this.config.flip ? -1 : 1); depth = 24; }
-    else {
-      [zx, depth] = (ZONES[this.coverage] || ZONES.cover3)[i - 4];
-      if (this.config.flip) zx = -zx;
+    for (const z of deeps) {
+      const prev = z.d.job?.threats || [];
+      const danger = id => seen[id].z + 0.5 * Math.max(0, seen[id].vz) + (prev.slice(0, 2).includes(id) ? 2 : 0);
+      const threats = z.threats.sort((a, b) => danger(b) - danger(a) || order(a) - order(b));
+      if (threats.length === 1) z.job = { kind: 'top', id: threats[0], primary: threats[0] };
+      else if (threats.length > 1) {
+        // Two verticals: midpoint them, leaning to the one nobody else has.
+        const [a, b] = threats, ca = carried(a), cb = carried(b), w = ca === cb ? 0.5 : ca ? 0.2 : 0.8;
+        z.job = { kind: 'split', a, b, w, primary: w > 0.75 ? a : w < 0.25 ? b : null };
+      }
+      if (z.job) z.job.threats = threats;
     }
-    let target = { x: zx, z: Math.min(115, this.spot + depth) };
-    const deep = depth > 20;
-    let near = null, best = Infinity;
-    for (const id of RECEIVERS) {
-      const r = this.estimate(id, d.latency);
-      if (Math.abs(r.x - zx) < (deep ? 12 : 8) && r.z > this.spot + (deep ? 9 : -2) && dist(r, target) < best) { best = dist(r, target); near = r; }
+    // A deep man has a receiver when he is assigned to him alone and on top
+    // of him: deeper by `top` to `over` yd and within `topWidth` across.
+    const onTop = (d, r, width) => d.z > r.z + COVER.top && d.z < r.z + COVER.over && Math.abs(d.x - r.x) < width;
+    const deepHas = id => deeps.some(z => z.job?.primary === id && onTop(z.d, seen[id], COVER.topWidth));
+
+    // Underneath: carries first. A carry ends when a deep man has the
+    // receiver, past the carry depth, or (a curl/flat defender sinking with a
+    // vertical with a deep man over it) when a receiver shows in his flat; it
+    // becomes a plain match when the receiver settles back underneath.
+    const deepOver = id => deeps.some(z => z.threats.includes(id) && onTop(z.d, seen[id], 2 * COVER.topWidth));
+    const outside = u => Math.abs(u.x) >= 12 && u.depth <= 8;
+    const inFlat = (u, r) => Math.sign(r.x) === Math.sign(u.x) && Math.abs(r.x) > Math.abs(u.x) - 5 && r.z < spot + 6 && r.z > spot - 2;
+    const taken = new Set();
+    for (const u of unders) {
+      const d = u.d, r = seen[d.match];
+      if (d.handed && (!seen[d.handed] || seen[d.handed].z < spot + COVER.carryAt - 1)) d.handed = null;
+      if (!r) { d.match = null; d.carrying = false; continue; }
+      if (!d.carrying) continue;
+      const flat = outside(u) && r.z > spot + 8 && deepOver(d.match) && ids.some(id => id !== d.match && inFlat(u, seen[id]));
+      if (deepHas(d.match) || r.z > spot + skill.carry || flat) { d.handed = d.match; d.match = null; d.carrying = false; }
+      else if (!upfield(r) && r.z < spot + COVER.carryAt) d.carrying = false;
+      else taken.add(d.match);
     }
-    if (!near) return { want: seekWant(d, target, cap), threat: null };
-    if (deep) {
+    const pairs = [];
+    for (const u of unders) {
+      const d = u.d;
+      if (d.carrying) continue;
+      for (const id of ids) {
+        const r = seen[id], mine = d.match === id;
+        if (taken.has(id) || id === d.handed || r.z < spot - 2 || Math.abs(r.x - u.x) > COVER.window + (mine ? COVER.stick : 0)) continue;
+        if (!mine && (r.z > spot + Math.min(skill.carry, 18) || (r.z > spot + COVER.carryAt && deepHas(id)))) continue;
+        // A curl/flat defender takes the flat first; the hooks wall the inside.
+        pairs.push({ u, id, cost: Math.hypot(r.x - u.x, r.z - u.z) - (mine ? COVER.stick : 0) - (outside(u) && inFlat(u, r) ? COVER.flat : 0) });
+      }
+    }
+    pairs.sort((a, b) => a.cost - b.cost || unders.indexOf(a.u) - unders.indexOf(b.u) || order(a.id) - order(b.id));
+    const matched = new Set();
+    for (const { u, id } of pairs) if (!matched.has(u) && !taken.has(id)) { matched.add(u); taken.add(id); u.d.match = id; }
+    for (const u of unders) {
+      const d = u.d;
+      if (!d.carrying && !matched.has(u)) d.match = null;
+      const r = seen[d.match];
+      if (r && !d.carrying && upfield(r) && r.z > spot + COVER.carryAt) d.carrying = true;
+      if (d.match) u.job = { kind: d.carrying ? 'man' : 'zone', id: d.match, x: u.x, z: u.z };
+    }
+
+    // Help. Each receiver's coverage gap is the distance to the nearest other
+    // coverage defender; a free man leans toward the most open one in reach,
+    // keeping last step's choice unless another is clearly more open.
+    const coverers = this.defense.filter((d, i) => i >= first && !d.engaged && d.action !== 'stumble');
+    const openMan = (d, minDepth, where = () => true) => {
+      let best = null, score = COVER.open;
+      for (const id of ids) {
+        const r = seen[id];
+        if (r.z < spot + minDepth || dist(d, r) > COVER.reach || !where(r)) continue;
+        let gap = Infinity;
+        for (const q of coverers) if (q !== d) gap = Math.min(gap, dist(q, r));
+        if (d.helpOn === id) gap += COVER.keep;
+        if (gap > score) { score = gap; best = id; }
+      }
+      return (d.helpOn = best);
+    };
+    for (const u of unders) {
+      if (u.job) continue;
+      const id = openMan(u.d, 1);
+      u.job = id ? { kind: 'lean', id, w: skill.help, x: u.x, z: u.z, lo: spot + 2, hi: spot + 16 } : { kind: 'spot', x: u.x, z: u.z };
+    }
+    for (const z of deeps) {
+      if (z.job) continue;
+      // An empty deep zone: squeeze an open man underneath in it (a corner
+      // sinking on a hitch), else shade toward the nearest vertical beside
+      // it, else help on any open man near him. He stays deeper than his man.
+      const own = openMan(z.d, 1, r => r.x >= z.lo && r.x < z.hi);
+      if (own) { z.job = { kind: 'lean', id: own, w: skill.help, x: z.x, z: z.z, lo: spot + 4, hi: 115, over: true }; continue; }
+      let beside = null;
+      for (const other of deeps) for (const id of other.threats) if (!beside || Math.abs(seen[id].x - z.x) < Math.abs(seen[beside].x - z.x)) beside = id;
+      if (beside) { z.job = { kind: 'lean', id: beside, w: COVER.shade, x: z.x, z: z.z, lo: z.z, hi: 115, over: true }; continue; }
+      const id = openMan(z.d, 1);
+      z.job = id ? { kind: 'lean', id, w: skill.help, x: z.x, z: z.z, lo: spot + 4, hi: 115, over: true } : { kind: 'spot', x: z.x, z: z.z };
+    }
+    // Man coverage. A man whose receiver stays in to block is free: he robs
+    // the shallow middle and doubles the most open man near him.
+    for (const m of men) {
+      if (seen[m.id]) { m.job = { kind: 'man', id: m.id }; continue; }
+      const x = this.pocketX(), z = spot + 7, id = openMan(m.d, 1);
+      m.job = id ? { kind: 'lean', id, w: Math.max(skill.help, 0.5), x, z, lo: spot + 3, hi: spot + 12 } : { kind: 'spot', x, z };
+    }
+    for (const c of [...men, ...deeps, ...unders]) { if (c.x !== undefined) { c.job.x ??= c.x; c.job.z ??= c.z; } c.d.job = c.job; }
+  }
+
+  // Coverage movement for one defender's job (planCoverage). Returns the
+  // wanted velocity and the receiver who threatens him (for the hip flip).
+  cover(d) {
+    if (this.coverPlanAt !== this.time || !d.job) this.planCoverage();
+    const cap = speedCap(d), job = d.job, seen = this.coverSeen, spot = this.spot;
+    const r = job && job.id ? seen[job.id] : null;
+    if (!job || (job.kind !== 'split' && job.kind !== 'spot' && !r)) return { want: ZERO, threat: null };
+    if (job.kind === 'man') {
+      const lead = this.skill.routeLead, target = { x: r.x + r.vx * lead, z: r.z + 1.2 + r.vz * lead };
+      return { want: trackWant(d, target, { x: r.vx, z: r.vz }, cap), threat: r };
+    }
+    if (job.kind === 'top') {
       // Stay on top: deeper than the receiver by a cushion that grows with his
       // speed, matching his vertical speed instead of waiting at the landmark.
-      const z = Math.max(this.spot + depth, near.z + 2 + Math.max(0, near.vz) * 0.35);
-      target = { x: zx * 0.28 + near.x * 0.72, z };
-      const ahead = near.z > d.z - 8 ? Math.max(0, near.vz) : 0;
-      return { want: trackWant(d, target, { x: near.vx * 0.72, z: ahead }, cap, 1.6), threat: near };
+      const target = { x: job.x * 0.15 + r.x * 0.85, z: Math.max(Math.min(job.z, spot + COVER.floor), r.z + COVER.cushion + Math.max(0, r.vz) * COVER.cushionSpeed) };
+      const ahead = r.z > d.z - 8 ? Math.max(0, r.vz) : 0;
+      return { want: trackWant(d, target, { x: r.vx * 0.72, z: ahead }, cap, 1.6), threat: r };
     }
-    target = { x: zx * 0.28 + near.x * 0.72, z: clamp(near.z + 1, this.spot + 2, this.spot + 16) };
-    return { want: seekWant(d, target, cap), threat: near };
+    if (job.kind === 'split') {
+      const a = seen[job.a], b = seen[job.b], w = job.w, deeper = a.z > b.z ? a : b;
+      const target = { x: job.x * 0.15 + (w * a.x + (1 - w) * b.x) * 0.85, z: Math.max(Math.min(job.z, spot + COVER.floor), deeper.z + COVER.cushion + Math.max(0, deeper.vz) * COVER.cushionSpeed) };
+      const ahead = deeper.z > d.z - 8 ? Math.max(0, deeper.vz) : 0;
+      return { want: trackWant(d, target, { x: (w * a.vx + (1 - w) * b.vx) * 0.85, z: ahead }, cap, 1.6), threat: deeper };
+    }
+    if (job.kind === 'zone') {
+      const target = { x: job.x * 0.15 + r.x * 0.85, z: clamp(r.z + 1, spot + 2, spot + 16) };
+      return { want: seekWant(d, target, cap), threat: r };
+    }
+    if (job.kind === 'lean') {
+      // A point between the anchor and where the receiver is heading; a deep
+      // man stays deeper than him.
+      const ax = r.x + r.vx * 0.3, az = r.z + r.vz * 0.3;
+      let z = clamp(job.z + (az - job.z) * job.w, job.lo, job.hi);
+      if (job.over) z = Math.max(z, r.z + 2);
+      return { want: seekWant(d, { x: job.x + (ax - job.x) * job.w, z: Math.min(115, z) }, cap), threat: r };
+    }
+    return { want: seekWant(d, { x: job.x, z: job.z }, cap), threat: null };
   }
 
   // Until he opens his hips, a coverage defender faces the quarterback, so
@@ -1163,8 +1349,9 @@ export class Simulation {
 
   // Flip and run once a receiver eats the cushion going vertical; flipping
   // out of a backpedal costs a quarter second of grip.
+  // A vertical far to his side also makes him open up and run to it.
   readThreat(d, threat) {
-    const threatened = threat && threat.vz > 4 && threat.z > d.z - CUSHION;
+    const threatened = threat && threat.vz > 4 && (threat.z > d.z - CUSHION || (Math.abs(threat.x - d.x) > WIDE_THREAT && threat.z > d.z - 16));
     if (threatened || d.z - d.start.z > MAX_BACKPEDAL) this.turnHips(d);
   }
 
