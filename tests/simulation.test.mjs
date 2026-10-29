@@ -203,16 +203,55 @@ test('a tackle drags 0-3 yards after contact and the rep ends within 1.2 s of co
   }
 });
 
-test('a missed tackle makes the tackler stumble at 30 % speed and costs the carrier 20 %',()=>{
+test('a missed tackle makes the tackler stumble at 30 % speed and costs the carrier 35 %',()=>{
   const s=openField(2),r=s.byId.R,d=s.byId.LB2;advance(s,1.2,{z:1,sprint:true});
   s.random=()=>.999;d.turned=true;d.x=r.x+.2;d.z=r.z+3;d.vx=0;d.vz=-4;
   let before=null;
   for(let i=0;i<120&&d.action!=='stumble';i++){before=speedOf(r);s.step(STEP,{z:1,sprint:true});}
   assert.equal(d.action,'stumble');assert.equal(s.phase,'run');assert.ok(s.drainEvents().includes('broken-tackle'));
-  assert.ok(speedOf(r)<before*.85,'carrier slowed from '+before+' to '+speedOf(r));
-  assert.ok(Math.abs(d.actionTime-.7)<.02);
+  assert.ok(speedOf(r)<before*.7,'carrier slowed from '+before+' to '+speedOf(r));
+  assert.ok(Math.abs(d.actionTime-.55)<.02);
   advance(s,.3,{z:1,sprint:true});assert.ok(speedOf(d)<.31*d.top+.1,'stumbling defender is slow');
   assert.equal(s.phase,'run','one attempt per contact');
+});
+
+test('a straight runner is tackled by a set defender most of the time; a juke just before contact breaks it often',()=>{
+  // A linebacker stands square in the runner's path 7 yd ahead. Over 40 seeds
+  // the runner either sprints into him or jukes 2 yd before contact.
+  const rep=(seed,juke)=>{
+    const s=openField(seed),r=s.byId.R;advance(s,1.2,{z:1,sprint:true});
+    const d=s.byId.LB2;d.x=r.x;d.z=r.z+7;d.vx=d.vz=0;d.turned=true;
+    let juked=false;
+    for(let i=0;i<240&&s.phase!=='dead';i++){
+      if(juke&&!juked&&Math.hypot(d.x-r.x,d.z-r.z)<2)juked=s.juke(seed%2?1:-1);
+      s.step(STEP,{z:1,sprint:true});
+      const e=s.drainEvents().find(e=>e==='tackle'||e==='broken-tackle');
+      if(e)return e;
+    }
+    return 'none';
+  };
+  let straight=0,juked=0;
+  for(let seed=1;seed<=40;seed++){if(rep(seed,false)==='tackle')straight++;if(rep(seed,true)!=='tackle')juked++;}
+  assert.ok(straight>=30,'straight runner tackled '+straight+' of 40');
+  assert.ok(juked>=14&&juked<=28,'juke broke free '+juked+' of 40');
+});
+
+test('a second man on the same step hits a runner already off balance, and a third joins the wrap',()=>{
+  const s=openField(2),r=s.byId.R;advance(s,1.2,{z:1,sprint:true});
+  const a=s.byId.LB1,b=s.byId.LB3,c=s.byId.SS;
+  for(const [d,dx] of [[a,-.3],[b,.3]]){d.x=r.x+dx;d.z=r.z+1.6;d.vx=d.vz=0;d.turned=true;}
+  // One draw per attempt: the first man misses on .99; .9 beats one man's
+  // odds (under .9) but not the second man's, who closes half the gap to 1.
+  const draws=[.99,.9],odds=[];s.random=()=>draws.length?draws.shift():.5;
+  const chance=s.tackleChance.bind(s);s.tackleChance=(d,q)=>{const p=chance(d,q);odds.push(p);return p;};
+  let events=[];
+  for(let i=0;i<60&&s.phase==='run';i++){s.step(STEP,{z:1,sprint:true});events=s.drainEvents();}
+  assert.deepEqual(events.filter(e=>e==='tackle'||e==='broken-tackle'),['broken-tackle','tackle']);
+  assert.equal(s.phase,'tackle');assert.equal(draws.length,0);
+  assert.equal(odds.length,2);assert.ok(odds[1]<.9,'alone, the second man would have missed at '+odds[1]);
+  // A free defender who arrives during the wrap joins it.
+  c.x=r.x+.5;c.z=r.z+.3;c.vx=c.vz=0;s.step(STEP,{z:1,sprint:true});
+  assert.ok(s.tackle.helpers.has('SS'));assert.equal(c.action,'tackle');
 });
 
 test('a sacked quarterback is wrapped behind the line and the sack is counted once',()=>{

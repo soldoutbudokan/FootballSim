@@ -83,7 +83,23 @@ const DIVE_REACH = 1.7;                // a diving tackle from behind
 const SHED_RANGE = 1.6, SHED_TIME = 0.3;  // a blocked man reads the ball carrier
 const WRAP_KEEP = 0.8;
 const TACKLE_DECEL = 12, GANG_DECEL = 6, TACKLE_HOLD = 0.9;
-const STUMBLE_TIME = 0.7, STUMBLE_SPEED = 0.3, BROKEN_KEEP = 0.8;
+// A miss: the tackler stumbles for STUMBLE_TIME at STUMBLE_SPEED of his top
+// speed; the runner keeps BROKEN_KEEP of his speed through the contact.
+const STUMBLE_TIME = 0.55, STUMBLE_SPEED = 0.3, BROKEN_KEEP = 0.65;
+// Tackle odds (tackleChance). A man who gets his hands on the runner makes
+// `base`; each unit of speed edge ((his speed - the runner's) / 3, ±1.5) is
+// worth `speed`, in full from behind and only `square` of it head on (the
+// runner runs into a man in his path). A runner who cut or juked within
+// `shakeTime` s takes `shaken` off. A man who comes in hot, within
+// `overrunTime` s of a cut or juke, on a line that now misses the runner by
+// over `missAngle`, has been made to overrun him and takes `overrun` off (the
+// larger of the two counts, they do not add up). A second man on the same
+// step hits a runner already off balance: he closes `help` of the gap from
+// his odds to a sure tackle.
+const TACKLE = {
+  base: 0.88, speed: 0.1, square: 0.25, min: 0.25, max: 0.97, help: 0.5,
+  shaken: 0.38, shakeTime: 0.3, overrun: 0.32, overrunTime: 0.8, missAngle: 40 * DEG,
+};
 // Pursuit leverage: each pursuer aims min..min+spread yards to his own side
 // of the carrier's path (the side he lined up on), fading out between `far`
 // and `near` yards from the carrier so he still closes to make the tackle;
@@ -1116,10 +1132,12 @@ export class Simulation {
     if (!c || !pu) return ZERO;
     // Decided once, the first time: far from the pile he eases off where he
     // is; closing on it, he steers to his spot beside it; otherwise (already
-    // at the pile, shed from a block, standing) he stops.
+    // at the pile, shed from a block, standing) he stops. Closing is his own
+    // run at the carrier, who is about to stop: a trailer who was not gaining
+    // on him (one who just missed, say) still takes a spot, not a file.
     if (!pu.mode) {
-      const gap = dist(d, c);
-      pu.mode = gap > pu.radius + PULL_UP.reach ? 'ease' : gap > PULL_UP.pileOn && this.closingSpeed(d, c) > 1 ? 'spot' : 'stop';
+      const gap = dist(d, c), running = (d.vx * (c.x - d.x) + d.vz * (c.z - d.z)) / Math.max(1e-6, gap);
+      pu.mode = gap > pu.radius + PULL_UP.reach ? 'ease' : gap > PULL_UP.pileOn && running > 1 ? 'spot' : 'stop';
       if (pu.mode === 'spot') pu.bearing = this.pullUpBearing(d, c);
     }
     if (pu.mode === 'ease') d.ease = pu.brake;
@@ -1581,20 +1599,26 @@ export class Simulation {
 
   // Contact (plan 4.3): every free defender within reach gets one attempt.
   // A pursuer who cannot close the last yard leaves his feet instead: one
-  // diving attempt from up to DIVE_REACH, at lower odds the farther he dives.
+  // diving attempt from up to DIVE_REACH, at 90 % of his odds at arm's length
+  // down to 70 % at full stretch.
+  // Two men on him at once are not two separate coin flips: once one misses,
+  // the next on the same step hits a runner already off balance (TACKLE.help).
   tryTackles(c) {
     const free = this.defense.filter(d => !d.engaged && d.action !== 'stumble');
     const reach = free.filter(d => dist(d, c) < REACH).sort((a, b) => dist(a, c) - dist(b, c));
-    for (const d of reach) {
-      if (this.random() < this.tackleChance(d, c)) { this.startTackle(d, c); return; }
-      this.brokenTackle(d, c);
-    }
+    let missed = false;
+    const attempt = (d, odds) => {
+      const p = missed ? odds + (1 - odds) * TACKLE.help : odds;
+      if (this.random() < p) { this.startTackle(d, c); return true; }
+      this.brokenTackle(d, c); missed = true;
+      return false;
+    };
+    for (const d of reach) if (attempt(d, this.tackleChance(d, c))) return;
     for (const d of free) {
       const gap = dist(d, c);
       if (gap < REACH || gap > DIVE_REACH || !this.chasing(d, c) || this.closingSpeed(d, c) > 0.5) continue;
       const stretch = (gap - REACH) / (DIVE_REACH - REACH);
-      if (this.random() < this.tackleChance(d, c) * (0.75 - 0.3 * stretch)) { this.startTackle(d, c); return; }
-      this.brokenTackle(d, c);
+      if (attempt(d, this.tackleChance(d, c) * (0.9 - 0.2 * stretch))) return;
     }
   }
 
@@ -1619,10 +1643,17 @@ export class Simulation {
     // How fast the defender himself is coming in, toward the carrier.
     const gap = Math.max(1e-6, dist(c, d));
     const closing = (d.vx * (c.x - d.x) + d.vz * (c.z - d.z)) / gap;
+    // Speed edge counts in full from behind, a quarter of it head on.
     const advantage = clamp((ds - cs) / 3, -1.5, 1.5);
-    const shaken = this.time - c.lastMoveAt < 0.3 && angle > 60 * DEG ? 1 : 0;
-    const overrun = closing > cs + 2 && angle > 70 * DEG ? 1 : 0;
-    return clamp(0.78 + 0.12 * advantage - 0.25 * shaken - 0.10 * overrun, 0.30, 0.97);
+    const behind = (1 + Math.cos(angle)) / 2;
+    const edge = advantage * (TACKLE.square + (1 - TACKLE.square) * behind);
+    // Just cut or juked: the man was set for where the runner was going.
+    const sinceMove = this.time - c.lastMoveAt;
+    const shaken = sinceMove < TACKLE.shakeTime && angle > 60 * DEG ? TACKLE.shaken : 0;
+    // Overrun: the runner's move left a man who came in hot, across or head
+    // on, on a line that no longer points at him.
+    const overrun = sinceMove < TACKLE.overrunTime && ds > cs + 1 && angle > 70 * DEG && closing < ds * Math.cos(TACKLE.missAngle) ? TACKLE.overrun : 0;
+    return clamp(TACKLE.base + TACKLE.speed * edge - Math.max(shaken, overrun), TACKLE.min, TACKLE.max);
   }
 
   startTackle(d, c) {
