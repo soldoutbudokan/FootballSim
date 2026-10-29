@@ -17,9 +17,13 @@ import { Markers } from './athletes/markers.js';
 // their world matrices and instance buffers ready for renderer.render().
 // Distance from the camera (yards) beyond which an athlete is drawn with the
 // reduced meshes, per graphics tier; High and Ultra always draw full detail.
-// An athlete switches back inside the distance minus LOD_HYSTERESIS.
-export const LOD_DISTANCE = { performance: 20, balanced: 30 };
-const LOD_HYSTERESIS = 2;
+// An athlete switches back inside the distance minus LOD_HYSTERESIS. At
+// Balanced the game camera sits about 30 yd from the deep safeties, so the
+// switch is pushed past them (and the band widened) to keep them from popping.
+export const LOD_DISTANCE = { performance: 20, balanced: 40 };
+const LOD_HYSTERESIS = { performance: 2, balanced: 4 };
+// Highest ball (yards) a player reaches for: a leaping two-hand catch.
+const CATCH_TOP = 2.6;
 
 export class Athletes {
   // options.camera: the scene camera, for the distance level of detail
@@ -45,6 +49,7 @@ export class Athletes {
     this.index = new Map(players.map((spec, i) => [spec.id, i]));
     this.levels = new Uint8Array(players.length);
     this.lodDistance = Infinity;
+    this.lodBand = 2;
     this.ball = new Football(this.group, this.materials);
     this.markers = new Markers(this.group, players.length);
     this.qbId = players.find(p => p.role === 'qb')?.id ?? 'QB';
@@ -59,6 +64,7 @@ export class Athletes {
     this.squad.setDetail(profile.detail !== false);
     this.markers.setQuality(profile);
     this.lodDistance = LOD_DISTANCE[profile.id] ?? Infinity;
+    this.lodBand = LOD_HYSTERESIS[profile.id] ?? 2;
   }
 
   // Full or reduced meshes per athlete, by distance from the camera.
@@ -70,7 +76,7 @@ export class Athletes {
       if (i === undefined) continue;
       let d = 0;
       if (Number.isFinite(far)) d = eye ? Math.hypot(p.x - eye.x, 1.1 - eye.y, -p.z - eye.z) : Math.hypot(p.x - controlled.x, p.z - controlled.z) + 11;
-      const limit = this.levels[i] ? far - LOD_HYSTERESIS : far;
+      const limit = this.levels[i] ? far - this.lodBand : far;
       this.levels[i] = d > limit ? 1 : 0;
     }
     this.squad.setLevels(this.levels);
@@ -120,13 +126,17 @@ export class Athletes {
     const qb = this.byId.get(this.qbId);
     const b = state.ball;
     this.ballScene.set(b.x, b.y, -b.z);
+    const pocket = holderId === this.qbId && state.phase === 'live' && !!qb && qb.z < (state.spot ?? 35) + 0.3;
     const ctx = {
       state, phase: state.phase, presnap, dead, reset,
       dt: animDt, realDt: Math.max(0, Math.min(dt, 0.1)), time: this.time,
       deadTime: state.deadTime || 0, spot: state.spot ?? 35, ball: b, ballScene: this.ballScene,
       byId: this.byId, rigs: this.rigs, animators: this.animators,
       holderId, carrierId: state.carrier, qbId: this.qbId,
-      pocket: holderId === this.qbId && state.phase === 'live' && !!qb && qb.z < (state.spot ?? 35) + 0.3,
+      pocket,
+      // Linemen pass protect while the quarterback holds the ball behind the
+      // line and while a pass is in the air; otherwise they run block.
+      protect: pocket || state.phase === 'air',
       // Where the ball was when a pass was caught: the snapshot already puts
       // it in the receiver's hands, the hands still have to meet it there.
       catchFrom: this.lastPhase === 'air' && state.phase !== 'air' ? this.ball.position.clone() : null,
@@ -176,8 +186,10 @@ export class Athletes {
     return best;
   }
 
-  // While the ball is in the air, every eligible player gets the point and
-  // time at which the ball passes closest to him, so hands can reach early.
+  // While the ball is in the air, every player it will pass within reach of
+  // (about 1.3 yd, at a height his hands can get to) gets the point and time
+  // of its closest approach, so his hands can reach for it early. Linemen and
+  // anyone locked in a block do not reach.
   anticipateCatches(ctx) {
     const air = ctx.phase === 'air';
     for (const anim of this.animators.values()) {
@@ -190,17 +202,17 @@ export class Athletes {
       const role = anim.spec.role;
       if (id === this.qbId || role === 'ol') continue;
       const p = ctx.byId.get(id);
-      if (!p || Math.hypot(p.x - b.x, p.z - b.z) > 30) continue;
+      if (!p || p.engaged != null || Math.hypot(p.x - b.x, p.z - b.z) > 30) continue;
       let best = null;
       for (let t = 0; t <= 1.6; t += 1 / 60) {
         const y = b.y + vy * t - 0.5 * GRAVITY * t * t;
-        if (y < 0.2) break;
-        if (y > 3.1) continue;
+        if (y < 0.3) break;
+        if (y > CATCH_TOP) continue;
         const bx = b.x + vx * t, bz = b.z + vz * t;
         const d = Math.hypot(bx - (p.x + (p.vx || 0) * t), bz - (p.z + (p.vz || 0) * t));
         if (!best || d < best.dist) best = { t, dist: d, x: bx, y, z: bz };
       }
-      if (!best || best.dist > 2.2) continue;
+      if (!best || best.dist > 1.3) continue;
       // The hands meet the ball out along its incoming path (relative to the
       // runner), not at the body: back off 0.42 yd from the closest approach.
       const rx = vx - (p.vx || 0), ry = vy - GRAVITY * best.t, rz = vz - (p.vz || 0), rl = Math.hypot(rx, ry, rz) || 1;

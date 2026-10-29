@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SIDES, clamp, lerp, smoothstep, bump, sampleTrack, wrapAngle } from './math.js';
+import { TAU, SIDES, clamp, lerp, smoothstep, bump, sampleTrack, wrapAngle, damp } from './math.js';
 import { armAngles } from './pose.js';
 
 // Action layer: each function modifies the locomotion base pose for one
@@ -153,17 +153,23 @@ function senseCut(anim, data, age) {
 }
 
 // Hands meet a ball approaching through the air (anticipation before the
-// simulation registers the catch). Also turns the head to track the ball.
+// simulation registers the catch): both hands together, elbows soft, eyes on
+// the ball. Only for a ball that passes within reach (anticipateCatches).
 function reachForBall(anim, pose, p, ctx) {
   const reach = anim.reach;
   if (!reach) return;
-  if (ctx.ballScene && reach.t < 1.6 && reach.dist < 4) anim.lookAt(pose, ctx.ballScene, 0.85 * (1 - smoothstep(1.0, 1.6, reach.t)));
-  const w = (1 - smoothstep(0.18, 0.5, reach.t)) * (1 - smoothstep(1.0, 1.8, reach.dist));
+  if (ctx.ballScene && reach.t < 1.6) anim.lookAt(pose, ctx.ballScene, 0.85 * (1 - smoothstep(1.0, 1.6, reach.t)));
+  const w = (1 - smoothstep(0.18, 0.5, reach.t)) * (1 - smoothstep(0.8, 1.3, reach.dist));
   if (w <= 0) return;
   // Turn the shoulders toward the ball, then put both hands on it.
   anim.worldToTilt(pose, reach.point, _a);
   pose.spine.y += clamp(Math.atan2(_a.x, Math.max(0.05, _a.z)), -0.7, 0.7) * w;
   anim.worldToChest(pose, reach.point, _a);
+  // A ball beyond the arms is met where they can get to, elbows still bent.
+  const d = anim.dims, top = _d.set(0, d.shoulder[1], d.shoulder[2]), most = 0.86 * (d.upperArm + d.forearm);
+  _a.sub(top);
+  if (_a.length() > most) _a.setLength(most);
+  _a.add(top);
   for (let i = 0; i < 2; i++) {
     _b.copy(_a); _b.x += SIDES[i] * 0.075;
     pose.hands[i].lerp(_b, w);
@@ -172,6 +178,145 @@ function reachForBall(anim, pose, p, ctx) {
   }
 }
 
+// Which of his feet is the inside one (toward the quarterback), 0 = left,
+// 1 = right, -1 when the quarterback is straight ahead or behind.
+const _qb = new THREE.Vector3();
+function insideFoot(anim, ctx) {
+  const qb = ctx.byId.get(ctx.qbId);
+  if (!qb) return -1;
+  const local = anim.worldToRoot(_qb.set(qb.x, 0, -qb.z), _w);
+  return Math.abs(local.x) < 0.6 ? -1 : local.x > 0 ? 0 : 1;
+}
+
+// Live-ball postures for a player without the ball, shown while he is doing
+// nothing else (the 'run' action): an offensive lineman's pass set while the
+// line protects (ctx.protect) or a two-point drive stance on runs, a
+// defensive lineman's rush crouch, a coverage player's ready crouch. Weight 1
+// when standing, fading out as he speeds up so the gait, the backpedal and
+// the shuffle take over without a pop.
+export function livePosture(anim, p, ctx) {
+  const live = ctx.phase === 'live' || ctx.phase === 'air' || ctx.phase === 'run';
+  if (!live || ctx.holderId === p.id) return null;
+  const role = anim.spec.role, v = anim.speed;
+  if (role === 'ol') {
+    if (!ctx.protect) return { kind: 'drive', w: 1 - smoothstep(2.5, 5, v) };
+    // He kick-slides sideways and back in his set (facing downfield, see
+    // Animator.updateYaw); a run blocker firing forward during the mesh is
+    // not setting.
+    return { kind: 'set', w: (1 - smoothstep(3.8, 5.5, v)) * (1 - smoothstep(0.9, 2.0, p.vz || 0)) };
+  }
+  if (role === 'dl') return { kind: 'drive', w: 1 - smoothstep(2.5, 5, v) };
+  if (role === 'cb' || role === 's' || role === 'lb') return { kind: 'cover', w: 1 - smoothstep(1.0, 2.4, v) };
+  return null;
+}
+
+// Hands up in front of the chest, ready to punch (chest frame).
+function handsUp(pose, d, w, x = 0.14, y = 0.1, z = 0.3) {
+  for (let i = 0; i < 2; i++) {
+    pose.hands[i].lerp(_w.set(SIDES[i] * x * d.torso, y, z), w);
+    pose.elbows[i].lerp(_w.set(SIDES[i] * 0.45, -1, -0.35), w);
+    pose.wrists[i].lerp(_w.set(-0.75, 0, 0), w);
+  }
+}
+
+// Each posture moves the locomotion pose toward itself by weight w.
+export const POSTURES = {
+  // Pass set: knees bent and hips down, a little forward lean, hands up, the
+  // inside foot forward and the outside one kicked back, weight bouncing on
+  // short choppy steps when he is not sliding.
+  set(anim, pose, w, p, ctx) {
+    const d = anim.dims, still = 1 - smoothstep(0.15, 0.7, anim.speed);
+    const chop = Math.sin(TAU * 2.6 * ctx.time + anim.seed * 6);
+    pose.pelvis.y = lerp(pose.pelvis.y, d.hipY - 0.15 + 0.01 * chop * chop * still, w);
+    pose.pelvis.z = lerp(pose.pelvis.z, -0.04, w);
+    pose.hips.set(lerp(pose.hips.x, 0.36, w), pose.hips.y * (1 - w), pose.hips.z * (1 - w));
+    pose.spine.set(lerp(pose.spine.x, 0.02, w), pose.spine.y * (1 - w), pose.spine.z * (1 - w));
+    pose.head.x = lerp(pose.head.x, -0.04, w);
+    const inside = insideFoot(anim, ctx);
+    for (let i = 0; i < 2; i++) {
+      pose.feet[i].z += w * (inside < 0 ? 0 : i === inside ? 0.08 : -0.12);
+      pose.feet[i].y += 0.035 * w * still * Math.max(0, i ? -chop : chop);
+      pose.knees[i].lerp(_w.set(SIDES[i] * 0.4, 0, 1), w);
+    }
+    handsUp(pose, d, w);
+  },
+
+  // Two-point crouch of a lineman off the ball: pads low, hands up.
+  drive(anim, pose, w) {
+    const d = anim.dims;
+    pose.pelvis.y = lerp(pose.pelvis.y, Math.min(pose.pelvis.y, d.hipY - 0.13), w);
+    pose.hips.x = lerp(pose.hips.x, Math.max(pose.hips.x, 0.5), w);
+    pose.spine.x = lerp(pose.spine.x, Math.max(pose.spine.x, 0.14), w);
+    pose.head.x = lerp(pose.head.x, -0.12, w);
+    for (let i = 0; i < 2; i++) pose.feet[i].x += SIDES[i] * 0.06 * w;
+    handsUp(pose, d, w, 0.15, 0.08, 0.33);
+  },
+
+  // Coverage ready crouch: knees bent, hips back, slight forward lean, arms
+  // bent with the hands near the hips, feet staggered (inside foot up), eyes
+  // where the simulation faces him. Linebackers and safeties sit lower.
+  cover(anim, pose, w, p, ctx) {
+    const d = anim.dims, corner = anim.spec.role === 'cb';
+    pose.pelvis.y = lerp(pose.pelvis.y, Math.min(pose.pelvis.y, d.hipY - (corner ? 0.13 : 0.17)), w);
+    pose.pelvis.z = lerp(pose.pelvis.z, -0.04, w);
+    pose.hips.set(lerp(pose.hips.x, corner ? 0.46 : 0.52, w), pose.hips.y * (1 - w), pose.hips.z * (1 - w));
+    pose.spine.set(lerp(pose.spine.x, 0.1, w), pose.spine.y * (1 - w), pose.spine.z * (1 - w));
+    pose.head.set(lerp(pose.head.x, -0.04, w), pose.head.y * (1 - w), pose.head.z);
+    const inside = insideFoot(anim, ctx), lead = inside < 0 ? (anim.seed < 0.5 ? 0 : 1) : inside;
+    for (let i = 0; i < 2; i++) {
+      pose.feet[i].x += SIDES[i] * 0.08 * w;
+      pose.feet[i].z += w * (i === lead ? 0.1 : -0.1);
+      if (i !== lead) pose.footRot[i].x = lerp(pose.footRot[i].x, 0.2, w);
+      pose.knees[i].lerp(_w.set(SIDES[i] * 0.3, 0, 1), w);
+      pose.hands[i].lerp(_w.set(SIDES[i] * 0.25 * d.torso, -0.3, 0.17), w);
+      pose.elbows[i].lerp(_w.set(SIDES[i] * 0.55, -0.45, -0.9), w);
+      pose.wrists[i].lerp(_w.set(0.15, 0, 0), w);
+    }
+  },
+};
+
+// Engaged pairs. How far each body reaches forward of its feet (yards along
+// its facing) for a net torso lean and hips offset: the chest plate and the
+// facemask. Pivoting the whole torso at the hips overestimates the reach, so
+// the pair errs toward space between them.
+const chestFront = (d, lean, hipsZ) => hipsZ + 0.62 * d.k * Math.sin(lean) + 0.165 * (1 + d.torso) / 2 * Math.cos(lean);
+const helmetFront = (d, lean, hipsZ) => hipsZ + 0.88 * d.k * Math.sin(lean) + 0.19;
+
+// Postures of the two men (lean = net torso pitch with room to spare,
+// hipsZ = pelvis ahead of the feet, drop = pelvis below standing height).
+const BLOCK_STYLES = {
+  pass: { lean: 0.26, hipsZ: -0.07, drop: 0.17 },     // blocker in his pass set
+  rush: { lean: 0.6, hipsZ: 0.05, drop: 0.13 },       // rusher leaning into him
+  drive: { lean: 0.55, hipsZ: 0.05, drop: 0.15 },     // run blocker driving
+  anchor: { lean: 0.36, hipsZ: -0.02, drop: 0.16 },   // defender holding his ground
+};
+
+function blockStyle(offense, run, out) {
+  const a = BLOCK_STYLES[offense ? 'pass' : 'rush'], b = BLOCK_STYLES[offense ? 'drive' : 'anchor'];
+  out.lean = lerp(a.lean, b.lean, run); out.hipsZ = lerp(a.hipsZ, b.hipsZ, run); out.drop = lerp(a.drop, b.drop, run);
+  return out;
+}
+
+// The share of each man's full lean that fits in the gap (the same for both
+// men, so the two always agree), and how far both sit back when even upright
+// bodies would touch.
+const MARGIN = 0.06;
+function pairFit(gap, dA, sA, dB, sB) {
+  const need = f => {
+    const la = sA.lean * f, lb = sB.lean * f;
+    const ca = chestFront(dA, la, sA.hipsZ), cb = chestFront(dB, lb, sB.hipsZ);
+    const ha = helmetFront(dA, la, sA.hipsZ), hb = helmetFront(dB, lb, sB.hipsZ);
+    return Math.max(ca + cb, ha + cb, hb + ca);
+  };
+  const room = gap - MARGIN;
+  if (need(1) <= room) return { f: 1, back: 0 };
+  if (need(0) > room) return { f: 0, back: (need(0) - room) / 2 };
+  let lo = 0, hi = 1;
+  for (let k = 0; k < 10; k++) { const m = (lo + hi) / 2; if (need(m) <= room) lo = m; else hi = m; }
+  return { f: lo, back: 0 };
+}
+const _styleA = {}, _styleB = {};
+
 const THROW_RIGHT = [[0, -0.075, 0.15, 0.27], [0.07, -0.21, 0.37, 0.02], [0.15, -0.27, 0.45, -0.16], [0.23, -0.16, 0.57, 0.36], [0.3, -0.03, 0.24, 0.47], [0.4, 0.14, -0.1, 0.33]];
 const THROW_LEFT = [[0, 0.075, 0.15, 0.27], [0.08, 0.19, 0.19, 0.42], [0.17, 0.2, 0.15, 0.46], [0.23, 0.23, 0.02, 0.2], [0.4, 0.22, -0.12, -0.04]];
 const THROW_SPINE = [[0, 0.08, 0, 0], [0.12, -0.02, -0.6, 0.12], [0.18, -0.04, -0.62, 0.12], [0.23, 0.18, 0.15, -0.05], [0.32, 0.4, 0.42, -0.12], [0.4, 0.38, 0.45, -0.15]];
@@ -179,10 +324,13 @@ const THROW_HIPS = [[0, 0.15, 0, 0], [0.12, 0.1, -0.35, 0], [0.2, 0.12, -0.1, 0]
 
 export const ACTIONS = {
   run(anim, pose, age, data, p, ctx) {
+    for (const kind in POSTURES) if (anim.postures[kind] > 0.005) POSTURES[kind](anim, pose, anim.postures[kind], p, ctx);
     if (ctx.phase === 'air') reachForBall(anim, pose, p, ctx);
-    // After the whistle, players who are standing around put their hands on their hips.
-    if (ctx.dead) {
-      const w = smoothstep(0.8, 1.7, ctx.deadTime) * (1 - smoothstep(0.4, 1.2, anim.speed));
+    // After the whistle, most players who are standing around put their
+    // hands on their hips, each in his own time rather than all at once.
+    if (ctx.dead && anim.seed < 0.7) {
+      const start = 0.7 + 0.9 * anim.seed;
+      const w = smoothstep(start, start + 0.9, ctx.deadTime) * (1 - smoothstep(0.4, 1.2, anim.speed));
       if (w > 0) {
         anim.prepareChest(pose);
         for (let i = 0; i < 2; i++) {
@@ -200,15 +348,32 @@ export const ACTIONS = {
     pose.spine.x += 0.04;
   },
 
+  // Ball in both hands at the numbers. Dropping (or shuffling) he stays
+  // tall with the ball up; set in the pocket he flexes his knees, staggers
+  // his feet a third of a yard (left foot forward), keeps his shoulders
+  // square downfield and bounces lightly while his eyes scan the field.
   pocket(anim, pose, age, data, p, ctx) {
-    pose.hands[0].set(0.075, 0.09, 0.28); pose.hands[1].set(-0.075, 0.1, 0.28);
-    pose.elbows[0].set(0.9, -1, 0); pose.elbows[1].set(-0.9, -1, 0);
+    const d = anim.dims, t = ctx.time;
+    pose.hands[0].set(0.075, 0.14, 0.25); pose.hands[1].set(-0.075, 0.15, 0.25);
+    pose.elbows[0].set(0.9, -1, -0.1); pose.elbows[1].set(-0.9, -1, -0.1);
     pose.wrists[0].set(-0.2, 0, -0.9); pose.wrists[1].set(-0.2, 0, 0.9);
     // Quarterbacks drop back tall, even when shuffling backwards.
     pose.spine.x = Math.min(pose.spine.x, 0.12);
     pose.hips.x = Math.min(pose.hips.x, 0.16);
-    pose.pelvis.y = Math.max(pose.pelvis.y, anim.dims.hipY - 0.12);
-    pose.head.y = 0.35 * Math.sin(ctx.time * 0.8 + anim.seed * 3);
+    pose.pelvis.y = Math.max(pose.pelvis.y, d.hipY - 0.12);
+    const set = 1 - smoothstep(0.5, 1.8, anim.speed);
+    if (set > 0) {
+      const bounce = Math.sin(TAU * 1.7 * t + anim.seed * 5);
+      pose.pelvis.set(lerp(pose.pelvis.x, 0.015 * Math.sin(TAU * 0.6 * t + anim.seed * 3), set), lerp(pose.pelvis.y, d.hipY - 0.085 + 0.008 * bounce, set), lerp(pose.pelvis.z, 0, set));
+      pose.hips.set(lerp(pose.hips.x, 0.16, set), lerp(pose.hips.y, -0.12, set), pose.hips.z * (1 - set));
+      pose.spine.set(lerp(pose.spine.x, 0.05, set), lerp(pose.spine.y, 0.12, set), pose.spine.z * (1 - set));
+      pose.feet[0].lerp(_a.set(0.15, d.ankle, 0.17), set);
+      pose.feet[1].lerp(_a.set(-0.17, d.ankle, -0.16), set);
+      pose.footRot[0].lerp(_a.set(0, 0.1, 0), set);
+      pose.footRot[1].lerp(_a.set(0, -0.4, 0), set);
+      for (let i = 0; i < 2; i++) pose.knees[i].lerp(_a.set(SIDES[i] * 0.3, 0, 1), set);
+    }
+    pose.head.set(0, 0.45 * Math.sin(t * 0.8 + anim.seed * 3), 0);
   },
 
   // Wind-up, stride, release at 0.23 s, follow-through across the body.
@@ -284,33 +449,65 @@ export const ACTIONS = {
   cut: plantAndDrive,
   juke: plantAndDrive,
 
-  // Engaged: low, wide base, hands inside on the opponent's chest.
-  // The closer the two are, the more upright they stand, so the pads meet
-  // and the helmets slide past each other (each puts his head to his left
-  // side of the opponent) instead of passing through one another.
+  // Engaged pair. The blocker sits in his pass set: hips down, back fairly
+  // upright, arms out with the hands on the rusher's chest plate, elbows in.
+  // The rusher leans into him with his hands on the blocker's shoulder pads.
+  // On runs the blocker drives and the defender anchors. Each puts his helmet
+  // to his own left of the other man's, and the lean of both shrinks with the
+  // gap (pairFit) so bodies never pass through each other: a tight gap
+  // straightens them up.
   block(anim, pose, age, data, p, ctx) {
-    const d = anim.dims;
+    const d = anim.dims, offense = anim.spec.team === 'offense';
     const q = p.engaged != null ? ctx.byId.get(p.engaged) : null;
+    const other = q ? ctx.animators.get(q.id) : null;
     const gap = q ? Math.hypot(q.x - p.x, q.z - p.z) : 1.3;
-    const lean = smoothstep(0.75, 1.35, gap);
-    pose.pelvis.y = d.hipY - 0.2 + 0.05 * (1 - lean);
-    pose.pelvis.z -= 0.08 * (1 - lean);
-    pose.hips.x = 0.3 + 0.22 * lean; pose.spine.x = 0.1 + 0.2 * lean;
-    pose.spine.y = -0.12; pose.spine.z = -0.05;
-    pose.feet[0].x += 0.12; pose.feet[1].x -= 0.12;
-    pose.feet[0].z += 0.06; pose.feet[1].z -= 0.06;
-    pose.head.set(-0.1, 0.25, 0);
-    const opp = q ? bodyPoint(ctx, p.engaged, 'chest', _a, 1.35) : null;
-    if (opp) {
-      anim.worldToChest(pose, opp, _b);
-      // Contact surface: a little short of the opponent's chest centre.
-      const len = Math.hypot(_b.x, _b.y - 0.2, _b.z);
-      _b.multiplyScalar(Math.max(0, len - 0.17) / Math.max(len, 1e-3));
-    } else _b.set(0, 0.2, 0.55);
+    // Run or pass, eased so a block that starts during the mesh does not pop.
+    const run = ctx.protect ? 0 : 1;
+    data.run = data.run === undefined ? run : damp(data.run, run, 5, ctx.dt);
+    const mine = blockStyle(offense, data.run, _styleA);
+    let fit = { f: 1, back: 0 };
+    if (other) {
+      const theirs = blockStyle(other.spec.team === 'offense', data.run, _styleB);
+      // Offense first, so both men get the same answer.
+      fit = offense ? pairFit(gap, d, mine, other.dims, theirs) : pairFit(gap, other.dims, theirs, d, mine);
+    }
+    const lean = mine.lean * fit.f, chop = Math.sin(ctx.time * 9 + anim.seed * 5);
+    pose.pelvis.set(0.02, d.hipY - mine.drop + 0.01 * chop, mine.hipsZ - fit.back);
+    pose.hips.set(0.7 * lean, 0, 0);
+    // Head to his own left: shoulders rolled a little that way.
+    pose.spine.set(0.3 * lean, 0, -0.1);
+    pose.head.set(offense ? -0.04 : -0.1, -0.22, 0);
     for (let i = 0; i < 2; i++) {
-      pose.hands[i].set(_b.x + SIDES[i] * 0.13, _b.y + 0.02 * Math.sin(ctx.time * 9 + i * 2), _b.z);
-      pose.elbows[i].set(SIDES[i] * 0.5, -1, -0.2);
-      pose.wrists[i].set(-1.1, 0, 0);
+      pose.feet[i].x += SIDES[i] * 0.12;
+      // Blocker: left foot a little ahead. Rusher: feet driving back under him.
+      pose.feet[i].z += offense ? (i ? -0.06 : 0.06) : (i ? -0.16 : -0.02);
+      pose.knees[i].set(SIDES[i] * 0.35, 0, 1);
+    }
+    const rig = q ? ctx.rigs.get(q.id) : null;
+    // The hands travel to their spot (from wherever they were) instead of
+    // jumping when he locks on, or switches to another man.
+    data.hands ??= [anim.pose.hands[0].clone(), anim.pose.hands[1].clone()];
+    const follow = 1 - Math.exp(-30 * ctx.dt);
+    for (let i = 0; i < 2; i++) {
+      if (rig) {
+        // A point on the opponent's body (his chest frame): my left hand lands
+        // on his right side. The wrist stops short of the surface so the palm,
+        // not the wrist, meets it.
+        const od = rig.dims, depth = (1 + od.torso) / 2, s = -SIDES[i];
+        if (offense) _a.set(s * 0.12 * od.torso, 0.21 * od.k, 0.16 * depth);
+        else _a.set(s * 0.2 * od.torso, 0.33 * od.k, 0.12 * depth);
+        _a.applyMatrix4(rig.chest.matrixWorld);
+        anim.worldToChest(pose, _a, _b);
+        _c.set(SIDES[i] * d.shoulder[0], d.shoulder[1], d.shoulder[2]);
+        _d.subVectors(_b, _c);
+        const len = _d.length();
+        if (len > 0.1) _b.addScaledVector(_d, -0.07 / len);
+        data.hands[i].lerp(_b, follow);
+      }
+      // Without a man (the block just ended) the hands hold where they were.
+      pose.hands[i].set(data.hands[i].x, data.hands[i].y + 0.015 * Math.sin(ctx.time * 9 + i * 2), data.hands[i].z);
+      pose.elbows[i].set(SIDES[i] * (offense ? 0.3 : 0.65), -1, -0.15);
+      pose.wrists[i].set(offense ? -1.15 : -0.8, 0, 0);
     }
   },
 

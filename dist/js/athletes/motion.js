@@ -2,7 +2,7 @@ import * as THREE from '../../vendor/three.module.js';
 import { Pose, chestMatrix, tiltMatrix, armAngles } from './pose.js';
 import { TAU, SIDES, clamp, lerp, smoothstep, fract, damp, wrapAngle, approachAngle, hashString } from './math.js';
 import { applyStance } from './stances.js';
-import { ACTIONS, startAction } from './actions.js';
+import { ACTIONS, startAction, livePosture, POSTURES } from './actions.js';
 
 // Seconds each timed action lasts in the simulation (plan section 3.4).
 const DURATIONS = { throw: 0.4, catch: 0.45, juke: 0.45, cut: 0.2, tackle: 1.0, stumble: 0.7 };
@@ -32,7 +32,7 @@ export class Animator {
     this.work = new Pose();
     this.prevPose = new Pose();
     this.yaw = Math.PI;
-    this.speed = 0; this.accel = 0; this.lean = 0; this.turn = 0; this.heading = 0; this.backpedal = false;
+    this.speed = 0; this.accel = 0; this.lean = 0; this.turn = 0; this.heading = 0; this.backpedal = false; this.bp = 0;
     this.cycle = this.seed; this.stepLen = 1; this.lastPhase = null;
     this.local = new THREE.Vector2(0, 1);     // movement direction in the root frame
     this.action = null; this.age = 0; this.data = {};
@@ -42,6 +42,9 @@ export class Animator {
     this.reach = null;                          // live anticipation of a pass {point, t, dist}
     this.fresh = true;
     this.x = 0; this.z = 0;
+    // Live-ball postures without the ball (pass set, rush, coverage crouch),
+    // each faded in and out on its own so switching between them never pops.
+    this.postures = Object.fromEntries(Object.keys(POSTURES).map(k => [k, 0]));
     this.chestInverse = new THREE.Matrix4();
   }
 
@@ -50,8 +53,11 @@ export class Animator {
     this.x = p.x; this.z = p.z;
     this.kinematics(p, ctx, teleport);
 
-    const action = this.resolveAction(p, ctx);
+    const action = this.resolveAction(p, ctx, teleport);
     if (teleport || action !== this.action) {
+      // A switch before the last cross-fade has finished fades from the pose
+      // on screen, held still; re-evaluating only the last action would pop.
+      this.held = !teleport && this.blend < 1 && this.prevAction ? (this.heldPose ||= new Pose()).copy(this.pose) : null;
       this.prevAction = teleport ? null : this.action;
       this.prevAge = this.age;
       this.prevData = this.data;
@@ -72,13 +78,15 @@ export class Animator {
       this.prevAge += ctx.dt;
     }
 
+    this.updatePostures(p, ctx, teleport);
     this.updateYaw(p, ctx, teleport);
     this.advanceGait(p, ctx, teleport);
     this.locomotion(this.base, p, ctx);
 
     this.evaluate(this.work.copy(this.base), this.action, this.age, this.data, p, ctx);
     if (this.blend < 1 && this.prevAction) {
-      this.evaluate(this.prevPose.copy(this.base), this.prevAction, this.prevAge, this.prevData, p, ctx);
+      if (this.held) this.prevPose.copy(this.held);
+      else this.evaluate(this.prevPose.copy(this.base), this.prevAction, this.prevAge, this.prevData, p, ctx);
       this.pose.copy(this.prevPose).lerp(this.work, smoothstep(0, 1, this.blend));
     } else {
       this.pose.copy(this.work);
@@ -115,16 +123,22 @@ export class Animator {
     const right = vx * Math.cos(facing) - vz * Math.sin(facing);
     if (speed > 0.05) this.local.set(-right / speed, forward / speed);
     this.backpedal = typeof p.backpedal === 'boolean' ? p.backpedal : (forward < -0.45 * speed && speed > 0.8);
+    // Backpedal weight, eased: the simulation's flag flips on and off.
+    const bp = this.backpedal ? smoothstep(0.5, 2, speed) : 0;
+    this.bp = teleport ? bp : damp(this.bp, bp, 10, dt);
   }
 
-  resolveAction(p, ctx) {
+  resolveAction(p, ctx, teleport = false) {
     if (ctx.presnap) return 'ready';
     const holder = ctx.holderId === p.id;
     let a = SIM_ACTIONS.has(p.action) ? p.action : 'run';
     if (a === 'ready') a = 'run';
     // Stay in the stance after the snap until this player actually moves, so
-    // he fires out of it instead of standing up first.
-    if (this.action === 'ready' && a === 'run' && !holder && p.engaged == null && this.speed < 0.6 && ctx.state.time < 1.2) return 'ready';
+    // he fires out of it instead of standing up first. A replay jumps
+    // straight into the first frames after the snap (its pre-snap frame is
+    // usually skipped), so a jump there starts from the stance too.
+    const fromStance = this.action === 'ready' || (teleport && ctx.phase === 'live' && ctx.state.time < 0.6);
+    if (fromStance && a === 'run' && !holder && p.engaged == null && this.speed < 0.6 && ctx.state.time < 1.2) return 'ready';
     // After the whistle players on the ground stay there.
     if (ctx.dead && (this.action === 'down' || this.action === 'tackle')) return this.action;
     if (ctx.dead && this.action === 'wrapped') return 'down';
@@ -136,11 +150,26 @@ export class Animator {
     return a;
   }
 
+  // Fades each live posture toward its weight for this frame (see
+  // livePosture). They are tracked whatever the action, so one is already in
+  // place when he comes out of a stance or off a block.
+  updatePostures(p, ctx, teleport) {
+    const want = livePosture(this, p, ctx);
+    for (const kind in this.postures) {
+      const target = want && want.kind === kind ? want.w : 0;
+      this.postures[kind] = teleport ? target : damp(this.postures[kind], target, 7, ctx.dt);
+    }
+  }
+
   updateYaw(p, ctx, teleport) {
     let target = Math.PI - (Number.isFinite(p.facing) ? p.facing : 0);
     const face = this.data.face?.(p, ctx);
     if (face) target = Math.PI - Math.atan2(face.x - p.x, face.z - p.z);
     if (this.data.holdYaw !== undefined) target = this.data.holdYaw;
+    // A lineman in his pass set stays square to the defense while he slides
+    // (the simulation turns him to his path); the offense goes toward +z.
+    const set = this.action === 'run' ? smoothstep(0.3, 0.7, this.postures.set) : 0;
+    if (set > 0) target += wrapAngle(Math.PI - target) * set;
     this.yaw = teleport || ctx.presnap ? target : approachAngle(this.yaw, target, 11 * ctx.dt);
   }
 
@@ -153,6 +182,9 @@ export class Animator {
     if (role === 'ol' || role === 'dl') cadence *= 1.1;
     const churning = this.action === 'block' || this.action === 'wrapped';
     if (churning) cadence = Math.max(cadence, 3.2);
+    // A pass set moves on quick short kick-slide steps, never a walk.
+    const set = this.postures.set;
+    if (set > 0) cadence = lerp(cadence, Math.max(cadence, 3.4), set);
     // Sideways movement is a quick step-together shuffle, not a stride.
     this.stepLen = Math.max(0.2, v / cadence) * (1 - 0.6 * Math.abs(this.local.x));
     let dist = v * ctx.dt;
@@ -173,14 +205,15 @@ export class Animator {
   locomotion(pose, p, ctx) {
     const d = this.dims, v = this.speed;
     const moving = smoothstep(0.08, 0.9, v), run = smoothstep(2.0, 6.5, v), sprint = smoothstep(6.5, 9.0, v);
-    const bp = this.backpedal ? smoothstep(0.5, 2, v) : 0;
+    const bp = this.bp;
     const s = fract(this.cycle);
     const lateral = Math.abs(this.local.x);
     const duty = lerp(0.62, 0.36, run) - 0.06 * sprint;
     const reachLen = Math.min(2 * duty * this.stepLen, 1.2) * moving * (1 - 0.35 * lateral);
-    const lift = (lerp(0.06, 0.27, run) + 0.22 * sprint) * moving * (1 - 0.55 * bp) * (1 - 0.45 * lateral);
+    const lift = (lerp(0.06, 0.27, run) + 0.22 * sprint) * moving * (1 - 0.55 * bp) * (1 - 0.45 * lateral) * (1 - 0.5 * this.postures.set);
     const behind = lerp(0.1, 0.28, run) * (1 - bp);
-    const width = lerp(0.115, 0.07, run) + 0.13 * lateral + 0.04 * bp;
+    // Pass set: a base about shoulder width and low, sliding steps.
+    const width = lerp(lerp(0.115, 0.07, run) + 0.13 * lateral + 0.04 * bp, 0.27, this.postures.set);
     const dx = this.local.x, dz = this.local.y;
 
     pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0; pose.tiltSide = 0;

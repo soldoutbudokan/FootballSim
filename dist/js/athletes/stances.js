@@ -27,7 +27,10 @@ function stanceKind(spec, p, ctx) {
 export function applyStance(anim, pose, p, ctx) {
   const d = anim.dims, k = d.k, a = d.ankle, t = ctx.time, seed = anim.seed;
   const breathe = 0.014 * Math.sin(t * 2.3 + seed * 9);
-  const kind = stanceKind(anim.spec, p, ctx);
+  // Chosen before the snap and kept while he holds the stance after it, so a
+  // man easing off the line does not switch stances mid-hold.
+  if (ctx.presnap || ctx.reset || anim.fresh || !anim.stanceKind) anim.stanceKind = stanceKind(anim.spec, p, ctx);
+  const kind = anim.stanceKind;
   pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0; pose.tiltSide = 0;
   pose.head.set(0, 0, 0);
   for (let i = 0; i < 2; i++) { pose.footRot[i].set(0, SIDES[i] * 0.14, 0); pose.knees[i].set(SIDES[i] * 0.35, 0, 1); pose.wrists[i].set(0, 0, 0); }

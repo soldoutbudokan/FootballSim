@@ -23,7 +23,7 @@ Twenty-two procedural athletes built around a 6 ft 2 in frame, with wider linema
 
 The team is a fictional navy-and-silver club: navy helmets with a silver stripe, the offense in navy practice jerseys, the defense in white, and the quarterback in the red non-contact jersey.
 
-Animation is procedural and driven by the simulation: stride length and cadence follow speed, the body leans with acceleration and banks into turns, defensive backs backpedal and flip their hips, linemen and backs set in their stances, the quarterback drops, sets and throws through a full motion (the ball leaves the hand 0.23 s into the 0.4 s throw), receivers reach for the ball where it will arrive, carriers tuck it high and tight, and cuts, jukes, blocks, wrap tackles, stumbles and falls each have their own pose. The practice ball is a prolate spheroid with laces and stripes that spirals nose-first along its flight.
+Animation is procedural and driven by the simulation: stride length and cadence follow speed, the body leans with acceleration and banks into turns, defensive backs backpedal and flip their hips, linemen and backs set in their stances, the quarterback drops, sets and throws through a full motion (the ball leaves the hand 0.23 s into the 0.4 s throw), receivers reach for the ball with both hands where it will arrive (only players it passes within about 1.3 yd of, at a catchable height), carriers tuck it high and tight, and cuts, jukes, blocks, wrap tackles, stumbles and falls each have their own pose. After the snap pass blockers sit in a pass set and kick-slide, rushers and run blockers stay low with their hands up, coverage players hold a ready crouch, and the quarterback sets in the pocket on staggered feet with the ball at his chest. An engaged blocker and rusher lean only as far as the gap between them allows, hands on the other man's pads and each helmet to its own side, so the two never pass through each other. A replay that opens on the snap starts from the stances. The practice ball is a prolate spheroid with laces and stripes that spirals nose-first along its flight.
 
 Player models: drop a rigged character at dist/models/player.glb (and optional clips at dist/models/clips/<slot>.glb|.fbx) to replace the procedural athletes. See MODELS.md. ?athletes=procedural|skinned|dev overrides the choice.
 
@@ -87,7 +87,7 @@ Auto starts at Balanced, waits through a warm-up, and lowers quality after repea
 | Profile | Pixel budget | Max pixel ratio | Sun shadow map | Environment detail | Grass tufts | Small details |
 | --- | ---: | ---: | --- | --- | ---: | --- |
 | Performance | 800,000 | 0.85 | none (contact shadows only) | 35 % of the trees with single-sided leaf cards, no small sideline props, simple turf shading, athletes beyond 20 yd at reduced detail | 0 | off |
-| Balanced | 1,500,000 | 1.15 | 1024² | 70 % of the trees with single-sided leaf cards, full sideline, detailed turf without anisotropic filtering, athletes beyond 30 yd at reduced detail | 9,000 | on |
+| Balanced | 1,500,000 | 1.15 | 1024² | 70 % of the trees with single-sided leaf cards, full sideline, detailed turf without anisotropic filtering, athletes beyond 40 yd at reduced detail | 9,000 | on |
 | High | 2,500,000 | 1.5 | 2048² | all trees with double-sided, alpha-to-coverage leaf cards, full sideline, detailed turf with 8x anisotropic filtering, full-detail athletes | 22,000 | on |
 | Ultra | 4,200,000 | 2 | 4096² | as High | 45,000 | on |
 
