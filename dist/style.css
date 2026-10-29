@@ -172,6 +172,14 @@ kbd {
 .call-formation { padding: 10px 16px 0; font: 600 14px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--silver-dim); }
 .call-name { padding: 6px 16px 0; font: 800 30px/1 var(--display); letter-spacing: .01em; text-transform: uppercase; color: var(--paper); }
 .call-read { padding: 8px 16px 0; font-size: 13px; line-height: 1.45; color: var(--silver); }
+/* Receiver keys inside a coaching cue: the pass key on the receiver's route
+   colour, like an active helmet badge. Sits on the text baseline and stays
+   inside the line height, so a cue with five badges keeps even lines. */
+.read-badge {
+  display: inline-block; min-width: 1.3em; height: 1.3em; padding: 0 .2em; margin: 0 .05em;
+  font: 800 1.08em/1.3em var(--display); text-align: center; vertical-align: baseline;
+  color: var(--navy-deep); background: var(--target-color); border-radius: 2px;
+}
 .call-actions { display: flex; gap: 6px 16px; flex-wrap: wrap; padding: 10px 16px 0; }
 .call-actions + .call-actions { padding-top: 8px; }
 .call-actions button { display: inline-flex; align-items: center; gap: 7px; font: 700 15px/1 var(--display); letter-spacing: .05em; text-transform: uppercase; color: var(--silver); }

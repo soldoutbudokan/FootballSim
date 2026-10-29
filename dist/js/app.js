@@ -1,5 +1,5 @@
 import { Simulation, STEP, GOAL } from './sim.js';
-import { PLAYS, formationFor, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES } from './plays.js';
+import { PLAYS, formationFor, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES, readParts, readText } from './plays.js';
 import { FieldScene } from './scene.js';
 import { AdaptiveGraphics, PROFILES } from './graphics.js';
 import { FieldAudio } from './audio.js';
@@ -254,7 +254,7 @@ function syncPlay() {
   if (sim.audibled) flags.push('AUDIBLE');
   if (Object.keys(sim.hotRoutes).length) flags.push('HOT ROUTE');
   $('formation').textContent = flags.join(' · ');
-  $('read-tip').textContent = sim.play.read;
+  $('read-tip').replaceChildren(...readNodes(sim.play));
   renderPlaybook();
   clearInput();
   renderHUD();
@@ -518,11 +518,25 @@ function routeEnd(points, color, blocker) {
   return `<path d="M${f(x2 + ux)} ${f(y2 + uy)}L${f(bx + px * 2.8)} ${f(by + py * 2.8)}L${f(bx - px * 2.8)} ${f(by - py * 2.8)}Z" fill="${color}"/>`;
 }
 
+// The coaching cue with each receiver as a small badge in his route colour,
+// showing his pass key. The badge text is the key, so the element's
+// textContent equals readText(play).
+function readNodes(play) {
+  return readParts(play).map(part => {
+    if (part.text !== undefined) return document.createTextNode(part.text);
+    const badge = document.createElement('span');
+    badge.className = 'read-badge';
+    badge.textContent = String(part.receiver + 1);
+    badge.style.setProperty('--target-color', ROUTE_COLORS[part.receiver]);
+    return badge;
+  });
+}
+
 function matchesFilter(play) {
   const typeMatches = playFilter === 'all' || (playFilter === 'run' ? play.type === 'run' : play.type !== 'run');
   const formationMatches = !$('play-formation-filter').value || play.formation === $('play-formation-filter').value;
   const query = $('play-search').value.trim().toLowerCase();
-  const searchMatches = !query || `${play.name} ${play.tag} ${play.formation} ${play.family || ''} ${play.read}`.toLowerCase().includes(query);
+  const searchMatches = !query || `${play.name} ${play.tag} ${play.formation} ${play.family || ''} ${readText(play)}`.toLowerCase().includes(query);
   return typeMatches && formationMatches && searchMatches;
 }
 
@@ -538,7 +552,11 @@ function renderPlaybook() {
   const cards = PLAYS.filter(matchesFilter).map(play => {
     const current = play.id === sim.play.id;
     const head = `<div class="play-card-head"><span class="play-tag">${play.tag}</span>${current ? '<span class="play-current">Current</span>' : ''}</div>`;
-    const b = button('play-card' + (current ? ' selected' : ''), `${head}<h3>${play.name}</h3>${diagram(play)}<span class="play-formation">${play.formation}</span><span class="play-read">${play.read}</span>`, () => choosePlay(play.id));
+    const b = button('play-card' + (current ? ' selected' : ''), `${head}<h3>${play.name}</h3>${diagram(play)}<span class="play-formation">${play.formation}</span>`, () => choosePlay(play.id));
+    const read = document.createElement('span');
+    read.className = 'play-read';
+    read.append(...readNodes(play));
+    b.append(read);
     b.setAttribute('aria-label', play.name + ' — ' + play.tag);
     return b;
   });

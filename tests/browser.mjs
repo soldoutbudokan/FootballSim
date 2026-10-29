@@ -4,7 +4,7 @@
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
-import { PLAYS, formationFor } from '../dist/js/plays.js';
+import { PLAYS, ROUTE_COLORS, formationFor, readParts, readText } from '../dist/js/plays.js';
 import { captureModels } from './model-screenshots.mjs';
 
 const url = process.env.TEST_URL || 'http://127.0.0.1:8000';
@@ -98,11 +98,23 @@ try {
     }, id);
     assert.ok(Math.abs(actual[0] - spec.x) < 1e-8 && Math.abs(actual[1] - spec.z) < 1e-8, id + ' uses the called alignment');
   }
+  // The coaching cue names receivers by pass key, each in a badge of his route colour.
+  const rgb = hex => 'rgb(' + [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ') + ')';
+  const cue = await page.locator('#read-tip').evaluate(el => ({ text: el.textContent,
+    badges: [...el.querySelectorAll('.read-badge')].map(b => [b.textContent, getComputedStyle(b).backgroundColor]) }));
+  assert.equal(cue.text, readText(newPlay));
+  assert.deepEqual(cue.badges, readParts(newPlay).filter(p => p.receiver !== undefined).map(p => [String(p.receiver + 1), rgb(ROUTE_COLORS[p.receiver])]));
   await page.locator('#playbook-open').click();
   await page.locator('#play-formation-filter').selectOption('');
   await page.locator('#play-search').fill('no such concept');
   assert.equal(await page.locator('.play-card').count(), 0);
   assert.match(await page.locator('#playbook-results').innerText(), /No matching plays/);
+  // Search reads the cue as plain text, with the pass keys.
+  const cueQuery = readText(newPlay).slice(-40);
+  assert.match(cueQuery, /[1-5]/);
+  await page.locator('#play-search').fill(cueQuery);
+  assert.equal(await page.locator('.play-card').count(), PLAYS.filter(p => readText(p).includes(cueQuery)).length);
+  assert.equal(await page.locator('.play-card .play-read').first().textContent(), readText(PLAYS.find(p => readText(p).includes(cueQuery))));
   await page.locator('#play-search').fill('');
   await shot('03-playbook');
   await page.getByRole('button', { name: 'Mesh concept — SHORT', exact: true }).click();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FORMATIONS, PLAYS, RECEIVERS, formationFor, routeFor, hotRouteFor } from '../dist/js/plays.js';
+import { FORMATIONS, PLAYS, RECEIVERS, formationFor, routeFor, hotRouteFor, readParts, readText } from '../dist/js/plays.js';
 import { Simulation, STEP, WIDTH } from '../dist/js/sim.js';
 
 test('every call has a complete, distinct route combination and a legal eleven-player alignment', () => {
@@ -30,6 +30,28 @@ test('every call has a complete, distinct route combination and a legal eleven-p
       for (const [x,z] of call.routes[id]) assert.ok(Number.isFinite(x) && Number.isFinite(z) && Math.abs(x) < WIDTH/2, call.id);
     }
   }
+});
+
+test('coaching cues name receivers by their pass keys, never by letter', () => {
+  const stick = PLAYS.find(p => p.id === 'stick');
+  assert.equal(readText(stick), 'Read the flat defender on the trips side: 3 settles inside him while 2 widens to the flat. 4 clears the sideline.');
+  for (const call of PLAYS) {
+    const parts = readParts(call);
+    assert.ok(parts.length, call.id + ': has a read');
+    // Every token resolves to one of the five receivers; none is left as text.
+    for (const token of call.read.matchAll(/\{(\w+)\}/g)) assert.ok(RECEIVERS.includes(token[1]), call.id + ': unknown receiver {' + token[1] + '}');
+    for (const part of parts) {
+      if (part.text !== undefined) assert.ok(part.text && !/[{}]/.test(part.text), call.id + ': stray token text');
+      else assert.ok(Number.isInteger(part.receiver) && part.receiver >= 0 && part.receiver < RECEIVERS.length, call.id);
+    }
+    // The renderer's segments read back as the plain text.
+    assert.equal(parts.map(p => p.text ?? String(p.receiver + 1)).join(''), readText(call), call.id);
+    if (call.type === 'run') continue;
+    const text = readText(call);
+    assert.ok(parts.some(p => p.receiver !== undefined), call.id + ': a pass read names its receivers');
+    assert.doesNotMatch(text, /\b[XYABR]\b/, call.id + ': bare receiver letter in ' + JSON.stringify(text));
+  }
+  assert.deepEqual(readParts({ read: 'Hit {Q} or {R}.' }), [{ text: 'Hit ' }, { text: '{Q}' }, { text: ' or ' }, { receiver: 4 }, { text: '.' }]);
 });
 
 test('each formation places and mirrors players and routes at both ends of the field', () => {
