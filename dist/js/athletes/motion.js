@@ -5,6 +5,8 @@ import { applyStance } from './stances.js';
 import { ACTIONS, startAction, livePosture, POSTURES } from './actions.js';
 
 // Seconds each timed action lasts in the simulation (plan section 3.4).
+// How far off downfield a lineman in his pass set may turn to face a rusher.
+const SET_TURN = 70 * Math.PI / 180;
 const DURATIONS = { throw: 0.4, catch: 0.45, juke: 0.45, cut: 0.2, tackle: 1.0, stumble: 0.7 };
 const SIM_ACTIONS = new Set(['ready', 'run', 'cut', 'juke', 'block', 'throw', 'catch', 'carry', 'wrapped', 'tackle', 'down', 'stumble']);
 
@@ -166,10 +168,14 @@ export class Animator {
     const face = this.data.face?.(p, ctx);
     if (face) target = Math.PI - Math.atan2(face.x - p.x, face.z - p.z);
     if (this.data.holdYaw !== undefined) target = this.data.holdYaw;
-    // A lineman in his pass set stays square to the defense while he slides
-    // (the simulation turns him to his path); the offense goes toward +z.
+    // A lineman in his pass set faces his rusher (the simulation's facing) but
+    // never turns his back on the defense while he slides: his yaw stays
+    // within SET_TURN of downfield (the offense goes toward +z).
     const set = this.action === 'run' ? smoothstep(0.3, 0.7, this.postures.set) : 0;
-    if (set > 0) target += wrapAngle(Math.PI - target) * set;
+    if (set > 0) {
+      const off = wrapAngle(target - Math.PI), limit = lerp(Math.PI, SET_TURN, set);
+      if (Math.abs(off) > limit) target = Math.PI + Math.sign(off) * limit;
+    }
     this.yaw = teleport || ctx.presnap ? target : approachAngle(this.yaw, target, 11 * ctx.dt);
   }
 
