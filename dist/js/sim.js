@@ -137,20 +137,27 @@ const DIFFICULTY = {
 // Locked, the rusher drives the blocker back at the matchup's push speed and
 // wins the rep at a hazard rate of win × (t / ramp)³ per second, t the time
 // since the snap, so pressure builds while the quarterback holds the ball.
-// A spare lineman within `helpRange` yd scales it by `help`; a quarterback
-// out of the pocket (`box` yd wide of the centre) or within `close` yd of the
-// rusher adds `loose`. The winner rips past at `rip` yd/s, `slip` yd to the
-// side he won for each yard toward the quarterback, then aims up to `lean`
-// yd to that side of the quarterback for `burst` s. Nobody can pick him up
-// for `clear` s, and the beaten blocker stumbles for `beaten` s. Ends lined
-// up more than `edge` yd wide rush the arc (aiming `arc` yd outside the
-// quarterback per yard still to go, at most `arcMax`); the others push the
-// A and B gaps (within `gap` yd of the centre). The back checks for a free
-// rusher until `pickup` s after the snap and blocks him if one comes; using
-// him costs `backCost` yd in the protection count, so the line goes first.
+// A spare lineman within `helpRange` yd scales it by `help`. A rusher within
+// `close` yd of the quarterback adds `loose`, falling to `onMove` of it as
+// the quarterback runs by (2 to 5 yd/s): moving the launch point beats the
+// collapse. A quarterback out of the pocket (`box` yd wide of the centre)
+// adds `scramble` for the rushers lined up on the side he rolls to, whose
+// blockers he has run past, and `away` of it for the rest, so the near side
+// comes off within a fraction of a second and the far side within about a
+// second. The winner rips past at `rip` yd/s, `slip` yd to the side he won
+// for each yard toward the quarterback, then aims up to `lean` yd to that
+// side of the quarterback for `burst` s. Nobody can pick him up for `clear`
+// s, and the beaten blocker stumbles for `beaten` s. Ends lined up more than
+// `edge` yd wide rush the arc (aiming `arc` yd outside the quarterback per
+// yard still to go, at most `arcMax`); the others push the A and B gaps
+// (within `gap` yd of the centre). The back checks for a free rusher until
+// `pickup` s after the snap and blocks him if one comes (unless he has a hot
+// route); once he has blocked he stays in. Using him costs `backCost` yd in
+// the protection count, so the line goes first.
 const POCKET = {
   tackle: { kick: 0.9, depth: 2.0, reach: 2.4 }, guard: { kick: 0.15, depth: 1.2, reach: 2.2 }, centre: { kick: 0, depth: 1.1, reach: 2.4 },
-  square: 0.95, engage: 1.3, part: 2.2, ramp: 2.5, help: 0.5, helpRange: 1.6, box: 4.4, close: 2, loose: 4,
+  square: 0.95, engage: 1.3, part: 2.2, ramp: 2.5, help: 0.5, helpRange: 1.6,
+  box: 4.4, close: 2, loose: 4, onMove: 0.25, scramble: 3, away: 0.33,
   beaten: 0.5, clear: 0.3, burst: 0.5, lean: 1.2, rip: 5.5, slip: 0.8, edge: 3.5, arc: 0.6, arcMax: 4.2, gap: 2.4, pickup: 1.2, backCost: 2,
 };
 // Pass-rush matchups: `push` is how fast the pair gives ground (yd/s), `win`
@@ -250,7 +257,8 @@ function createPlayer(spec, team, spot, flip) {
     latency: 0, seen: null, aim: null, ballRead: 0, ballAware: false, ballSightAt: -9,
     // Pass protection: `lock` is the partner in a pass-rush rep (it outlasts
     // a step, unlike `engaged`); a rusher wins once `have` reaches `need`.
-    lock: null, assignment: null, need: 0, have: 0, wonAt: -9, winSide: 0, beatenUntil: -9, pickup: null, released: false,
+    // `blocked`: the back has locked up with a rusher this rep, so he stays in.
+    lock: null, assignment: null, need: 0, have: 0, wonAt: -9, winSide: 0, beatenUntil: -9, pickup: null, released: false, blocked: false,
     // Zone coverage (planCoverage): `job` is this step's task, `match` the
     // receiver he has, `carrying` whether he runs with him upfield, `handed`
     // the vertical he passed to a deep man, `helpOn` the open man he leans to.
@@ -786,15 +794,16 @@ export class Simulation {
 
   // Pass protection. Pairs already locked fight it out first (contest); then
   // the free blockers (linemen who are neither locked nor beaten, and the
-  // back while he checks) are matched to the free rushers (assignProtection)
-  // and lock up with them on contact. A spare lineman picks up any free
-  // rusher who comes within reach.
+  // back while he checks or once he has blocked) are matched to the free
+  // rushers (assignProtection) and lock up with them on contact. A spare
+  // blocker picks up any free rusher who comes within reach.
   protect(dt) {
     const rushers = this.rushers(), rb = this.byId.R;
     for (const d of rushers) if (d.lock) this.contest(this.byId[d.lock], d, dt);
     const catching = this.phase === 'air' && this.pass.receiver === 'R';
     if (catching && rb.lock) { this.byId[rb.lock].lock = null; rb.lock = null; }
-    const back = rb.start.z < this.spot - 3 && this.carrier !== 'R' && !catching && !rb.released;
+    // A back with a hot route runs it; one lined up in the backfield checks.
+    const back = !this.hotRoutes.R && rb.start.z < this.spot - 3 && this.carrier !== 'R' && !catching && !rb.released;
     const blockers = this.line.filter(o => !o.lock && this.time >= o.beatenUntil);
     if (back && !rb.lock && this.time >= rb.beatenUntil) blockers.push(rb);
     const free = rushers.filter(d => !d.lock);
@@ -811,19 +820,22 @@ export class Simulation {
       if (d) this.lock(o, d);
     }
     // The back blocks only once he has a man; with none by the end of his
-    // check he releases into his route for good.
-    if (back && !rb.lock && !rb.assignment && this.time >= POCKET.pickup) rb.released = true;
+    // check he releases into his route for good. Once he has blocked he stays
+    // in, beaten or not: `pickup` is his man, or 'QB' while he has none.
+    if (back && !rb.blocked && !rb.lock && !rb.assignment && this.time >= POCKET.pickup) rb.released = true;
     for (const o of this.line) this.passSet(o, rushers);
-    if (back && (rb.lock || rb.assignment)) { this.passSet(rb, rushers); rb.pickup = rb.lock || rb.assignment; }
+    if (back && (rb.lock || rb.assignment || rb.blocked)) { this.passSet(rb, rushers); rb.pickup = rb.lock || rb.assignment || 'QB'; }
   }
 
   // One blocker's step in protection: locked, stay square between the rusher
   // and the quarterback, giving ground as the rusher pushes; assigned, meet
   // him in his lane from the set point; spare, sit behind the nearest block
-  // ready to help; beaten, recover toward the quarterback.
+  // ready to help; beaten, recover toward the quarterback. The back has no
+  // set point: he works from a spot just in front of the quarterback.
   passSet(o, rushers) {
     o.sprinting = false;
-    const back = o.role === 'rb', set = back ? null : this.setPoint(o);
+    const back = o.role === 'rb', qb = this.byId.QB;
+    const set = back ? { x: qb.x, z: qb.z + 1.2, reach: 2 } : this.setPoint(o);
     if (o.lock) {
       const d = this.byId[o.lock];
       this.engage(o, d);
@@ -838,7 +850,6 @@ export class Simulation {
       o.want = seekWant(o, target, speedCap(o, back ? 0.85 : 0.6));
       return;
     }
-    if (back) return;
     if (this.time < o.beatenUntil) { o.want = seekWant(o, { x: set.x, z: set.z - 0.6 }, speedCap(o, 0.7)); return; }
     let near = null;
     for (const q of rushers) if (!near || dist(q, set) < dist(near, set)) near = q;
@@ -858,6 +869,7 @@ export class Simulation {
   // and fixed by the seed) and the side he will win on.
   lock(o, d) {
     o.lock = d.id; d.lock = o.id; o.assignment = d.id;
+    if (o.role === 'rb') o.blocked = true;
     const m = this.matchup(o, d), { side } = this.rushSide(d);
     d.need = -Math.log(1 - this.random()); d.have = 0;
     d.winSide = side * (this.random() < m.outside ? 1 : -1);
@@ -865,15 +877,22 @@ export class Simulation {
   }
 
   // A locked rep. Pressure builds with the time since the snap; a spare
-  // lineman beside the block slows it, and a rusher at the quarterback or a
-  // quarterback out of the pocket speeds it. The winner beats his blocker,
-  // who stumbles and cannot block for a moment.
+  // lineman beside the block slows it, and a rusher at the quarterback (less
+  // so at one on the move) or a quarterback out of the pocket speeds it (more
+  // on the side he rolls to). The winner beats his blocker, who stumbles and
+  // cannot block for a moment.
   contest(o, d, dt) {
     if (!o || dist(o, d) > POCKET.part) { if (o) o.lock = null; d.lock = null; return; }
     const qb = this.byId.QB, m = this.matchup(o, d);
     let rate = m.win * (this.time / POCKET.ramp) ** 3;
     if (this.line.some(h => h !== o && !h.lock && !h.assignment && this.time >= h.beatenUntil && dist(h, d) < POCKET.helpRange)) rate *= POCKET.help;
-    if (this.scrambling() || dist(d, qb) < POCKET.close) rate += POCKET.loose;
+    if (dist(d, qb) < POCKET.close) {
+      const moving = clamp((Math.hypot(qb.vx, qb.vz) - 2) / 3, 0, 1);
+      rate += POCKET.loose * (1 - (1 - POCKET.onMove) * moving);
+    } else if (this.scrambling()) {
+      const near = this.rushSide(d).side === Math.sign(qb.x - this.pocketX());
+      rate += POCKET.scramble * (near ? 1 : POCKET.away);
+    }
     d.have += rate * dt;
     if (d.have < d.need) return;
     o.lock = d.lock = null; o.assignment = null;
@@ -1200,7 +1219,9 @@ export class Simulation {
 
     // Deep zones: thirds (split wide, so the middle owns the seams) or halves.
     // A vertical stays with last step's deep man while within 2 yd of his zone.
-    deeps.sort((a, b) => a.x - b.x);
+    // Zones and their edges are in the play's own frame (x × flip), so a
+    // flipped play is covered as the mirror image of the same call.
+    deeps.sort((a, b) => (a.x - b.x) * flip);
     const edges = deeps.length === 3 ? [-COVER.split, COVER.split] : deeps.length === 2 ? [0] : [];
     deeps.forEach((z, k) => { z.lo = k ? edges[k - 1] : -Infinity; z.hi = k < edges.length ? edges[k] : Infinity; z.threats = []; });
     // A deep threat stays one while he is still going upfield near that depth.
@@ -1209,7 +1230,8 @@ export class Simulation {
     for (const id of ids) {
       const r = seen[id];
       if (!vertical(r, id)) continue;
-      const owner = deeps.find(z => z.d.job?.threats?.includes(id) && r.x > z.lo - 2 && r.x < z.hi + 2) || deeps.find(z => r.x >= z.lo && r.x < z.hi);
+      const x = r.x * flip;
+      const owner = deeps.find(z => z.d.job?.threats?.includes(id) && x > z.lo - 2 && x < z.hi + 2) || deeps.find(z => x >= z.lo && x < z.hi);
       if (owner) owner.threats.push(id);
     }
     for (const z of deeps) {
@@ -1296,8 +1318,9 @@ export class Simulation {
       // An empty deep zone: squeeze an open man underneath in it (a corner
       // sinking on a hitch), else shade toward the nearest vertical beside
       // it, else help on any open man near him. He stays deeper than his man.
-      const own = openMan(z.d, 1, r => r.x >= z.lo && r.x < z.hi);
+      const own = openMan(z.d, 1, r => r.x * flip >= z.lo && r.x * flip < z.hi);
       if (own) { z.job = { kind: 'lean', id: own, w: skill.help, x: z.x, z: z.z, lo: spot + 4, hi: 115, over: true }; continue; }
+      // Ties go to the first in play-frame order, the same on a flipped play.
       let beside = null;
       for (const other of deeps) for (const id of other.threats) if (!beside || Math.abs(seen[id].x - z.x) < Math.abs(seen[beside].x - z.x)) beside = id;
       if (beside) { z.job = { kind: 'lean', id: beside, w: COVER.shade, x: z.x, z: z.z, lo: z.z, hi: 115, over: true }; continue; }
@@ -1777,6 +1800,8 @@ export class Simulation {
   snapshot() {
     return {
       phase: this.phase, time: this.time, deadTime: this.deadTime, carrier: this.carrier, selected: this.selected, spot: this.spot,
+      // The line is in pass protection (never on a run play).
+      pocket: this.inPocket(),
       ball: { ...this.ball },
       players: this.players.map(p => ({
         id: p.id, x: p.x, z: p.z, vx: p.vx, vz: p.vz, facing: p.facing,

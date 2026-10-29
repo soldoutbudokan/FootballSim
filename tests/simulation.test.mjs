@@ -476,6 +476,38 @@ test('the back picks up a free blitzer, and runs his route when nobody comes', (
   assert.ok(r.released && gapOf(r, r.start) > 5, 'he released into his route');
 });
 
+test('a back who has blocked stays in protection, beaten or not', () => {
+  let stayed = 0, again = 0;
+  for (let seed = 1; seed <= 8; seed++) {
+    let blocked = false, beaten = false, relocked = false;
+    rushRep(seed, 'blitz', s => {
+      const r = s.byId.R;
+      if (blocked && s.inPocket()) {
+        assert.equal(r.released, false, `${seed} ${s.time.toFixed(2)}: he is not released into his route`);
+        assert.ok(r.pickup, `${seed} ${s.time.toFixed(2)}: he stays in to block`);
+        stayed++;
+      }
+      if (beaten && r.lock) relocked = true;
+      if (blocked && r.beatenUntil > s.time) beaten = true;
+      blocked ||= !!r.lock;
+      return {};
+    });
+    if (relocked) again++;
+  }
+  assert.ok(stayed > 500, 'frames checked: ' + stayed);
+  assert.ok(again >= 1, 'beaten, the back picks up a rusher again in ' + again + '/8');
+});
+
+test('a back with a hot route runs it against the blitz instead of staying in', () => {
+  for (let seed = 1; seed <= 4; seed++) {
+    const s = new Simulation(seed, { offense: 'mesh', coverage: 'blitz', difficulty: 'pro', mode: 'reps' }), r = s.byId.R;
+    assert.ok(s.setHotRoute('R', 'flat'));
+    s.snap();
+    while (s.time < 2.5 - 1e-9 && s.phase !== 'dead') { s.step(STEP); assert.equal(r.pickup, null, `${seed}: no pickup`); }
+    assert.ok(r.z > s.spot, `${seed}: past the line at ${(r.z - s.spot).toFixed(1)} yd`);
+  }
+});
+
 test('a scrambling quarterback is chased at speed, with the edge on his side keeping contain', () => {
   let outside = 0, reps = 0;
   for (let seed = 1; seed <= 10; seed++) {

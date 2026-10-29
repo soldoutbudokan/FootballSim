@@ -41,7 +41,7 @@ export const FORMATIONS = {
   tight: { id:'tight', label:'GUN · TIGHT', personnel:'11', players:alignment({
     X:{x:-8,z:0}, Y:{x:-5.5,z:-1.2}, A:{x:5.5,z:-1.2}, B:{x:8,z:0},
   }) },
-  singleback: { id:'singleback', label:'SINGLEBACK · TE RIGHT', personnel:'11', players:alignment({
+  singleback: { id:'singleback', label:'SINGLEBACK · TE', personnel:'11', players:alignment({
     QB:{x:0,z:-1.4}, A:{x:5,z:0}, B:{x:21,z:-1.2}, R:{x:0,z:-6.6},
   }) },
 };

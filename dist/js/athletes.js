@@ -134,9 +134,11 @@ export class Athletes {
       byId: this.byId, rigs: this.rigs, animators: this.animators,
       holderId, carrierId: state.carrier, qbId: this.qbId,
       pocket,
-      // Linemen pass protect while the quarterback holds the ball behind the
-      // line and while a pass is in the air; otherwise they run block.
-      protect: pocket || state.phase === 'air',
+      // Linemen pass protect while the simulation's line protects the pocket
+      // (never on a run play); otherwise they run block. A snapshot without
+      // the field: while the quarterback holds the ball behind the line and
+      // while a pass is in the air.
+      protect: state.pocket ?? (pocket || state.phase === 'air'),
       // Where the ball was when a pass was caught: the snapshot already puts
       // it in the receiver's hands, the hands still have to meet it there.
       catchFrom: this.lastPhase === 'air' && state.phase !== 'air' ? this.ball.position.clone() : null,

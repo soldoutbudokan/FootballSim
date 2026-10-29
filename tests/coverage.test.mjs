@@ -119,9 +119,9 @@ test('zone assignments hold instead of flipping every step', () => {
 
 // Share of receivers more than 4 yd past the line with no defender within
 // 4 yd, sampled at 1.5, 2, 2.5 and 3 s (the metrics script's openness).
-function openness(coverage, difficulty) {
+function openness(coverage, difficulty, seeds = [1, 2]) {
   let open = 0, total = 0;
-  for (const play of passPlays) for (const seed of [1, 2]) {
+  for (const play of passPlays) for (const seed of seeds) {
     const s = rep(play.id, coverage, difficulty, seed);
     for (const t of [1.5, 2, 2.5, 3]) {
       run(s, t);
@@ -138,13 +138,33 @@ function openness(coverage, difficulty) {
 }
 
 test('zone coverage tightens with difficulty: Rookie leaves more open men than Pro, Pro more than All-pro', () => {
-  for (const coverage of ['cover3', 'cover2']) {
-    const [rookie, pro, allpro] = ['rookie', 'pro', 'allpro'].map(k => openness(coverage, k));
-    const shares = [rookie, pro, allpro].map(v => (100 * v).toFixed(0) + '%').join(' > ');
+  // Cover 2's levels sit closer together (about 18 %, 14 % and 10 % open over
+  // seeds 1-6, a pair of seeds giving a 6 to 10 point spread), so it samples
+  // more seeds against a smaller margin. Cover 3 spreads about 18 points.
+  for (const [coverage, seeds, margin] of [['cover3', [1, 2], 0.1], ['cover2', [1, 2, 3, 4, 5, 6], 0.05]]) {
+    const [rookie, pro, allpro] = ['rookie', 'pro', 'allpro'].map(k => openness(coverage, k, seeds));
+    const shares = [rookie, pro, allpro].map(v => (100 * v).toFixed(1) + '%').join(' > ');
     assert.ok(rookie > pro && pro > allpro, coverage + ': ' + shares);
-    assert.ok(rookie - allpro > 0.08, coverage + ' difficulty matters: ' + shares);
+    assert.ok(rookie - allpro > margin, coverage + ' difficulty matters: ' + shares);
+    if (coverage === 'cover3') assert.ok(allpro < 0.3, 'All-pro Cover 3 leaves under 30 % open: ' + shares);
   }
-  assert.ok(openness('cover3', 'allpro') < 0.3, 'All-pro Cover 3 leaves under 30 % open');
+});
+
+test('a flipped play is covered as the mirror image: the deep thirds own the same receivers', () => {
+  // createPlayer mirrors every player's own spot, so each deep man (CB1, CB2,
+  // FS) is his own mirror; his job must name the same receivers.
+  const job = d => [d.job?.kind, d.job?.id, d.job?.a, d.job?.b, (d.job?.threats || []).join()].join('/');
+  for (const offense of ['verts', 'snag', 'scissors']) for (const seed of [1, 2]) {
+    const [plain, flipped] = [false, true].map(flip => {
+      const s = new Simulation(seed, { offense, coverage: 'cover3', difficulty: 'allpro', mode: 'reps', flip });
+      s.snap();
+      return s;
+    });
+    for (const t of [1.5, 2.5]) {
+      run(plain, t); run(flipped, t);
+      for (const id of ['CB1', 'CB2', 'FS']) assert.equal(job(flipped.byId[id]), job(plain.byId[id]), `${offense}/${seed} ${t} s: ${id}`);
+    }
+  }
 });
 
 test('a Cover 2 corner sinks with an outside go route when his flat is empty', () => {

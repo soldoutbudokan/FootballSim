@@ -30,7 +30,8 @@ function play({ sim, athletes }, seconds, each = () => {}, input = () => ({})) {
 
 // A body as a box in its chest frame (the pads, rounded, so a little inside
 // the mesh's bounds); signed distance from a scene point, negative inside.
-const _p = new THREE.Vector3(), _m = new THREE.Matrix4();
+// Without the vendored three.js the tests skip, so these stay unset.
+const _p = THREE && new THREE.Vector3(), _m = THREE && new THREE.Matrix4();
 function bodyDistance(rig, point) {
   const d = rig.dims, depth = (1 + d.torso) / 2;
   _p.copy(point).applyMatrix4(_m.copy(rig.chest.matrixWorld).invert());
@@ -89,6 +90,23 @@ poseTest('on a pass play unengaged linemen sit in a pass set and coverage player
   assert.ok(set.every(s => s.drop > 0.1), 'linemen bend their knees in the set');
   assert.ok(set.filter(s => s.hands).length / set.length > 0.9, 'linemen keep their hands up');
   assert.ok(cover.every(d => d > 0.09), 'slow coverage players stay in a crouch');
+});
+
+poseTest('run blockers never show the pass set; pass blockers do', () => {
+  // Highest 'set' posture over the five linemen while the quarterback still
+  // has the ball (before the handoff on a run).
+  const peak = offense => {
+    const r = rep(1, { offense, coverage: 'cover3' });
+    let most = 0;
+    play(r, 1.5, s => {
+      if (s.carrier !== 'QB') return;
+      for (const p of s.players) if (r.athletes.rigs.get(p.id).spec.role === 'ol') most = Math.max(most, r.athletes.animators.get(p.id).postures.set);
+    });
+    return most;
+  };
+  const run = peak('power'), pass = peak('mesh');
+  assert.ok(run < 0.2, `run blockers set to ${run.toFixed(2)} before the handoff`);
+  assert.ok(pass > 0.9, `pass blockers set to ${pass.toFixed(2)}`);
 });
 
 poseTest('the quarterback sets in the pocket on staggered feet with the ball at his chest', () => {
