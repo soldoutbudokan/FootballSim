@@ -80,4 +80,7 @@ export const defense = {
   initDefender(d) {
     d.latency = this.skill.latency;
   },
+
+  // The rep is over: what the coordinator remembers about the offense.
+  noteResult(result) {},
 };

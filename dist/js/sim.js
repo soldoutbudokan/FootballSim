@@ -1004,6 +1004,7 @@ export class Simulation {
     if (this.completed) this.stats.passing += gain;
     else if (!this.threw && kind !== 'sack') this.stats.rushing += gain;
     this.events.push(kind === 'touchdown' ? 'touchdown' : 'whistle');
+    this.noteResult(this.result);
     this.saveFrame();
   }
 
