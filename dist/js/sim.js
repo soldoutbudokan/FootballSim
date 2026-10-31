@@ -1,17 +1,15 @@
-import { FORMATION, PLAYS, RECEIVERS, routeFor, hotRouteFor, formationFor, COVERAGES } from './plays.js';
+import { PLAYS, RECEIVERS, routeFor, hotRouteFor, formationFor } from './plays.js';
+import { STEP, DEG, clamp, dist, wrapAngle, smoothstep, ZERO, STUMBLE_SPEED, GET_OFF, LEVERAGE, PULL_UP, fatigueOf, speedCap, scaled, seekWant, trackWant, meetWant } from './sim/common.js';
+import { DIFFICULTY, defense } from './sim/defense.js';
+import { coverage } from './sim/coverage.js';
+import { protection } from './sim/protection.js';
 
 // Units are yards and seconds. +z points downfield (own end line z = 0, goal
 // lines at z = 10 and z = 110) and +x is the offense's right. A heading is
 // atan2(vx, vz), so 0 faces downfield. Everything random comes from the seeded
 // generator, so a seed and a sequence of inputs always replay the same rep.
-export const STEP = 1 / 120, WIDTH = 53.333333, GOAL = 110, GRAVITY = 10.73;
-
-const DEG = Math.PI / 180;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
-const smoothstep = t => t * t * (3 - 2 * t);
-const ZERO = Object.freeze({ x: 0, z: 0 });
+export { STEP };
+export const WIDTH = 53.333333, GOAL = 110, GRAVITY = 10.73;
 
 export function seededRandom(seed = 12345) {
   let a = seed >>> 0;
@@ -69,23 +67,16 @@ const CUT_TIME = 0.2;
 const PLANT_GRIP = 1.2;
 const FACING_RATE = 9;                 // rad/s
 const FLIP_RATE = 13;                  // a defensive back opening his hips
-const FLIP_TIME = 0.25;                // lateral grip is halved while flipping
-const BACKPEDAL_SPEED = 0.65;          // share of top speed, moving away from facing
-const CUSHION = 3;                     // yards a receiver may close before the flip
-const MAX_BACKPEDAL = 7;               // yards of backpedal before a back must open up
-const WIDE_THREAT = 5;                 // yards across to a vertical that also turns him
-const SHUFFLE_SPEED = 0.88;
 const JUKE = { plant: 0.25, action: 0.45, keep: 0.65, cost: 0.05, minSpeed: 2 };
 const SPRINT_DRAIN = 1 / 9;            // a full tank lasts nine seconds of sprinting
 const RECOVERY = 0.12;
 const REACH = 0.95;                    // tackling reach, yards
 const DIVE_REACH = 1.7;                // a diving tackle from behind
-const SHED_RANGE = 1.6, SHED_TIME = 0.3;  // a blocked man reads the ball carrier
 const WRAP_KEEP = 0.8;
 const TACKLE_DECEL = 12, GANG_DECEL = 6, TACKLE_HOLD = 0.9;
 // A miss: the tackler stumbles for STUMBLE_TIME at STUMBLE_SPEED of his top
 // speed; the runner keeps BROKEN_KEEP of his speed through the contact.
-const STUMBLE_TIME = 0.55, STUMBLE_SPEED = 0.3, BROKEN_KEEP = 0.65;
+const STUMBLE_TIME = 0.55, BROKEN_KEEP = 0.65;
 // Tackle odds (tackleChance). A man who gets his hands on the runner makes
 // `base`; each unit of speed edge ((his speed - the runner's) / 3, ±1.5) is
 // worth `speed`, in full from behind and only `square` of it head on (the
@@ -105,126 +96,9 @@ const TACKLE = {
 // and `near` yards from the carrier so he still closes to make the tackle;
 // a defender in front of the runner takes only `front` of it. Pursuers
 // arrive side by side instead of in single file.
-const LEVERAGE = { min: 1.0, spread: 0.5, near: 2.5, far: 7, front: 0.25 };
-// Once the carrier is wrapped up, pursuers who are not in on the tackle pull
-// up: those within `reach` yards of their spot steer to it, radius..radius+
-// spread yards from the carrier and fanned out to their own side; the rest
-// ease off where they are, braking at brake..brake+brakeSpread of full, so
-// they stop at varied spots. A defender already within `pileOn` yards keeps
-// coming and can join the tackle.
-const PULL_UP = { radius: 1.8, spread: 2.7, fan: 28 * DEG, flank: 55 * DEG, effort: 0.7, pileOn: 1.6, reach: 6, brake: 0.5, brakeSpread: 0.4 };
 const BALL_REST = 0.1;                 // centre height of a ball lying on the turf
 const CATCH_GRACE = 0.35;
 const MESH_REACH = 1.25;               // QB to back, body centres, at the exchange              // a new carrier runs on through the catch
-const GET_OFF = { ol: 0.06, qb: 0, rb: 0.1, wr: 0.18, te: 0.18, dl: 0.2, lb: 0.28, cb: 0.28, s: 0.28 };
-const DIFFICULTY = {
-  // Difficulty changes reads and anticipation, never bodies or catching odds.
-  // `contain`: yards outside a scrambling quarterback the edge rusher on his
-  // side keeps (rush lane discipline). `carry`: yards past the line where an
-  // underneath defender gives up a vertical he is carrying when no deep man
-  // has taken it. `help`: how far a defender with an empty zone leans toward
-  // the most open receiver near him (share of the way from his landmark).
-  rookie: { latency: 0.40, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06, contain: 0.3, carry: 16, help: 0.2 },
-  pro: { latency: 0.28, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, contain: 1.0, carry: 21, help: 0.45 },
-  allpro: { latency: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, contain: 1.5, carry: Infinity, help: 0.7 },
-};
-// Pass protection (the pocket). Tackles kick-slide back and out, guards and
-// the centre set short (`kick` yd out, `depth` yd behind the line), and each
-// blocker meets his rusher in the lane: the spot `square` yd from the rusher
-// toward the quarterback, no more than `reach` yd either side of his set.
-// A blocker within `engage` yd of a rusher, and nearer the quarterback than
-// he is, locks up with him; a pair more than `part` yd apart comes unlocked.
-// Locked, the rusher drives the blocker back at the matchup's push speed and
-// wins the rep at a hazard rate of win × (t / ramp)³ per second, t the time
-// since the snap, so pressure builds while the quarterback holds the ball.
-// A spare lineman within `helpRange` yd scales it by `help`. A rusher within
-// `close` yd of the quarterback adds `loose`, falling to `onMove` of it as
-// the quarterback runs by (2 to 5 yd/s): moving the launch point beats the
-// collapse. A quarterback out of the pocket (`box` yd wide of the centre)
-// adds `scramble` for the rushers lined up on the side he rolls to, whose
-// blockers he has run past, and `away` of it for the rest, so the near side
-// comes off within a fraction of a second and the far side within about a
-// second. The winner rips past at `rip` yd/s, `slip` yd to the side he won
-// for each yard toward the quarterback, then aims up to `lean` yd to that
-// side of the quarterback for `burst` s. Nobody can pick him up for `clear`
-// s, and the beaten blocker stumbles for `beaten` s. Ends lined up more than
-// `edge` yd wide rush the arc (aiming `arc` yd outside the quarterback per
-// yard still to go, at most `arcMax`); the others push the A and B gaps
-// (within `gap` yd of the centre). The back checks for a free rusher until
-// `pickup` s after the snap and blocks him if one comes (unless he has a hot
-// route); once he has blocked he stays in. Using him costs `backCost` yd in
-// the protection count, so the line goes first.
-const POCKET = {
-  tackle: { kick: 0.9, depth: 2.0, reach: 2.4 }, guard: { kick: 0.15, depth: 1.2, reach: 2.2 }, centre: { kick: 0, depth: 1.1, reach: 2.4 },
-  square: 0.95, engage: 1.3, part: 2.2, ramp: 2.5, help: 0.5, helpRange: 1.6,
-  box: 4.4, close: 2, loose: 4, onMove: 0.25, scramble: 3, away: 0.33,
-  beaten: 0.5, clear: 0.3, burst: 0.5, lean: 1.2, rip: 5.5, slip: 0.8, edge: 3.5, arc: 0.6, arcMax: 4.2, gap: 2.4, pickup: 1.2, backCost: 2,
-};
-// Pass-rush matchups: `push` is how fast the pair gives ground (yd/s), `win`
-// the base hazard (per second) and `outside` the share of wins taken on the
-// rusher's outside shoulder.
-const MATCHUP = {
-  edge: { push: 0.75, win: 0.3, outside: 0.7 },    // an end on a tackle: slow to collapse, likelier to win
-  inside: { push: 1.1, win: 0.2, outside: 0.5 },  // a tackle or blitzer on a guard or centre: a steady push
-  back: { push: 1.6, win: 0.8, outside: 0.5 },    // anyone on a back: he gives ground fast
-};
-
-const DEFENSE = [
-  { id: 'DE1', number: 91, role: 'dl', x: -4.8, z: 1.2, speed: 7.2 },
-  { id: 'DT1', number: 95, role: 'dl', x: -1.5, z: 1.2, speed: 6.9 },
-  { id: 'DT2', number: 97, role: 'dl', x: 1.6, z: 1.2, speed: 6.8 },
-  { id: 'DE2', number: 99, role: 'dl', x: 4.8, z: 1.2, speed: 7.2 },
-  { id: 'LB1', number: 54, role: 'lb', x: -7, z: 5, speed: 8.4 },
-  { id: 'LB2', number: 52, role: 'lb', x: 0, z: 6, speed: 8.2 },
-  { id: 'LB3', number: 56, role: 'lb', x: 7, z: 5, speed: 8.3 },
-  { id: 'CB1', number: 23, role: 'cb', x: -21, z: 6, speed: 9.3 },
-  { id: 'CB2', number: 24, role: 'cb', x: 21, z: 6, speed: 9.3 },
-  { id: 'FS', number: 31, role: 's', x: -9, z: 17, speed: 9.0 },
-  { id: 'SS', number: 32, role: 's', x: 9, z: 17, speed: 8.9 },
-];
-const FRONTS = [
-  { name: 'Even', x: [-4.8, -1.6, 1.6, 4.8] }, { name: 'Over', x: [-5.8, -2.8, 0.65, 4.2] },
-  { name: 'Under', x: [-4.2, -0.65, 2.8, 5.8] }, { name: 'Wide 9', x: [-7, -2, 2, 7] },
-];
-// Man assignments for defenders 4..10 (LB1, LB2, LB3, CB1, CB2, FS, SS).
-const MAN = {
-  blitz: ['', '', 'Y', 'X', 'B', 'R', 'A'],
-  base: ['Y', 'R', 'A', 'X', 'B', 'Y', 'A'],
-};
-// Zone landmarks [x, depth past the line] for defenders 4..10. A landmark
-// deeper than 20 yd is a deep zone. Cover 3: curl/flat, two hooks and the
-// strong safety's curl/flat underneath, three deep thirds. Cover 2: two hooks,
-// the middle hole and the corners' flats underneath, two deep halves.
-const ZONES = {
-  cover3: [[-13, 7], [-4, 9], [5, 9], [-19, 23], [19, 23], [0, 26], [13, 7]],
-  cover2: [[-8, 11], [0, 12], [8, 11], [-23, 5], [23, 5], [-12, 25], [12, 25]],
-};
-// Pattern-matching zones (see planCoverage). Yards and yards past the line.
-const COVER = {
-  window: 8.5, stick: 2,   // an underneath man matches within `window` yd across his landmark; his own man gets `stick` yd more room and is `stick` yd cheaper
-  flat: 3,                 // a curl/flat man takes a receiver in his flat first: `flat` yd cheaper
-  carryAt: 7,              // a matched receiver going upfield past this depth is carried like man coverage
-  vertical: 6, deep: 15,   // a deep threat: past `vertical` yd and going upfield, or past `deep` yd
-  split: 12,               // Cover 3 deep thirds split this far either side of the ball, so the middle owns the seams
-  top: 1, over: 8, topWidth: 4,  // a deep man is on top: `top` to `over` yd deeper and within `topWidth` yd across
-  close: 3,                // a carrier or man defender within this of his receiver counts as help
-  cushion: 1, cushionSpeed: 0.1, floor: 8,  // on top: `cushion` + `cushionSpeed` × his speed deeper, never shallower than `floor`
-  reach: 14, open: 2.5, keep: 1.5,  // help: the most open man within `reach` yd (open: no other defender within `open`), keeping his choice by `keep` yd
-  shade: 0.35,             // an empty deep zone shades this share of the way toward the vertical beside it
-};
-
-function defensiveAlignment(coverage, front, random) {
-  const support = {
-    cover3: [[-9, 5], [-1, 6], [6, 5], [-21, 8], [21, 8], [0, 20], [10, 8]],
-    cover2: [[-8, 5], [0, 6], [8, 5], [-22, 4], [22, 4], [-12, 18], [12, 18]],
-    man: [[-10, 2.5], [-2, 4], [6.4, 2.5], [-21, 2], [21, 2], [-11, 20], [11, 20]],
-    blitz: [[-2.7, 1.5], [2.7, 1.5], [-10, 2.5], [-21, 1.8], [21, 1.8], [-3.5, 4], [6.4, 2.5]],
-  }[coverage];
-  return DEFENSE.map((spec, i) => {
-    const [x, z] = i < 4 ? [FRONTS[front].x[i], 1.2] : support[i - 4];
-    return { ...spec, x: x + (random() - 0.5) * 0.8, z: Math.max(0.8, z + (random() - 0.5) * 0.7) };
-  });
-}
 
 // Each defender's pursuit leverage and pull-up spot, varied by his index
 // with low-discrepancy fractions (no random draws, so the seeded stream is
@@ -360,42 +234,7 @@ function integrate(p, dt) {
   p.phase += Math.hypot(p.vx, p.vz) * dt;
 }
 
-// 0 while fresh, rising to 1 as the tank empties below 60 %.
-function fatigueOf(p) { return clamp((0.6 - p.stamina) / 0.6, 0, 1); }
 
-function speedCap(p, effort = 1) {
-  const cap = p.top * effort * (1 - 0.12 * fatigueOf(p));
-  return p.action === 'stumble' ? cap * STUMBLE_SPEED : cap;
-}
-
-function scaled(x, z, speed) {
-  const d = Math.hypot(x, z);
-  return d > 1e-6 ? { x: x / d * speed, z: z / d * speed } : ZERO;
-}
-
-// Toward a point, slowing so the player stops on it (or passes at `exit`).
-function seekWant(p, target, cap, exit = 0) {
-  const dx = target.x - p.x, dz = target.z - p.z, d = Math.hypot(dx, dz);
-  if (d < 0.05) return ZERO;
-  return scaled(dx, dz, Math.min(cap, Math.sqrt(exit * exit + 1.6 * p.brake * d)));
-}
-
-// Match a moving target's velocity and close the gap to it.
-function trackWant(p, target, velocity, cap, gain = 2.5) {
-  const wx = velocity.x + (target.x - p.x) * gain, wz = velocity.z + (target.z - p.z) * gain;
-  const speed = Math.hypot(wx, wz);
-  return speed > cap ? scaled(wx, wz, cap) : { x: wx, z: wz };
-}
-
-// Arrive at `target` when the ball does, `timeLeft` seconds from now.
-function meetWant(p, target, timeLeft, cap) {
-  const dx = target.x - p.x, dz = target.z - p.z, d = Math.hypot(dx, dz);
-  if (d < 0.25) return ZERO;
-  return scaled(dx, dz, Math.min(cap, d / Math.max(0.15, timeLeft)));
-}
-
-// Lateral shade of a pursuit aim point: `leverage` yards along the normal of
-// the carrier's path (as the defender saw it), oriented so + is toward +x,
 // fading to nothing as the defender closes in.
 function leverageOffset(seen, d, leverage) {
   if (!leverage) return ZERO;
@@ -497,32 +336,18 @@ export class Simulation {
       this.play = this.config.offense === 'random'
         ? PLAYS[Math.floor(this.random() * PLAYS.length)]
         : PLAYS.find(p => p.id === this.config.offense) || this.play;
-      const cover = this.config.coverage;
-      this.coverage = cover === 'random' ? ['cover3', 'cover2', 'man', 'blitz'][Math.floor(this.random() * 4)] : cover;
-      const front = Math.floor(this.random() * FRONTS.length);
-      this.defensiveFront = FRONTS[front].name;
-      this.alignment = defensiveAlignment(this.coverage, front, this.random);
+      this.callDefense();
       this.hotRoutes = {}; this.audibled = false;
     }
     this.skill = DIFFICULTY[this.config.difficulty] || DIFFICULTY.pro;
     const flip = this.config.flip;
     const formation = formationFor(this.play);
     this.players = formation.map(p => createPlayer(p, 'offense', this.spot, flip));
-    this.players.push(...this.alignment.map((p, i) => {
-      let x = p.x, z = p.z;
-      // Man defenders travel with their assignments when the offense changes
-      // formation, including an audible. Keep the called front/safety shell.
-      const ids = this.coverage === 'blitz' ? MAN.blitz : MAN.base;
-      if (i >= COVERAGES[this.coverage].rushers && (this.coverage === 'blitz' || (this.coverage === 'man' && i < 9))) {
-        const id = ids[i - 4], base = FORMATION.find(o => o.id === id), aligned = formation.find(o => o.id === id);
-        if (base && aligned) { x += aligned.x - base.x; z = Math.max(1.2, z + aligned.z - base.z); }
-      }
-      return createPlayer({ ...p, x, z: Math.min(z, 118 - this.spot) }, 'defense', this.spot, flip);
-    }));
+    this.players.push(...this.alignDefense(formation).map(p => createPlayer(p, 'defense', this.spot, flip)));
     this.players.forEach(p => {
       p.shed = 2.5 + this.random() * 2.8;
       p.route = routeFor(this.effectivePlay, p.id, this.spot, flip);
-      if (p.team === 'defense') p.latency = this.skill.latency;
+      if (p.team === 'defense') this.initDefender(p);
     });
     this.byId = Object.fromEntries(this.players.map(p => [p.id, p]));
     this.offense = this.players.filter(p => p.team === 'offense');
@@ -717,298 +542,6 @@ export class Simulation {
     if (p.id === 'QB' && this.time < 0.6 && amount < 0.05) p.want = seekWant(p, { x: p.x, z: this.spot - 6.5 }, 0.5 * p.top);
   }
 
-  // While the quarterback holds a called pass, the line protects the pocket
-  // (see protect). Otherwise (run plays, and after a catch or a scramble over
-  // the line) each lineman takes a defender (see assignBlocks) and the pair
-  // locks up until the defender's shed time; locked defenders drive toward
-  // the ball slowly.
-  planBlocking(dt = STEP) {
-    const run = this.play.type === 'run', guard = this.guardPoint();
-    this.byId.R.pickup = null;
-    if (this.time < GET_OFF.ol) return;
-    if (this.inPocket()) { this.protect(dt); return; }
-    for (const p of this.players) p.lock = null;
-    this.readTheBall();
-    const assigned = this.assignBlocks();
-    for (const o of this.line) {
-      if (run && o.id === this.play.pullingGuard && this.pullBlock(o)) continue;
-      const d = assigned.get(o.id);
-      if (!d) continue;
-      if (dist(o, d) < 1.55 && this.time < d.shed + (run ? 0.9 : 0) && d.action !== 'stumble') this.engage(o, d);
-      let target;
-      if (o.engaged) {
-        // Stay square between the defender and the ball.
-        const away = scaled(guard.x - d.x, guard.z - d.z, 0.95);
-        target = { x: d.x + away.x, z: d.z + away.z };
-      } else if (run) {
-        const side = Math.sign(this.play.lane || 1) * (this.config.flip ? -1 : 1);
-        const stretch = this.play.blocking === 'stretch';
-        target = { x: d.x + side * (stretch ? 0.85 : 0.2), z: d.z - (stretch ? 0.4 : 0.7) };
-      }
-      else target = { x: d.x, z: Math.min(this.spot - 0.7, d.z - 0.8) };
-      o.want = seekWant(o, target, speedCap(o, run ? 0.85 : 0.5));
-      o.sprinting = false;
-    }
-  }
-
-  // A called pass while the quarterback still holds the ball behind the line
-  // or has just let it go.
-  inPocket() {
-    return this.play.type !== 'run' && !this.pursuing() && (this.phase === 'live' || this.phase === 'air');
-  }
-
-  pursuing() {
-    return this.phase === 'run' || this.phase === 'tackle' || this.crossedLine || (this.play.type === 'run' && this.time > 0.8);
-  }
-
-  rushers() { return this.defense.slice(0, COVERAGES[this.coverage].rushers); }
-
-  pocketX() { return this.byId.C ? this.byId.C.start.x : 0; }
-
-  // The quarterback has left the pocket sideways.
-  scrambling() { return this.carrier === 'QB' && Math.abs(this.byId.QB.x - this.pocketX()) > POCKET.box; }
-
-  // Where a rusher lined up: his side of the centre, and whether he is an end
-  // outside the tackles.
-  rushSide(d) {
-    const off = d.start.x - this.pocketX();
-    return { off, side: Math.sign(off) || 1, edge: Math.abs(off) > POCKET.edge };
-  }
-
-  matchup(o, d) {
-    return o.role === 'rb' ? MATCHUP.back : this.rushSide(d).edge ? MATCHUP.edge : MATCHUP.inside;
-  }
-
-  // Where a lineman sets: tackles kick back and out, guards and centre short.
-  setPoint(o) {
-    const off = o.start.x - this.pocketX(), a = Math.abs(off);
-    const set = a > 2.4 ? POCKET.tackle : a > 0.8 ? POCKET.guard : POCKET.centre;
-    return { x: o.start.x + Math.sign(off) * set.kick, z: this.spot - set.depth, reach: set.reach };
-  }
-
-  // The spot between a rusher and the quarterback where a blocker squares up.
-  squarePoint(d, extra = 0) {
-    const qb = this.byId.QB, away = scaled(qb.x - d.x, qb.z - d.z, POCKET.square + extra);
-    return { x: d.x + away.x, z: d.z + away.z };
-  }
-
-  // Pass protection. Pairs already locked fight it out first (contest); then
-  // the free blockers (linemen who are neither locked nor beaten, and the
-  // back while he checks or once he has blocked) are matched to the free
-  // rushers (assignProtection) and lock up with them on contact. A spare
-  // blocker picks up any free rusher who comes within reach.
-  protect(dt) {
-    const rushers = this.rushers(), rb = this.byId.R;
-    for (const d of rushers) if (d.lock) this.contest(this.byId[d.lock], d, dt);
-    const catching = this.phase === 'air' && this.pass.receiver === 'R';
-    if (catching && rb.lock) { this.byId[rb.lock].lock = null; rb.lock = null; }
-    // A back with a hot route runs it; one lined up in the backfield checks.
-    const back = !this.hotRoutes.R && rb.start.z < this.spot - 3 && this.carrier !== 'R' && !catching && !rb.released;
-    const blockers = this.line.filter(o => !o.lock && this.time >= o.beatenUntil);
-    if (back && !rb.lock && this.time >= rb.beatenUntil) blockers.push(rb);
-    const free = rushers.filter(d => !d.lock);
-    const plan = this.assignProtection(blockers, free);
-    for (const o of [...this.line, rb]) if (!blockers.includes(o)) o.assignment = o.lock;
-    for (const o of blockers) {
-      const d = plan.get(o.id);
-      o.assignment = d ? d.id : null;
-      if (d && this.canLock(o, d)) this.lock(o, d);
-    }
-    for (const o of blockers) {
-      if (o.lock || o.assignment) continue;
-      const d = free.find(q => !q.lock && this.canLock(o, q));
-      if (d) this.lock(o, d);
-    }
-    // The back blocks only once he has a man; with none by the end of his
-    // check he releases into his route for good. Once he has blocked he stays
-    // in, beaten or not: `pickup` is his man, or 'QB' while he has none.
-    if (back && !rb.blocked && !rb.lock && !rb.assignment && this.time >= POCKET.pickup) rb.released = true;
-    for (const o of this.line) this.passSet(o, rushers);
-    if (back && (rb.lock || rb.assignment || rb.blocked)) { this.passSet(rb, rushers); rb.pickup = rb.lock || rb.assignment || 'QB'; }
-  }
-
-  // One blocker's step in protection: locked, stay square between the rusher
-  // and the quarterback, giving ground as the rusher pushes; assigned, meet
-  // him in his lane from the set point; spare, sit behind the nearest block
-  // ready to help; beaten, recover toward the quarterback. The back has no
-  // set point: he works from a spot just in front of the quarterback.
-  passSet(o, rushers) {
-    o.sprinting = false;
-    const back = o.role === 'rb', qb = this.byId.QB;
-    const set = back ? { x: qb.x, z: qb.z + 1.2, reach: 2 } : this.setPoint(o);
-    if (o.lock) {
-      const d = this.byId[o.lock];
-      this.engage(o, d);
-      o.want = trackWant(o, this.squarePoint(d), { x: d.vx, z: d.vz }, speedCap(o, 0.7));
-      return;
-    }
-    const d = o.assignment ? this.byId[o.assignment] : null;
-    if (d) {
-      const lane = this.squarePoint(d);
-      const target = back ? { x: lane.x, z: Math.min(lane.z, this.spot - 1) }
-        : { x: clamp(lane.x, set.x - set.reach, set.x + set.reach), z: Math.min(set.z, lane.z) };
-      o.want = seekWant(o, target, speedCap(o, back ? 0.85 : 0.6));
-      return;
-    }
-    if (this.time < o.beatenUntil) { o.want = seekWant(o, { x: set.x, z: set.z - 0.6 }, speedCap(o, 0.7)); return; }
-    let near = null;
-    for (const q of rushers) if (!near || dist(q, set) < dist(near, set)) near = q;
-    const behind = near && dist(near, set) < 4 ? this.squarePoint(near, 1) : set;
-    o.want = seekWant(o, { x: clamp(behind.x, set.x - set.reach, set.x + set.reach), z: Math.min(set.z, behind.z) }, speedCap(o, 0.6));
-  }
-
-  // A blocker can only take on a rusher he is in front of (nearer the
-  // quarterback): a beaten man must get back between them first.
-  canLock(o, d) {
-    const qb = this.byId.QB;
-    return dist(o, d) < POCKET.engage && this.time - d.wonAt >= POCKET.clear && dist(o, qb) < dist(d, qb);
-  }
-
-  // Blocker and rusher lock up. The rusher draws how much pressure it takes
-  // him to win this rep (an exponential threshold, so wins are spread in time
-  // and fixed by the seed) and the side he will win on.
-  lock(o, d) {
-    o.lock = d.id; d.lock = o.id; o.assignment = d.id;
-    if (o.role === 'rb') o.blocked = true;
-    const m = this.matchup(o, d), { side } = this.rushSide(d);
-    d.need = -Math.log(1 - this.random()); d.have = 0;
-    d.winSide = side * (this.random() < m.outside ? 1 : -1);
-    d.vx *= 0.8; d.vz *= 0.8;
-  }
-
-  // A locked rep. Pressure builds with the time since the snap; a spare
-  // lineman beside the block slows it, and a rusher at the quarterback (less
-  // so at one on the move) or a quarterback out of the pocket speeds it (more
-  // on the side he rolls to). The winner beats his blocker, who stumbles and
-  // cannot block for a moment.
-  contest(o, d, dt) {
-    if (!o || dist(o, d) > POCKET.part) { if (o) o.lock = null; d.lock = null; return; }
-    const qb = this.byId.QB, m = this.matchup(o, d);
-    let rate = m.win * (this.time / POCKET.ramp) ** 3;
-    if (this.line.some(h => h !== o && !h.lock && !h.assignment && this.time >= h.beatenUntil && dist(h, d) < POCKET.helpRange)) rate *= POCKET.help;
-    if (dist(d, qb) < POCKET.close) {
-      const moving = clamp((Math.hypot(qb.vx, qb.vz) - 2) / 3, 0, 1);
-      rate += POCKET.loose * (1 - (1 - POCKET.onMove) * moving);
-    } else if (this.scrambling()) {
-      const near = this.rushSide(d).side === Math.sign(qb.x - this.pocketX());
-      rate += POCKET.scramble * (near ? 1 : POCKET.away);
-    }
-    d.have += rate * dt;
-    if (d.have < d.need) return;
-    o.lock = d.lock = null; o.assignment = null;
-    o.beatenUntil = this.time + POCKET.beaten; o.action = 'stumble'; o.actionTime = POCKET.beaten;
-    o.vx *= STUMBLE_SPEED; o.vz *= STUMBLE_SPEED;
-    // The rip or swim: over a quarter second (the juke blend) the rusher
-    // goes from his push to `rip` yd/s past the blocker's shoulder.
-    const toQB = scaled(qb.x - d.x, qb.z - d.z, 1), past = scaled(toQB.x + d.winSide * POCKET.slip, toQB.z, POCKET.rip);
-    d.juke = { t: 0, from: { x: d.vx, z: d.vz }, to: past };
-    d.wonAt = this.time;
-    this.events.push('block-win');
-  }
-
-  // Protection: block the most dangerous rushers, those who would reach the
-  // quarterback first, so the one left free is the farthest; among those
-  // choices take the shortest trips (so the line slides toward an overload),
-  // keep last step's man, and use the back only when the line runs out.
-  // Exact search over every matching (at most six blockers and six rushers).
-  assignProtection(blockers, rushers) {
-    const qb = this.byId.QB, n = blockers.length, k = rushers.length, full = 1 << k;
-    const plan = new Map();
-    if (!n || !k) return plan;
-    const cost = blockers.map(o => rushers.map(d => dist(o, this.squarePoint(d)) - (o.assignment === d.id ? 1 : 0) + (o.role === 'rb' ? POCKET.backCost : 0)));
-    // Leaving a rusher free costs far more than any trip, and more the sooner
-    // he would arrive (about 2 yd of trips per yard nearer the quarterback).
-    const free = rushers.map(d => 100 - 14 * dist(d, qb) / d.top);
-    const best = Array.from({ length: n + 1 }, () => new Float64Array(full));
-    const pick = Array.from({ length: n }, () => new Int8Array(full));
-    for (let mask = 0; mask < full; mask++) for (let j = 0; j < k; j++) if (!(mask & 1 << j)) best[n][mask] += free[j];
-    for (let i = n - 1; i >= 0; i--) for (let mask = 0; mask < full; mask++) {
-      let b = best[i + 1][mask], choice = -1;
-      for (let j = 0; j < k; j++) {
-        if (mask & 1 << j) continue;
-        const c = cost[i][j] + best[i + 1][mask | 1 << j];
-        if (c < b - 1e-9) { b = c; choice = j; }
-      }
-      best[i][mask] = b; pick[i][mask] = choice;
-    }
-    for (let i = 0, mask = 0; i < n; i++) {
-      const j = pick[i][mask];
-      if (j >= 0) { plan.set(blockers[i].id, rushers[j]); mask |= 1 << j; }
-    }
-    return plan;
-  }
-
-  // Where a rusher aims, as a lateral shade (yd, + toward +x) off the
-  // quarterback: an end rushes the arc outside the tackle, bending in as he
-  // reaches the quarterback's depth; an inside man pushes his gap; a rusher
-  // who just won goes past his blocker on that side, then straight in. On a
-  // scramble the end on that side contains (keeps outside leverage) and the
-  // others chase.
-  rushShade(d) {
-    const qb = this.byId.QB, x0 = this.pocketX(), { off, side, edge } = this.rushSide(d);
-    if (this.scrambling()) return edge && Math.sign(qb.x - x0) === side ? side * this.skill.contain : 0;
-    const since = this.time - d.wonAt;
-    if (since < POCKET.burst) return d.winSide * POCKET.lean * (1 - since / POCKET.burst);
-    if (d.wonAt > 0) return 0;
-    const depth = Math.max(0, d.z - qb.z);
-    if (edge) return side * Math.min(POCKET.arcMax, POCKET.arc * depth);
-    return (x0 + clamp(off, -POCKET.gap, POCKET.gap) - qb.x) * clamp(depth / 8, 0, 1);
-  }
-
-  // A gap scheme pulls its backside guard behind the line before he leads
-  // through the called gap. The other four linemen cover his vacated matchup.
-  pullBlock(o) {
-    if ((o.pullStage || 0) >= 2) return false;
-    const side = this.config.flip ? -1 : 1, lane = this.play.lane * side;
-    o.pullStage ||= 0;
-    const target = o.pullStage === 0 ? { x: o.start.x, z: this.spot - 1.9 } : { x: lane, z: this.spot - 1.9 };
-    if (dist(o, target) < 0.65 || this.time > (o.pullStage === 0 ? 0.65 : 1.9)) o.pullStage++;
-    if (o.pullStage >= 2) return false;
-    o.want = seekWant(o, target, speedCap(o, 0.9));
-    return true;
-  }
-
-  // A blocked defender comes off his block when the ball carrier gets close:
-  // SHED_TIME to disengage, so a back hitting the hole cleanly is past him,
-  // and one dancing beside the block is not.
-  readTheBall() {
-    const c = this.byId[this.carrier];
-    if (!c) return;
-    const bonus = this.play.type === 'run' ? 0.9 : 0;
-    for (const d of this.defense) {
-      if (dist(d, c) < SHED_RANGE) d.shed = Math.min(d.shed, this.time + SHED_TIME - bonus);
-    }
-  }
-
-  // Blocking assignments: the closest lineman-defender pairs are matched
-  // first, so two linemen never take the same man and nobody leaves a rusher
-  // to his neighbour. A lineman keeps his man unless another is much closer.
-  assignBlocks() {
-    const pairs = [];
-    for (const o of this.line) for (const d of this.defense) {
-      if (this.play.type === 'run' && o.id === this.play.pullingGuard && (o.pullStage || 0) < 2) continue;
-      pairs.push({ o, d, cost: dist(o, d) - (o.assignment === d.id ? 1.5 : 0) });
-    }
-    pairs.sort((a, b) => a.cost - b.cost || a.o.number - b.o.number || a.d.number - b.d.number);
-    const taken = new Set(), result = new Map();
-    for (const { o, d } of pairs) {
-      if (result.has(o.id) || taken.has(d.id)) continue;
-      result.set(o.id, d); taken.add(d.id); o.assignment = d.id;
-    }
-    return result;
-  }
-
-  engage(a, b) {
-    a.engaged = b.id; b.engaged = a.id;
-    for (const p of [a, b]) if (!['stumble', 'tackle', 'catch'].includes(p.action)) { p.action = 'block'; p.actionTime = 0.1; }
-  }
-
-  // What blockers protect and engaged defenders drive toward.
-  guardPoint() {
-    const c = this.byId[this.carrier];
-    if (c) return c;
-    return this.byId.QB;
-  }
 
   planReceivers() {
     const run = this.play.type === 'run';
@@ -1056,61 +589,6 @@ export class Simulation {
     }
   }
 
-  planDefense(dt = STEP) {
-    const pursuit = this.phase === 'run' || this.phase === 'tackle' || this.crossedLine || (this.play.type === 'run' && this.time > 0.8);
-    const rushers = COVERAGES[this.coverage].rushers;
-    this.defense.forEach((d, i) => {
-      d.sprinting = true;
-      if (this.phase === 'air') this.readPass(d, dt);
-      if (this.phase === 'tackle' && d.id === this.tackle.tackler) return;
-      if (this.phase === 'tackle' && this.tackle.helpers.has(d.id)) {
-        const c = this.byId[this.carrier];
-        d.want = { x: c.vx, z: c.vz };
-        return;
-      }
-      if (this.time < GET_OFF[d.role]) { d.want = ZERO; return; }
-      if (d.engaged) { this.drivePast(d); return; }
-      if (this.phase === 'tackle' && dist(d, this.byId[this.carrier]) >= PULL_UP.pileOn) { d.want = this.pullUpWant(d); return; }
-      if (pursuit) { this.turnHips(d); d.want = this.pursue(d, this.carrier || 'R', speedCap(d), 0, d.leverage); return; }
-      if (i < rushers) {
-        d.turned = true;
-        // Rush lanes (rushShade); flat out once the quarterback scrambles.
-        d.want = this.pursue(d, 'QB', speedCap(d, this.scrambling() ? 1 : 0.92), this.rushShade(d));
-        return;
-      }
-      const cover = this.cover(d);
-      if (this.phase === 'air' && d.ballAware) {
-        const flight = this.readFlight(d);
-        // Stay in coverage when the pass is elsewhere. The read is an estimate
-        // from the visible ball, not access to the quarterback's chosen target.
-        if (dist(d, flight.target) < Math.min(15, d.top * flight.remaining + 3)) {
-          this.turnHips(d);
-          // Brake into the spot: arrive under control instead of running past it.
-          const want = meetWant(d, flight.target, flight.remaining, speedCap(d));
-          d.want = scaled(want.x, want.z, Math.min(Math.hypot(want.x, want.z), Math.sqrt(1.6 * d.brake * dist(d, flight.target))));
-          return;
-        }
-      }
-      if (!d.turned) this.readThreat(d, cover.threat);
-      d.want = this.backpedalLimit(d, cover.want);
-    });
-  }
-
-  // A blocked defender keeps driving toward the ball. In pass protection the
-  // rusher drives his blocker back along his rush lane at the matchup's push
-  // speed and the pair slides with the quarterback; elsewhere he leans toward
-  // the ball at a walking pace.
-  drivePast(d) {
-    d.sprinting = false;
-    if (d.lock) {
-      const o = this.byId[d.lock], qb = this.byId.QB;
-      const push = scaled(qb.x + this.rushShade(d) - d.x, qb.z - d.z, this.matchup(o, d).push);
-      d.want = { x: push.x + qb.vx * 0.85, z: push.z };
-      return;
-    }
-    const goal = this.guardPoint(), run = this.play.type === 'run' || this.phase === 'run';
-    d.want = scaled(goal.x - d.x, goal.z - d.z, run ? 0.3 : 0.6);
-  }
 
   // Pursuit with reaction latency (plan 4.3): aim from where the target was
   // `latency` seconds ago, led along the velocity seen then toward an intercept,
@@ -1178,231 +656,6 @@ export class Simulation {
     return behind + rel;
   }
 
-  // Pattern-matching coverage, planned once a step for every coverage
-  // defender from the receivers as the defense sees them (`latency` seconds
-  // late, carried forward), so difficulty still works through reaction time.
-  // Each defender gets a `job` (see cover):
-  //   man    trail one receiver: man coverage, or a vertical he carries;
-  //   zone   sit on the receiver he matched in his underneath zone;
-  //   top    stay on top of the one deep threat in his deep zone;
-  //   split  midpoint two deep threats, leaning to the one nobody carries;
-  //   lean   move from an anchor toward an open man or a nearby vertical;
-  //   spot   hold his landmark.
-  // Deep men own every vertical in their zone. Underneath men are matched
-  // one receiver each, nearest landmark first, keeping last step's man unless
-  // another is clearly nearer. A matched receiver who goes upfield is carried
-  // until a deep man has him (or past the difficulty's carry depth); only then
-  // is he handed off. A man with nobody to match helps on the open receiver.
-  planCoverage() {
-    this.coverPlanAt = this.time;
-    const spot = this.spot, skill = this.skill, flip = this.config.flip ? -1 : 1;
-    const first = COVERAGES[this.coverage]?.rushers ?? 4;
-    const seen = this.coverSeen = {};
-    for (const id of RECEIVERS) if (!this.byId[id].pickup && this.carrier !== id) seen[id] = this.estimate(id, skill.latency);
-    const ids = Object.keys(seen), order = id => RECEIVERS.indexOf(id);
-    const upfield = r => r.vz > 2.5 && r.vz > Math.abs(r.vx) * 0.8;
-    const men = [], deeps = [], unders = [];
-    const manIds = this.coverage === 'blitz' ? MAN.blitz : MAN.base;
-    this.defense.forEach((d, i) => {
-      if (i < first) return;
-      if (this.coverage === 'blitz' || (this.coverage === 'man' && i < 9)) { men.push({ d, id: manIds[i - 4] }); return; }
-      let x, depth;
-      if (this.coverage === 'man') [x, depth] = [i === 9 ? -12 : 12, 24];
-      else [x, depth] = (ZONES[this.coverage] || ZONES.cover3)[i - 4];
-      const zone = { d, x: x * flip, z: Math.min(115, spot + depth), depth, job: null };
-      (depth > 20 ? deeps : unders).push(zone);
-    });
-    // A receiver is carried (by an underneath man last step, or manned) when
-    // his man is within `close` yd of him.
-    const near = (d, id) => dist(d, seen[id]) < COVER.close;
-    const carried = id => unders.some(u => u.d.carrying && u.d.match === id && near(u.d, id)) || men.some(m => m.id === id && near(m.d, id));
-
-    // Deep zones: thirds (split wide, so the middle owns the seams) or halves.
-    // A vertical stays with last step's deep man while within 2 yd of his zone.
-    // Zones and their edges are in the play's own frame (x × flip), so a
-    // flipped play is covered as the mirror image of the same call.
-    deeps.sort((a, b) => (a.x - b.x) * flip);
-    const edges = deeps.length === 3 ? [-COVER.split, COVER.split] : deeps.length === 2 ? [0] : [];
-    deeps.forEach((z, k) => { z.lo = k ? edges[k - 1] : -Infinity; z.hi = k < edges.length ? edges[k] : Infinity; z.threats = []; });
-    // A deep threat stays one while he is still going upfield near that depth.
-    const wasDeep = id => deeps.some(z => z.d.job?.threats?.includes(id));
-    const vertical = (r, id) => r.z > spot + COVER.deep || (r.z > spot + COVER.vertical && upfield(r)) || (wasDeep(id) && r.z > spot + COVER.vertical - 1 && r.vz > 0);
-    for (const id of ids) {
-      const r = seen[id];
-      if (!vertical(r, id)) continue;
-      const x = r.x * flip;
-      const owner = deeps.find(z => z.d.job?.threats?.includes(id) && x > z.lo - 2 && x < z.hi + 2) || deeps.find(z => x >= z.lo && x < z.hi);
-      if (owner) owner.threats.push(id);
-    }
-    for (const z of deeps) {
-      const prev = z.d.job?.threats || [];
-      const danger = id => seen[id].z + 0.5 * Math.max(0, seen[id].vz) + (prev.slice(0, 2).includes(id) ? 2 : 0);
-      const threats = z.threats.sort((a, b) => danger(b) - danger(a) || order(a) - order(b));
-      if (threats.length === 1) z.job = { kind: 'top', id: threats[0], primary: threats[0] };
-      else if (threats.length > 1) {
-        // Two verticals: midpoint them, leaning to the one nobody else has.
-        const [a, b] = threats, ca = carried(a), cb = carried(b), w = ca === cb ? 0.5 : ca ? 0.2 : 0.8;
-        z.job = { kind: 'split', a, b, w, primary: w > 0.75 ? a : w < 0.25 ? b : null };
-      }
-      if (z.job) z.job.threats = threats;
-    }
-    // A deep man has a receiver when he is assigned to him alone and on top
-    // of him: deeper by `top` to `over` yd and within `topWidth` across.
-    const onTop = (d, r, width) => d.z > r.z + COVER.top && d.z < r.z + COVER.over && Math.abs(d.x - r.x) < width;
-    const deepHas = id => deeps.some(z => z.job?.primary === id && onTop(z.d, seen[id], COVER.topWidth));
-
-    // Underneath: carries first. A carry ends when a deep man has the
-    // receiver, past the carry depth, or (a curl/flat defender sinking with a
-    // vertical with a deep man over it) when a receiver shows in his flat; it
-    // becomes a plain match when the receiver settles back underneath.
-    const deepOver = id => deeps.some(z => z.threats.includes(id) && onTop(z.d, seen[id], 2 * COVER.topWidth));
-    const outside = u => Math.abs(u.x) >= 12 && u.depth <= 8;
-    const inFlat = (u, r) => Math.sign(r.x) === Math.sign(u.x) && Math.abs(r.x) > Math.abs(u.x) - 5 && r.z < spot + 6 && r.z > spot - 2;
-    const taken = new Set();
-    for (const u of unders) {
-      const d = u.d, r = seen[d.match];
-      if (d.handed && (!seen[d.handed] || seen[d.handed].z < spot + COVER.carryAt - 1)) d.handed = null;
-      if (!r) { d.match = null; d.carrying = false; continue; }
-      if (!d.carrying) continue;
-      const flat = outside(u) && r.z > spot + 8 && deepOver(d.match) && ids.some(id => id !== d.match && inFlat(u, seen[id]));
-      if (deepHas(d.match) || r.z > spot + skill.carry || flat) { d.handed = d.match; d.match = null; d.carrying = false; }
-      else if (!upfield(r) && r.z < spot + COVER.carryAt) d.carrying = false;
-      else taken.add(d.match);
-    }
-    const pairs = [];
-    for (const u of unders) {
-      const d = u.d;
-      if (d.carrying) continue;
-      for (const id of ids) {
-        const r = seen[id], mine = d.match === id;
-        if (taken.has(id) || id === d.handed || r.z < spot - 2 || Math.abs(r.x - u.x) > COVER.window + (mine ? COVER.stick : 0)) continue;
-        if (!mine && (r.z > spot + Math.min(skill.carry, 18) || (r.z > spot + COVER.carryAt && deepHas(id)))) continue;
-        // A curl/flat defender takes the flat first; the hooks wall the inside.
-        pairs.push({ u, id, cost: Math.hypot(r.x - u.x, r.z - u.z) - (mine ? COVER.stick : 0) - (outside(u) && inFlat(u, r) ? COVER.flat : 0) });
-      }
-    }
-    pairs.sort((a, b) => a.cost - b.cost || unders.indexOf(a.u) - unders.indexOf(b.u) || order(a.id) - order(b.id));
-    const matched = new Set();
-    for (const { u, id } of pairs) if (!matched.has(u) && !taken.has(id)) { matched.add(u); taken.add(id); u.d.match = id; }
-    for (const u of unders) {
-      const d = u.d;
-      if (!d.carrying && !matched.has(u)) d.match = null;
-      const r = seen[d.match];
-      if (r && !d.carrying && upfield(r) && r.z > spot + COVER.carryAt) d.carrying = true;
-      if (d.match) u.job = { kind: d.carrying ? 'man' : 'zone', id: d.match, x: u.x, z: u.z };
-    }
-
-    // Help. Each receiver's coverage gap is the distance to the nearest other
-    // coverage defender; a free man leans toward the most open one in reach,
-    // keeping last step's choice unless another is clearly more open.
-    const coverers = this.defense.filter((d, i) => i >= first && !d.engaged && d.action !== 'stumble');
-    const openMan = (d, minDepth, where = () => true) => {
-      let best = null, score = COVER.open;
-      for (const id of ids) {
-        const r = seen[id];
-        if (r.z < spot + minDepth || dist(d, r) > COVER.reach || !where(r)) continue;
-        let gap = Infinity;
-        for (const q of coverers) if (q !== d) gap = Math.min(gap, dist(q, r));
-        if (d.helpOn === id) gap += COVER.keep;
-        if (gap > score) { score = gap; best = id; }
-      }
-      return (d.helpOn = best);
-    };
-    for (const u of unders) {
-      if (u.job) continue;
-      const id = openMan(u.d, 1);
-      u.job = id ? { kind: 'lean', id, w: skill.help, x: u.x, z: u.z, lo: spot + 2, hi: spot + 16 } : { kind: 'spot', x: u.x, z: u.z };
-    }
-    for (const z of deeps) {
-      if (z.job) continue;
-      // An empty deep zone: squeeze an open man underneath in it (a corner
-      // sinking on a hitch), else shade toward the nearest vertical beside
-      // it, else help on any open man near him. He stays deeper than his man.
-      const own = openMan(z.d, 1, r => r.x * flip >= z.lo && r.x * flip < z.hi);
-      if (own) { z.job = { kind: 'lean', id: own, w: skill.help, x: z.x, z: z.z, lo: spot + 4, hi: 115, over: true }; continue; }
-      // Ties go to the first in play-frame order, the same on a flipped play.
-      let beside = null;
-      for (const other of deeps) for (const id of other.threats) if (!beside || Math.abs(seen[id].x - z.x) < Math.abs(seen[beside].x - z.x)) beside = id;
-      if (beside) { z.job = { kind: 'lean', id: beside, w: COVER.shade, x: z.x, z: z.z, lo: z.z, hi: 115, over: true }; continue; }
-      const id = openMan(z.d, 1);
-      z.job = id ? { kind: 'lean', id, w: skill.help, x: z.x, z: z.z, lo: spot + 4, hi: 115, over: true } : { kind: 'spot', x: z.x, z: z.z };
-    }
-    // Man coverage. A man whose receiver stays in to block is free: he robs
-    // the shallow middle and doubles the most open man near him.
-    for (const m of men) {
-      if (seen[m.id]) { m.job = { kind: 'man', id: m.id }; continue; }
-      const x = this.pocketX(), z = spot + 7, id = openMan(m.d, 1);
-      m.job = id ? { kind: 'lean', id, w: Math.max(skill.help, 0.5), x, z, lo: spot + 3, hi: spot + 12 } : { kind: 'spot', x, z };
-    }
-    for (const c of [...men, ...deeps, ...unders]) { if (c.x !== undefined) { c.job.x ??= c.x; c.job.z ??= c.z; } c.d.job = c.job; }
-  }
-
-  // Coverage movement for one defender's job (planCoverage). Returns the
-  // wanted velocity and the receiver who threatens him (for the hip flip).
-  cover(d) {
-    if (this.coverPlanAt !== this.time || !d.job) this.planCoverage();
-    const cap = speedCap(d), job = d.job, seen = this.coverSeen, spot = this.spot;
-    const r = job && job.id ? seen[job.id] : null;
-    if (!job || (job.kind !== 'split' && job.kind !== 'spot' && !r)) return { want: ZERO, threat: null };
-    if (job.kind === 'man') {
-      const lead = this.skill.routeLead, target = { x: r.x + r.vx * lead, z: r.z + 1.2 + r.vz * lead };
-      return { want: trackWant(d, target, { x: r.vx, z: r.vz }, cap), threat: r };
-    }
-    if (job.kind === 'top') {
-      // Stay on top: deeper than the receiver by a cushion that grows with his
-      // speed, matching his vertical speed instead of waiting at the landmark.
-      const target = { x: job.x * 0.15 + r.x * 0.85, z: Math.max(Math.min(job.z, spot + COVER.floor), r.z + COVER.cushion + Math.max(0, r.vz) * COVER.cushionSpeed) };
-      const ahead = r.z > d.z - 8 ? Math.max(0, r.vz) : 0;
-      return { want: trackWant(d, target, { x: r.vx * 0.72, z: ahead }, cap, 1.6), threat: r };
-    }
-    if (job.kind === 'split') {
-      const a = seen[job.a], b = seen[job.b], w = job.w, deeper = a.z > b.z ? a : b;
-      const target = { x: job.x * 0.15 + (w * a.x + (1 - w) * b.x) * 0.85, z: Math.max(Math.min(job.z, spot + COVER.floor), deeper.z + COVER.cushion + Math.max(0, deeper.vz) * COVER.cushionSpeed) };
-      const ahead = deeper.z > d.z - 8 ? Math.max(0, deeper.vz) : 0;
-      return { want: trackWant(d, target, { x: (w * a.vx + (1 - w) * b.vx) * 0.85, z: ahead }, cap, 1.6), threat: deeper };
-    }
-    if (job.kind === 'zone') {
-      const target = { x: job.x * 0.15 + r.x * 0.85, z: clamp(r.z + 1, spot + 2, spot + 16) };
-      return { want: seekWant(d, target, cap), threat: r };
-    }
-    if (job.kind === 'lean') {
-      // A point between the anchor and where the receiver is heading; a deep
-      // man stays deeper than him.
-      const ax = r.x + r.vx * 0.3, az = r.z + r.vz * 0.3;
-      let z = clamp(job.z + (az - job.z) * job.w, job.lo, job.hi);
-      if (job.over) z = Math.max(z, r.z + 2);
-      return { want: seekWant(d, { x: job.x + (ax - job.x) * job.w, z: Math.min(115, z) }, cap), threat: r };
-    }
-    return { want: seekWant(d, { x: job.x, z: job.z }, cap), threat: null };
-  }
-
-  // Until he opens his hips, a coverage defender faces the quarterback, so
-  // moving away from him is a slower backpedal and sideways a shuffle.
-  backpedalLimit(d, want) {
-    if (d.turned) return want;
-    const speed = Math.hypot(want.x, want.z);
-    if (speed < 0.5) return want;
-    const away = -(want.x * Math.sin(d.facing) + want.z * Math.cos(d.facing)) / speed;
-    const share = away > 0.17 ? BACKPEDAL_SPEED : away > -0.5 ? SHUFFLE_SPEED : 1;
-    const cap = speedCap(d) * share;
-    return speed > cap ? scaled(want.x, want.z, cap) : want;
-  }
-
-  // Flip and run once a receiver eats the cushion going vertical; flipping
-  // out of a backpedal costs a quarter second of grip.
-  // A vertical far to his side also makes him open up and run to it.
-  readThreat(d, threat) {
-    const threatened = threat && threat.vz > 4 && (threat.z > d.z - CUSHION || (Math.abs(threat.x - d.x) > WIDE_THREAT && threat.z > d.z - 16));
-    if (threatened || d.z - d.start.z > MAX_BACKPEDAL) this.turnHips(d);
-  }
-
-  turnHips(d) {
-    if (d.turned) return;
-    d.turned = true;
-    if (d.backpedal) d.flip = FLIP_TIME;
-  }
-
-  // Integrate every player once, from the velocity each one wants this step.
   moveAll(dt) {
     const controlled = this.carrier || this.selected;
     for (const p of this.players) {
@@ -1479,33 +732,6 @@ export class Simulation {
 
   recordTrails() {
     for (const p of this.offense) this.trails.get(p.id).push(this.time, p);
-  }
-
-  // Track a pass only after actually seeing it. A trailing man defender can
-  // notice his receiver looking back, but needs extra time to locate the ball.
-  // Turning away from the quarterback is therefore a real coverage tradeoff.
-  readPass(d, dt) {
-    if (d.engaged || ['stumble', 'tackle', 'down'].includes(d.action)) return;
-    const dx = this.ball.x - d.x, dz = this.ball.z - d.z, gap = Math.hypot(dx, dz);
-    const visible = gap < 0.1 || (dx * Math.sin(d.facing) + dz * Math.cos(d.facing)) / gap > -0.34;
-    const receiver = this.byId[this.pass.receiver];
-    const receiverCue = this.pass.elapsed > 0.16 && receiver && dist(d, receiver) < 2.8;
-    if (visible || receiverCue || d.ballAware) {
-      d.ballRead += dt;
-      if (d.ballRead >= this.skill.ballReaction + (visible ? 0 : 0.16)) d.ballAware = true;
-      if (d.ballAware && visible) d.ballSightAt = this.time;
-    } else d.ballRead = Math.max(0, d.ballRead - dt);
-  }
-
-  readFlight(d) {
-    const b = this.ball;
-    const remaining = clamp((b.vy + Math.sqrt(Math.max(0, b.vy * b.vy + 2 * GRAVITY * (b.y - 1.6)))) / GRAVITY, 0.05, 3);
-    // Early reads have some depth/width error; watching the flight refines it.
-    // The fixed per-player bias consumes no random draws and cannot reveal a
-    // route or the throw's intended receiver/landing coordinate.
-    const error = this.skill.judgment * Math.min(1, remaining) / (1 + d.ballRead * 2);
-    const angle = d.number * 2.399963;
-    return { remaining, target: { x: b.x + b.vx * remaining + Math.sin(angle) * error, z: b.z + b.vz * remaining + Math.cos(angle) * error } };
   }
 
   // ---------------------------------------------------------------------------
@@ -1819,3 +1045,4 @@ export class Simulation {
 
   drainEvents() { return this.events.splice(0); }
 }
+Object.assign(Simulation.prototype, defense, coverage, protection);
