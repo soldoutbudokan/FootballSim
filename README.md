@@ -132,3 +132,17 @@ The browser test drives the real UI: title menu, camera fallback and cycling, pl
 Code layout: `dist/js/sim.js` and `plays.js` (simulation and playbook), `scene.js` with `environment.js` and `env/` (field, facility, sky, lighting, cameras, grass), `athletes.js` with `athletes/` (rigs, skinning, poses, ball), `characters/` (the optional skinned-model layer, see `MODELS.md`), `app.js`, `audio.js`, `index.html` and `style.css` (front end), and `graphics.js` (quality tiers).
 
 All game-specific code and procedural assets were created for this repository. Third-party credits: `ASSETS.md`.
+
+### Benchmark
+
+`scripts/bench.mjs` plays the real simulation with a scripted quarterback and ball carrier, so changes to the defense can be measured instead of felt. By difficulty and coverage it reports completion %, yards per attempt and per play, sack, interception, breakup and drop rates, pressure by 2.5 s, time to throw, receivers open at 2.5 s, explosive plays, touchdowns and yards per carry. Every rep is seeded, so a run replays exactly and two versions of the game can be compared on the same seeds.
+
+```sh
+node scripts/bench.mjs --reps 200                  # every difficulty x every coverage
+node scripts/bench.mjs --difficulty pro --coverage cover3,man --plays pass --aggression both
+node scripts/bench.mjs --mode drive --reps 50      # move the chains: points per drive
+node scripts/bench.mjs --watch 7 mesh cover3       # one rep, traced every 0.25 s
+node scripts/bench.mjs --sim /tmp/base/dist/js     # another copy of dist/js, e.g. from git archive
+```
+
+The quarterback sees only what the screen shows and knows the called play. Once the drop sets (1.0 s, 1.3 s after a play-action fake) he scores each receiver's openness every 0.1 s: the separation when the ball would arrive (the receiver carried along his route, the defenders along their run and then closing on the catch point) and now, less a cost for each defender who could reach the ball on its way. He gives the first read in the coaching cue 0.4 s, then throws to the best man open enough for his aggression (0 cautious, 1 aggressive). He takes the checkdown after 2.6 s, slides or steps up away from a free rusher, throws the ball away when a sack is coming and scrambles into open grass. He never holds the ball past 4.5 s. A seeded reaction delay of 0.15 to 0.3 s, the button hold for the throw style and an occasional late throw come between the decision and the release. After the catch the carrier runs at the lane with the most room downfield and jukes a tackler who closes from the side. `--help` lists every option and column, and `--json` writes every rep.
