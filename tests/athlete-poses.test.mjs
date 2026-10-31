@@ -71,7 +71,7 @@ poseTest('on a pass play unengaged linemen sit in a pass set and coverage player
   const set = [], cover = [];
   // Sample where a posture has blended fully in: a beaten lineman eases back
   // into his set, and zone defenders match and help, so few stand still for long.
-  for (const [seed, offense, coverage] of [[2, 'mesh', 'cover3'], [3, 'curlflat', 'cover2'], [4, 'spacing', 'cover3']]) {
+  for (const [seed, offense, coverage] of [[2, 'mesh', 'cover3'], [3, 'curlflat', 'cover2'], [4, 'spacing', 'cover3'], [6, 'spacing', 'cover4'], [8, 'stick', 'man']]) {
     const r = rep(seed, { offense, coverage });
     play(r, 3.5, s => {
       if (s.time < 0.6) return;
@@ -82,7 +82,7 @@ poseTest('on a pass play unengaged linemen sit in a pass set and coverage player
         const drop = rig.dims.hipY - rig.world.pelvis.y;
         // Hands up in front of the chest, not hanging at the sides.
         if (role === 'ol' && p.speed < 3 && anim.postures.set > 0.95) set.push({ drop, hands: rig.world.hands.every(h => h.y > rig.world.chest.y - 0.05) });
-        if (['cb', 's', 'lb'].includes(role) && p.speed < 1 && anim.postures.cover > 0.95) cover.push(drop);
+        if (['cb', 's', 'lb'].includes(role) && p.speed < 1.5 && anim.postures.cover > 0.9) cover.push(drop);
       }
     });
   }

@@ -284,7 +284,7 @@ function setCharge(next) {
 
 function beginCharge(index) {
   if (inMenu || paused || replay || sim.phase !== 'live' || sim.carrier !== 'QB' || sim.crossedLine || sim.play.type === 'run') return;
-  if (sim.play.type === 'pa' && sim.time < 1.1) { toast('Let the play-action fake develop'); return; }
+  if (sim.faking()) { toast('Let the play-action fake develop'); return; }
   setCharge({ id: RECEIVERS[index], index, started: performance.now() });
   $('charge-target').textContent = String(index + 1);
 }

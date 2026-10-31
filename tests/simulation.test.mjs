@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Simulation,STEP,GRAVITY,flightVelocity,nearestOnSegment} from '../dist/js/sim.js';
 import {PLAYS} from '../dist/js/plays.js';
+import {FAMILIES} from '../dist/js/sim/defense.js';
 function advance(s,seconds,input={}){for(let i=0;i<Math.round(seconds/STEP);i++)s.step(STEP,input);}
 function practice(seed){return new Simulation(seed,{offense:'mesh',coverage:'cover3',difficulty:'pro',mode:'reps'});}
 test('practice contains an 11-player offense and an 11-player CPU defense',()=>{const s=practice(1);assert.equal(s.players.length,22);assert.equal(s.players.filter(p=>p.team==='offense').length,11);assert.equal(new Set(s.players.map(p=>p.id)).size,22);assert.equal(s.carrier,'QB');});
@@ -43,7 +44,7 @@ test('default drives draw offense and defense again for each down',()=>{
   const s=new Simulation(2026),offenses=new Set(),defenses=new Set();
   assert.equal(s.config.offense,'random');assert.equal(s.config.coverage,'random');assert.equal(s.config.mode,'drive');
   for(let i=0;i<PLAYS.length*15;i++){offenses.add(s.play.id);defenses.add(s.coverage);s.snap();s.finish('Incomplete',0,'incomplete');assert.equal(s.next(),true);assert.equal(s.down,(i+1)%4+1);}
-  assert.equal(offenses.size,PLAYS.length);assert.equal(defenses.size,4);assert.equal(s.spot,35);assert.equal(s.down,1);
+  assert.equal(offenses.size,PLAYS.length);assert.equal(defenses.size,FAMILIES.length);assert.equal(s.spot,35);assert.equal(s.down,1);
 });
 test('fixed calls repeat until random offense is restored',()=>{
   const s=new Simulation(13,{difficulty:'pro',mode:'reps'});s.configure({offense:'zone',coverage:'man'});
@@ -64,7 +65,7 @@ test('resetting, flipping and selecting plays preserve a drive series',()=>{
 test('hot routes change one receiver, execute after the snap and preserve the base play',()=>{
   const s=practice(42),base=JSON.stringify(PLAYS.find(p=>p.id==='mesh').routes),other=s.byId.Y.route.map(p=>({...p}));
   assert.equal(s.setHotRoute('X','out'),true);assert.deepEqual(s.byId.Y.route,other);assert.notDeepEqual(s.effectivePlay.routes.X,s.play.routes.X);
-  s.snap();advance(s,1.8);assert.ok(s.byId.X.x<-21);assert.equal(s.setHotRoute('X','curl'),false);assert.equal(JSON.stringify(PLAYS.find(p=>p.id==='mesh').routes),base);
+  s.snap();let widest=0;for(let i=0;i<420;i++){s.step(STEP);widest=Math.min(widest,s.byId.X.x);}assert.ok(widest<-22.5,'the out breaks to the sideline: '+widest.toFixed(1));assert.equal(s.setHotRoute('X','curl'),false);assert.equal(JSON.stringify(PLAYS.find(p=>p.id==='mesh').routes),base);
   s.finish('Incomplete',0,'incomplete');s.next();assert.deepEqual(s.hotRoutes,{});assert.deepEqual(s.effectivePlay.routes,s.play.routes);
 });
 test('hot routes mirror with the play and can be restored',()=>{
@@ -79,12 +80,23 @@ test('audibles preserve the drive and defense, clear hot routes, and apply only 
   assert.deepEqual(s.players.filter(p=>p.team==='defense').map(p=>[p.id,p.x,p.z]),defense);
   s.snap();assert.equal(s.audible('zone'),false);s.finish('Incomplete',0,'incomplete');s.next();assert.equal(s.play.id,'mesh');assert.equal(s.down,3);assert.equal(s.toGo,7);
 });
-test('coverage calls use distinct safety shells, cushions and blitz positions',()=>{
-  const make=coverage=>new Simulation(31,{offense:'mesh',coverage,difficulty:'pro',mode:'reps'}),three=make('cover3'),two=make('cover2'),man=make('man'),blitz=make('blitz');
-  assert.ok(Math.abs(three.byId.FS.x)<1);assert.ok(three.byId.SS.z-three.spot<10);assert.ok(Math.abs(two.byId.FS.x)>10);assert.ok(two.byId.SS.z-two.spot>16);
-  assert.ok(three.byId.CB1.z-three.spot>7);assert.ok(two.byId.CB1.z-two.spot<5);assert.ok(man.byId.CB1.z-man.spot<3);
-  assert.ok(blitz.byId.LB1.z-blitz.spot<2);assert.ok(blitz.byId.LB2.z-blitz.spot<2);assert.ok(blitz.players.filter(p=>p.team==='defense').every(p=>p.z-blitz.spot<6));
-  man.snap();advance(man,.8);assert.ok(man.byId.FS.z-man.spot>18);assert.ok(man.byId.SS.z-man.spot>18);
+test('the pre-snap shell is a look, not the call: each shell has its own shape and a family shows several',()=>{
+  const deep=(s,p)=>p.z-s.spot;
+  for(const coverage of ['cover3','cover2','man','blitz']){
+    const shells=new Set();
+    for(let seed=1;seed<=24;seed++){
+      const s=new Simulation(seed,{offense:'mesh',coverage,difficulty:'pro',mode:'reps'}),fs=s.byId.FS,ss=s.byId.SS,shell=s.call.shell;
+      shells.add(shell);
+      assert.equal(s.coverage,coverage);
+      if(shell==='two-high'){assert.ok(deep(s,fs)>11&&deep(s,ss)>11,`${coverage} ${seed}: two safeties deep`);assert.ok(Math.abs(fs.x)>7&&Math.abs(ss.x)>7,'and wide');}
+      if(shell==='one-high'){const [high,low]=deep(s,fs)>deep(s,ss)?[fs,ss]:[ss,fs];assert.ok(deep(s,high)>12.5&&Math.abs(high.x)<6,`${coverage} ${seed}: one safety deep in the middle`);assert.ok(deep(s,low)<10,'the other down');}
+      if(shell==='mug')assert.ok(s.defense.filter(d=>d.role!=='dl'&&deep(s,d)<2).length>=2,`${coverage} ${seed}: two men walked up`);
+      if(coverage==='blitz')assert.equal(s.defense.filter(d=>d.rushing).length,6);
+    }
+    assert.ok(shells.size>=2,coverage+' shows more than one look: '+[...shells]);
+  }
+  const man=new Simulation(2,{offense:'mesh',coverage:'man',difficulty:'pro',mode:'reps'});man.snap();advance(man,1.5);
+  assert.ok(man.byId.FS.z-man.spot>14&&man.byId.SS.z-man.spot>14,'2-man: both safeties deep after the snap');
 });
 test('the same defensive call varies its front between reps and stays set during adjustments',()=>{
   const s=new Simulation(91,{offense:'mesh',coverage:'cover3',difficulty:'pro',mode:'reps'}),fronts=new Set(),positions=new Set();
@@ -297,7 +309,7 @@ test('the snapshot carries speed, lean, backpedal and the tackle phase fields of
 });
 
 test('coverage backs backpedal facing the quarterback, then flip when a receiver threatens them',()=>{
-  const s=new Simulation(5,{offense:'verts',coverage:'cover3',difficulty:'pro',mode:'reps'}),cb=s.byId.CB1,qb=s.byId.QB;s.snap();
+  const s=new Simulation(5,{offense:'verts',coverage:'cover3',difficulty:'pro',mode:'reps'});s.call.press=false;s.reset();const cb=s.byId.CB1,qb=s.byId.QB;s.snap();
   let backpedalled=false,facedQB=true,flippedAt=null;
   for(let i=0;i<360;i++){
     s.step(STEP);
@@ -508,26 +520,29 @@ test('a back with a hot route runs it against the blitz instead of staying in', 
   }
 });
 
-test('a scrambling quarterback is chased at speed, with the edge on his side keeping contain', () => {
-  let outside = 0, reps = 0;
+test('a scrambling quarterback is chased at speed once the rushers have shed their blocks', () => {
+  // Contain and the shed itself are covered in tests/protection.test.mjs.
+  // Here: 1.5 s after he leaves the pocket, the rush has come off its
+  // blocks (at most one man still locked up) and chases at speed, unless
+  // the rep has already ended with him run down.
+  let reps = 0, ended = 0;
   for (let seed = 1; seed <= 10; seed++) {
     const s = new Simulation(seed, { offense: 'mesh', coverage: 'cover3', difficulty: 'pro', mode: 'reps' }), qb = s.byId.QB;
     s.snap();
-    const rushers = s.defense.slice(0, 4), edge = rushers.reduce((a, b) => (b.start.x > a.start.x ? b : a));
+    const rushers = s.defense.filter(d => d.rushing);
     let out = null;
-    for (let i = 0; i < 600 && s.phase === 'live' && (out === null || s.time - out < 0.6); i++) {
+    for (let i = 0; i < 720 && s.phase === 'live' && (out === null || s.time - out < 1.5); i++) {
       s.step(STEP, s.time > 1.2 ? { x: 1, z: -0.15 } : {});
       if (out === null && qb.x > 4.4) out = s.time;
     }
-    if (s.phase !== 'live' || out === null) continue;
+    if (out === null) continue;
     reps++;
+    if (s.phase !== 'live') { ended++; continue; }
     const speed = mean(rushers.map(d => Math.hypot(d.vx, d.vz)));
     assert.ok(speed > 3.5, `${seed}: the rush chases at ${speed.toFixed(1)} yd/s`);
-    assert.ok(rushers.filter(d => d.engaged).length <= 2, `${seed}: rushers come off their blocks`);
-    if (edge.x > qb.x) outside++;
+    assert.ok(rushers.filter(d => d.engaged).length <= 1, `${seed}: rushers come off their blocks`);
   }
   assert.ok(reps >= 8, 'scrambles ' + reps);
-  assert.ok(outside >= reps - 2, `the edge kept outside the quarterback in ${outside}/${reps}`);
 });
 
 test('a beaten blocker stumbles for a moment, then can pick up a rusher again', () => {

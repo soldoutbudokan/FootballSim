@@ -73,6 +73,12 @@ const RECOVERY = 0.12;
 const REACH = 0.95;                    // tackling reach, yards
 const DIVE_REACH = 1.7;                // a diving tackle from behind
 const WRAP_KEEP = 0.8;
+const SCREEN = 0.3;                    // a body this close to the line between tackler and runner blocks the tackle
+// Receivers blocking on a run or after a catch: the nearest defender in
+// front of him within `range` yd, if that defender is within `near` yd of the
+// ball carrier; he locks on inside `engage` yd and holds him at most `hold`
+// s (a stalk block, not a pin), then lets him go for good.
+const DOWNFIELD = { range: 3.5, engage: 1.2, near: 12, hold: 1.3 };
 const TACKLE_DECEL = 12, GANG_DECEL = 6, TACKLE_HOLD = 0.9;
 // A miss: the tackler stumbles for STUMBLE_TIME at STUMBLE_SPEED of his top
 // speed; the runner keeps BROKEN_KEEP of his speed through the contact.
@@ -91,14 +97,9 @@ const TACKLE = {
   base: 0.88, speed: 0.1, square: 0.25, min: 0.25, max: 0.97, help: 0.5,
   shaken: 0.38, shakeTime: 0.3, overrun: 0.32, overrunTime: 0.8, missAngle: 40 * DEG,
 };
-// Pursuit leverage: each pursuer aims min..min+spread yards to his own side
-// of the carrier's path (the side he lined up on), fading out between `far`
-// and `near` yards from the carrier so he still closes to make the tackle;
-// a defender in front of the runner takes only `front` of it. Pursuers
-// arrive side by side instead of in single file.
 const BALL_REST = 0.1;                 // centre height of a ball lying on the turf
-const CATCH_GRACE = 0.35;
-const MESH_REACH = 1.25;               // QB to back, body centres, at the exchange              // a new carrier runs on through the catch
+const CATCH_GRACE = 0.35;              // a new carrier runs on through the catch
+const MESH_REACH = 1.25;               // QB to back, body centres, at the exchange
 
 // Each defender's pursuit leverage and pull-up spot, varied by his index
 // with low-discrepancy fractions (no random draws, so the seeded stream is
@@ -137,13 +138,19 @@ function createPlayer(spec, team, spot, flip) {
     // receiver he has, `carrying` whether he runs with him upfield, `handed`
     // the vertical he passed to a deep man, `helpOn` the open man he leans to.
     job: null, match: null, carrying: false, handed: null, helpOn: null,
+    // Route running (runRoute): the route's `kind` and `key` leg, the man-or-
+    // zone read, where he sits down, the decisions taken, a jam and the
+    // scramble drill lane. `ghost` marks predict()'s copy.
+    kind: null, key: 0, manRead: 0, mode: null, legAt: -1, sitting: false, sitX: 0, sitZ: 0, slideAt: -9, noSit: false, converted: false, extended: false, workBack: false,
+    jamUntil: -9, jamSide: 0, drillDeep: false, drillLane: 0, drillZ: 0, avoidId: null, avoidSide: 0, ghost: false,
+    blockOn: null, blockAt: 0, blockDone: null,
   };
 }
 
 // Recent positions of one player, so defenders can react to what they saw a
 // moment ago instead of to the present.
 class Trail {
-  constructor(size = 72) {
+  constructor(size = 120) {
     this.size = size; this.count = 0; this.head = -1;
     this.t = new Float64Array(size); this.x = new Float64Array(size); this.z = new Float64Array(size);
     this.vx = new Float64Array(size); this.vz = new Float64Array(size);
@@ -234,7 +241,8 @@ function integrate(p, dt) {
   p.phase += Math.hypot(p.vx, p.vz) * dt;
 }
 
-
+// Lateral shade of a pursuit aim point: `leverage` yards along the normal of
+// the carrier's path, toward the side the pursuer lined up on (LEVERAGE),
 // fading to nothing as the defender closes in.
 function leverageOffset(seen, d, leverage) {
   if (!leverage) return ZERO;
@@ -249,6 +257,23 @@ function leverageOffset(seen, d, leverage) {
   const share = ahead > 0 ? 1 - (1 - LEVERAGE.front) * Math.min(1, ahead * 2) : 1;
   const k = leverage * share * clamp((gap - LEVERAGE.near) / (LEVERAGE.far - LEVERAGE.near), 0, 1);
   return { x: nx * k, z: nz * k };
+}
+
+// Open-field pursuit angles (pursue). The carrier's path, as a defender saw
+// it, runs on at the velocity he saw and turns up (or down) the field `edge`
+// yd from the middle: the sideline fences him in. The defender aims at the
+// first point of that path he can reach in time (within `reach` yd), sampled
+// every `step` s up to `horizon` s ahead, so he takes an angle instead of
+// chasing. One who cannot get there in time chases `trail` s ahead of the
+// carrier and, when the carrier is more than `wide` yd from the middle of
+// the field and the defender is inside him, stays `force` yd inside him so
+// the carrier has only the sideline.
+const PURSUIT = { edge: 25.8, step: 0.1, horizon: 2.5, reach: 0.5, trail: 0.6, wide: 6, force: 1.2 };
+function carrierPath(seen, t) {
+  const x = seen.x + seen.vx * t, z = seen.z + seen.vz * t;
+  if (Math.abs(x) <= PURSUIT.edge) return { x, z };
+  const side = Math.sign(x), t0 = Math.abs(seen.vx) > 1e-6 ? clamp((side * PURSUIT.edge - seen.x) / seen.vx, 0, t) : 0;
+  return { x: side * PURSUIT.edge, z: seen.z + seen.vz * t0 + (seen.vz >= 0 ? 1 : -1) * Math.hypot(seen.vx, seen.vz) * (t - t0) };
 }
 
 function project(a, b, p) {
@@ -295,6 +320,146 @@ function routeWant(p, cap) {
   if (Math.hypot(dx, dz) < 0.05) return seekWant(p, leg.to, speed);
   return scaled(dx, dz, speed);
 }
+
+// ---------------------------------------------------------------------------
+// Receivers against the coverage. A receiver runs his landmarks with
+// routeWant, but he reads the defense on the way, READ.latency s late, the
+// same at every difficulty, so difficulty stays a property of the defense.
+//
+// Man or zone: each step he scores how closely the nearest coverage defender
+// stays on him: one within `near` yd (in full inside `tight`), less how fast
+// the gap between them opens or closes, as a share of `approach` × his speed.
+// A man trailing him or running with him scores near 1 however the release
+// weaves; a corner squatting in the flat as he runs at him, or a deep man
+// bailing away from him, scores near 0. The score settles over `tau` s while
+// he runs faster than `moving` yd/s; over `man` it reads as a man on him (or
+// a zone defender matching him, which is the same thing to a receiver).
+const READ = { latency: 0.25, near: 4.5, tight: 2.5, approach: 0.5, tau: 0.35, man: 0.45, moving: 2.5 };
+// The safety shell: coverage defenders deeper than `depth` yd past the line
+// and within `width` yd of the ball (one-high, two-high or none). A deep
+// defender for a seam is one at least `over` yd deeper than the seam runner
+// and more than `own` yd from him (not the man carrying him).
+const SHELL = { depth: 12, width: 15, over: 3, own: 3 };
+// Seams and posts. Passing `at` yd past the line, a seam picks the middle of
+// the gap between the nearest deep defenders either side of him (or the
+// sideline where there is none): away from a single-high safety into the
+// void beside him, between two-high safeties. He bends at most `bend` yd off
+// his line and stays `hash` yd on his own side of the ball. A post that
+// breaks against a single deep middle defender narrows to a skinny post,
+// `skinny` of its width; against two-high or none it stays a true post.
+const BEND = { at: 9, bend: 3.5, hash: 2.5, skinny: 0.45 };
+// Sit or run. A sit route (curl, hitch, stick, snag, checkdown) decides at
+// its break, `look` s into its last leg (or within `arrive` yd of its end).
+// He keeps running if a man has been on him (his score reads man), or if a
+// coverage defender will be within `contest` yd of the spot when he gets
+// there (from the velocity he sees, at most `ahead` s on) or is driving on it
+// at over `drive` yd/s from within `driveFrom` yd. A deep defender bailing
+// over the top, or one sitting in his own zone away from the spot, leaves
+// him the hole. Sitting, he shows the quarterback his numbers; when a
+// coverage defender comes within `crowd` yd of him he slides `slide` yd away
+// from him (no more often than every `every` s, never more than `shift` yd
+// from the landmark) to open the window again. Running, he breaks away from
+// his man's leverage (a man more than `leverage` yd to one side), `away` yd
+// across and `back` yd toward the line, and keeps going.
+// A crosser against zone settles once he has run `run` yd of his crossing
+// leg, shallower than `deep` yd, where he would stop with `room` yd to every
+// coverage defender and none closing on the spot faster than `closing` yd/s;
+// one coming within `crowd` yd gets him up and crossing again, for good.
+// Against man he never sits.
+const SIT = { look: 0, arrive: 1, contest: 2.5, ahead: 0.8, drive: 3, driveFrom: 6, crowd: 2, slide: 1.5, every: 0.6, shift: 2.5, leverage: 1, away: 8, back: 1.5, run: 4, deep: 18, room: 3.5, closing: 3 };
+// Late in the down (after `at` s) a vertical deeper than `depth` yd with a
+// coverage defender within `covered` yd throttles down and works `back` yd
+// toward the quarterback at `effort` of his speed. Routes that run out of
+// landmarks keep going along their last leg, a crosser to `edge` yd from the
+// middle of the field and a vertical to `deep` yd past the line, then settle.
+const LATE = { at: 3, depth: 12, covered: 2, back: 5, effort: 0.7, edge: 23.5, deep: 55 };
+// The scramble drill. Once the quarterback is out of the pocket off script
+// (rolling to the called side on a boot is the script) the receivers see it
+// READ.latency s later and break off to his side. Those shallower than
+// `split` yd work toward the sideline he rolls to, `lead` + `gap` × lane yd
+// past him and `low` to `high` yd past the line; the deeper ones go deep on
+// that side, `deepLead` + `gap` × lane yd past him, `climb` yd deeper than
+// they were and at least `deep` yd. Lanes go out from the quarterback in the
+// order the receivers already stand, never more than `edge` yd from the
+// middle of the field.
+const DRILL = { split: 10, lead: 5, gap: 5, low: 3, high: 7, deepLead: 8, climb: 4, deep: 16, edge: 24 };
+// A jam at the line (jam(), called by the coverage): while it lasts the
+// receiver's wanted velocity is damped to `damp` and pushed `push` yd/s
+// across, away from the defender's hands. A clean release (`clean` of the
+// time) shakes it in `quick` of the jam. Otherwise he is rerouted: held for
+// the jam and `cost` s more, and the landmark he is running to (if it is
+// shallower than `depth` yd) moves `shift` yd to the side he was pushed.
+const JAM = { clean: 0.4, quick: 0.4, damp: 0.3, push: 1.6, cost: [0.3, 0.6], shift: [0.8, 2], depth: 16 };
+// Receivers step around a defender in their path: the nearest one less than
+// `ahead` yd in front and within `width` yd of his line, whom he is running
+// into at over `closing` yd/s, aiming `clear` yd beside him but never more
+// than `off` yd off the line of his route. A prediction (predict) runs the
+// defenders on at their present velocity for at most `lookahead` s.
+const AVOID = { ahead: 1.4, width: 0.9, closing: 0.5, clear: 1.0, off: 1.2, lookahead: 0.5 };
+const RUNS_ON = new Set(['cross', 'slant', 'seam', 'go', 'post', 'corner']);
+const VERTICAL = new Set(['seam', 'go', 'post', 'corner']);
+
+// What a route asks of its runner, from the shape of its last leg (the rules
+// are mirror-symmetric, so a flipped play reads the same):
+//   sit     comes back or stops short (curl, hitch, stick, snag, checkdown);
+//   cross   runs across the formation (drag, dig, shallow, over);
+//   out     runs to his own sideline (out, flat, sail, swing);
+//   seam    a vertical inside the numbers; go: one outside them;
+//   post    in and upfield off a stem at least KIND.postDepth deep;
+//   slant   in and upfield off a short stem; corner: out and upfield.
+// `key` is the leg the decision belongs to (the post's first leg in).
+const KIND = { sitLength: 4.5, short: 2.5, flat: 1.6, vertical: 0.45, seamWidth: 13, checkdown: 9, flatDepth: 6, postDepth: 9, postBreak: 20 * DEG };
+function routeKind(route, start, spot) {
+  const n = route.length;
+  if (!n) return { kind: null, key: 0 };
+  const from = i => (i ? route[i - 1] : start);
+  const b = route[n - 1], a = from(n - 1), lx = b.x - a.x, lz = b.z - a.z, len = Math.hypot(lx, lz);
+  const kind = k => ({ kind: k, key: n - 1 });
+  if (len < KIND.short || (lz < -0.5 && len < KIND.sitLength)) return kind('sit');
+  if (Math.abs(lx) > KIND.flat * Math.abs(lz)) return kind(Math.sign(b.x) !== Math.sign(a.x) || Math.abs(b.x) < Math.abs(a.x) ? 'cross' : 'out');
+  if (lz <= 0) return kind('sit');
+  if (Math.abs(lx) < KIND.vertical * lz) return kind(b.z - spot < KIND.checkdown ? 'sit' : Math.abs(b.x) < KIND.seamWidth ? 'seam' : 'go');
+  if (Math.abs(b.x) >= Math.abs(a.x)) return kind(b.z - spot < KIND.flatDepth ? 'out' : 'corner');
+  // In and upfield: walk back over the legs that keep going that way.
+  const inward = i => { const p = from(i), q = route[i], dx = q.x - p.x, dz = q.z - p.z; return dz > 0 && Math.abs(dx) >= KIND.vertical * dz && Math.abs(q.x) < Math.abs(p.x); };
+  let k = n - 1;
+  while (k > 0 && inward(k - 1)) k--;
+  const brk = from(k);
+  return { kind: k > 0 && brk.z - spot >= KIND.postDepth && breakAngle(from(k - 1), brk, route[k]) >= KIND.postBreak ? 'post' : 'slant', key: k };
+}
+
+// The quarterback's drop while the user is not steering him. From the gun a
+// one-step settle to `quick` yd on quick game, otherwise three steps to `gun`
+// yd at `effort` of his speed; under centre a five-step drop to `centre` yd
+// at `centreEffort`, opened `open` rad to his throwing side until he is
+// `setNear` yd from his set. Play action: see FAKE and BOOT, then set at
+// `action` yd. Throwing, he plants (`plant` × full braking). Once the user has
+// steered him, letting go of the stick sets his feet at `reset` × full
+// braking, square to the line.
+const DROP = { quick: 6, gun: 7, centre: 7, action: 7.5, effort: 0.62, centreEffort: 0.8, open: 1.0, setNear: 1.0, plant: 1.3, reset: 1.6 };
+// Play action: he meets the back where the back's first leg passes nearest
+// him, `side` yd to the side away from where the back goes next, facing him,
+// at `effort` of his speed; he rides the fake until the back, having come
+// within `mesh` yd, is `past` yd farther away again (no sooner than `min` s,
+// no later than `max` s). A throw waits for the fake (faking()).
+const FAKE = { side: 0.9, mesh: 1.8, past: 0.4, min: 0.6, max: 0.9, effort: 0.5 };
+// A boot: after the fake he rolls away from it along `path` ([x out from the
+// ball, z from the line], yd) at `effort` of his speed, shoulders turned
+// `facing` rad toward the line from his run, moving on within `near` yd.
+const BOOT = { path: [[4, -6.6], [8.5, -6.2], [11.5, -5]], effort: 0.85, facing: 0.7, near: 1.0 };
+// Accuracy. A set throw lands within ± set/2 yd each way of the aim point.
+// Moving adds spread per 7 yd/s of speed: `toward` running at the target,
+// `across` running across the throw and `away` throwing back against his own
+// momentum (across his body); his speed is the larger of now and `reset` of
+// his speed `settle` s ago, so a quarterback who has only just stopped is
+// not set yet. A defender within `near` yd adds up to `pressure` as he
+// closes to `close` yd.
+const THROW = { set: 0.18, toward: 0.6, across: 1.6, away: 2.8, settle: 0.2, reset: 0.6, pressure: 2.8, near: 3.3, close: 0.6 };
+// Contested catches (catchBall): a defender within `near` yd adds to the drop
+// chance, up to `front` when he is between the receiver and the ball and
+// `trail` when he trails behind (the receiver shields him), in full within
+// `tight` yd. A bullet from inside `close` yd adds `bullet`.
+const CATCH = { base: 0.03, near: 1.2, tight: 0.6, front: 0.34, trail: 0.14, bullet: 0.08, close: 8 };
 
 // ---------------------------------------------------------------------------
 export class Simulation {
@@ -348,13 +513,19 @@ export class Simulation {
       p.shed = 2.5 + this.random() * 2.8;
       p.route = routeFor(this.effectivePlay, p.id, this.spot, flip);
       if (p.team === 'defense') this.initDefender(p);
+      else Object.assign(p, routeKind(p.route, p.start, this.spot));
     });
     this.byId = Object.fromEntries(this.players.map(p => [p.id, p]));
     this.offense = this.players.filter(p => p.team === 'offense');
     this.defense = this.players.filter(p => p.team === 'defense');
     this.defense.forEach(assignPursuitAngles);
     this.line = this.offense.filter(p => p.role === 'ol');
-    this.trails = new Map(this.offense.map(p => [p.id, new Trail()]));
+    this.trails = new Map(this.players.map(p => [p.id, new Trail()]));
+    // The offense's reads (readCoverage), the scramble drill and the
+    // quarterback's drop (planPasser).
+    this.seenDefense = []; this.shell = 0; this.drillAt = null; this.drillSide = 0;
+    this.qbSteered = false; this.qbFacing = null; this.fakeDone = false; this.fakeNear = Infinity; this.bootLeg = 0;
+    this.dropPlan = this.planDrop();
     this.ball = { x: 0, y: BALL_REST, z: this.spot, vx: 0, vy: 0, vz: 0 };
     this.lastBall = { ...this.ball };
     this.saveFrame();
@@ -368,8 +539,11 @@ export class Simulation {
   setHotRoute(id, kind) {
     if (this.phase !== 'presnap' || this.play.type === 'run' || !RECEIVERS.includes(id) || (kind !== 'default' && !hotRouteFor(id, kind, this.play))) return false;
     if (kind === 'default') delete this.hotRoutes[id]; else this.hotRoutes[id] = kind;
-    this.byId[id].route = routeFor(this.effectivePlay, id, this.spot, this.config.flip);
-    this.byId[id].routeIndex = 0;
+    const p = this.byId[id];
+    p.route = routeFor(this.effectivePlay, id, this.spot, this.config.flip);
+    p.routeIndex = 0;
+    Object.assign(p, routeKind(p.route, p.start, this.spot));
+    if (id === 'R') this.dropPlan = this.planDrop();
     return true;
   }
 
@@ -391,13 +565,19 @@ export class Simulation {
 
   requestThrow(id, style = 'bullet', lead = { x: 0, z: 0 }) {
     if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || this.threw || this.throwIntent || this.play.type === 'run' || !RECEIVERS.includes(id) || this.time < 0.28) return false;
-    if (this.play.type === 'pa' && this.time < 1.1) return false;
+    if (this.play.type === 'pa' && this.faking()) return false;
     this.throwIntent = {
       id, style: ['bullet', 'touch', 'lob'].includes(style) ? style : 'bullet',
       lead: { x: clamp(lead.x || 0, -1, 1), z: clamp(lead.z || 0, -1, 1) }, at: this.time + 0.23,
     };
     this.byId.QB.action = 'throw'; this.byId.QB.actionTime = 0.4;
     return true;
+  }
+
+  // A play-action quarterback is still riding the fake (no throw yet): until
+  // the back is past him, and never past FAKE.max s.
+  faking() {
+    return this.play.type === 'pa' && this.phase === 'live' && !this.fakeDone && this.time < FAKE.max;
   }
 
   throwAway() {
@@ -408,14 +588,16 @@ export class Simulation {
   }
 
   // Where a receiver will be after `t` seconds if he keeps running his route:
-  // a ghost copy runs the same route logic through the same momentum model.
+  // a ghost copy runs the same route logic (runRoute, with the reads he has
+  // made and the defense as he sees it now) through the same momentum model.
+  // The ghost changes nothing outside itself and draws no random numbers.
   predict(p, t) {
-    const ghost = { ...p, juke: null, want: ZERO };
-    const n = Math.max(1, Math.round(t * 60)), dt = t / n;
+    const ghost = { ...p, juke: null, want: ZERO, ghost: true };
+    const n = Math.max(1, Math.round(t / STEP)), dt = t / n, plain = this.play.type === 'run' || this.completed;
     let clock = this.time;
     for (let i = 0; i < n; i++) {
       clock += dt;
-      const want = clock < GET_OFF[ghost.role] ? ZERO : routeWant(ghost, speedCap(ghost));
+      const want = clock < GET_OFF[ghost.role] ? ZERO : plain ? routeWant(ghost, speedCap(ghost)) : this.runRoute(ghost, speedCap(ghost), clock);
       moveBody(ghost, want.x, want.z, dt);
     }
     return { x: ghost.x, z: ghost.z };
@@ -429,18 +611,29 @@ export class Simulation {
       target = this.predict(p, duration);
       duration = clamp(dist(qb, target) / speed, 0.42, 2.8);
     }
+    // Accuracy (THROW): set feet, on the move toward, across or away from the
+    // throw, and pressure. The error lands long or short and to either side.
     const nearest = Math.min(...this.defense.map(d => dist(d, qb)));
-    const pressure = clamp((3.3 - nearest) / 2.7, 0, 1), moving = Math.hypot(qb.vx, qb.vz) / 7;
-    const spread = 0.18 + moving * 1.6 + pressure * 2.8;
-    target.x += intent.lead.x * 2.5 + (this.random() - 0.5) * spread;
-    target.z += intent.lead.z * 2.5 + (this.random() - 0.5) * spread;
+    const pressure = clamp((THROW.near - nearest) / (THROW.near - THROW.close), 0, 1);
+    const then = this.perceive('QB', THROW.settle);
+    let vx = qb.vx, vz = qb.vz, pace = Math.hypot(vx, vz);
+    if (Math.hypot(then.vx, then.vz) * THROW.reset > pace) { vx = then.vx * THROW.reset; vz = then.vz * THROW.reset; pace = Math.hypot(vx, vz); }
+    const aim = scaled(target.x - qb.x, target.z - qb.z, 1), ux = aim === ZERO ? 0 : aim.x, uz = aim === ZERO ? 1 : aim.z;
+    const along = pace > 0.3 ? (vx * ux + vz * uz) / pace : 0;
+    const per7 = along >= 0 ? THROW.across + (THROW.toward - THROW.across) * along : THROW.across + (THROW.away - THROW.across) * -along;
+    const spread = THROW.set + pace / 7 * per7 + pressure * THROW.pressure;
+    const long = (this.random() - 0.5) * spread, wide = (this.random() - 0.5) * spread;
+    const error = { x: ux * long + uz * wide, z: uz * long - ux * wide };
+    target.x += intent.lead.x * 2.5 + error.x;
+    target.z += intent.lead.z * 2.5 + error.z;
     target.x = clamp(target.x, -29, 29); target.z = clamp(target.z, 0, 119);
+    this.qbFacing = null;
     // The ball leaves the throwing (right) hand, a little ahead of the body.
     const fx = Math.sin(qb.facing), fz = Math.cos(qb.facing);
     const from = { x: qb.x + fz * 0.25 + fx * 0.35, y: 1.85, z: qb.z - fx * 0.25 + fz * 0.35 };
     const to = { ...target, y: 1.6 }, v = flightVelocity(from, to, duration);
     this.ball = { ...from, vx: v.x, vy: v.y, vz: v.z };
-    this.pass = { target: to, receiver: p.id, duration, elapsed: 0, style: intent.style, pressure, distance: Math.hypot(to.x - from.x, to.z - from.z), attempted: new Set() };
+    this.pass = { target: to, receiver: p.id, duration, elapsed: 0, style: intent.style, pressure, spread, error, distance: Math.hypot(to.x - from.x, to.z - from.z), attempted: new Set() };
     this.threw = true; this.stats.attempts++; this.phase = 'air'; this.carrier = null; this.throwIntent = null;
     this.events.push('throw');
   }
@@ -491,7 +684,7 @@ export class Simulation {
     this.tickActions(dt);
     if (this.phase !== 'tackle') this.planController(input);
     this.planBlocking(dt);
-    this.planReceivers();
+    this.planReceivers(dt);
     this.planHandoff();
     this.planDefense(dt);
     this.moveAll(dt);
@@ -538,13 +731,14 @@ export class Simulation {
     }
     p.want = amount > 0.01 ? scaled(x, z, speedCap(p, sprint ? 1 : JOG) * amount) : ZERO;
     p.sprinting = sprint && amount > 0.1;
-    // An idle quarterback settles into a short drop after the snap.
-    if (p.id === 'QB' && this.time < 0.6 && amount < 0.05) p.want = seekWant(p, { x: p.x, z: this.spot - 6.5 }, 0.5 * p.top);
+    // Untouched, the quarterback runs his drop (planPasser).
+    if (p.id === 'QB' && this.phase === 'live' && !this.crossedLine) this.planPasser(p, amount);
   }
 
 
-  planReceivers() {
-    const run = this.play.type === 'run';
+  planReceivers(dt = STEP) {
+    const run = this.play.type === 'run', reading = !run && !this.completed && (this.phase === 'live' || this.phase === 'air');
+    if (reading) this.readCoverage(dt);
     for (const id of RECEIVERS) {
       const p = this.byId[id];
       if (this.carrier === id) continue;
@@ -559,17 +753,24 @@ export class Simulation {
       // On runs, and once a pass is caught, the other receivers block.
       const blocking = (run && id !== 'R') || (this.completed && this.phase !== 'air');
       if (blocking && this.blockDownfield(p)) continue;
-      p.want = routeWant(p, speedCap(p));
+      p.want = reading ? this.runRoute(p, speedCap(p)) : routeWant(p, speedCap(p));
     }
   }
 
-  // Receivers blocking: take the nearest defender in front of them.
+  // Receivers blocking (DOWNFIELD): take the nearest defender in front of
+  // them who matters to the play, and hold him for a stalk block's length.
   blockDownfield(p) {
     let defender = null, best = Infinity;
-    for (const d of this.defense) if (d.z > p.z - 1 && d.action !== 'tackle' && dist(d, p) < best) { best = dist(d, p); defender = d; }
-    if (!defender || best >= 3.5) return false;
-    if (best < 1.2 && !defender.engaged && this.time < defender.shed + 0.9) this.engage(p, defender);
-    const c = this.guardPoint(), away = scaled(c.x - defender.x, c.z - defender.z, 0.9);
+    for (const d of this.defense) if (d.z > p.z - 1 && d.action !== 'tackle' && d.id !== p.blockDone && dist(d, p) < best) { best = dist(d, p); defender = d; }
+    const c = this.guardPoint();
+    if (!defender || best >= DOWNFIELD.range || dist(defender, c) > DOWNFIELD.near) return false;
+    if (best < DOWNFIELD.engage && !defender.engaged && this.time < defender.shed + 0.9) {
+      if (p.blockOn !== defender.id) { p.blockOn = defender.id; p.blockAt = this.time; }
+      // The block is over: he lets his man go and eases off.
+      if (this.time - p.blockAt > DOWNFIELD.hold) { p.blockDone = defender.id; p.want = ZERO; p.sprinting = false; return true; }
+      this.engage(p, defender);
+    }
+    const away = scaled(c.x - defender.x, c.z - defender.z, 0.9);
     p.want = seekWant(p, { x: defender.x + away.x, z: defender.z + away.z }, speedCap(p, 0.9));
     return true;
   }
@@ -590,15 +791,340 @@ export class Simulation {
   }
 
 
+  // ---------------------------------------------------------------------------
+  // Receivers against the coverage (see READ). Once a step, live: what the
+  // defense looked like READ.latency s ago (seenDefense), the safety shell,
+  // each route runner's man-or-zone score and the scramble drill.
+  readCoverage(dt) {
+    const L = READ.latency, spot = this.spot, x0 = this.pocketX();
+    this.seenDefense = this.defense.map(d => {
+      const s = this.perceive(d.id, L);
+      return { id: d.id, x: s.x, z: s.z, vx: s.vx, vz: s.vz, cover: !d.rushing && !d.engaged && d.action !== 'tackle' && d.action !== 'down' };
+    });
+    let shell = 0;
+    for (const s of this.seenDefense) if (s.cover && s.z > spot + SHELL.depth && Math.abs(s.x - x0) < SHELL.width) shell++;
+    this.shell = shell;
+    for (const id of RECEIVERS) {
+      const p = this.byId[id];
+      if (p.pickup || this.carrier === id || this.time < GET_OFF[p.role]) continue;
+      const me = this.perceive(id, L), speed = Math.hypot(me.vx, me.vz);
+      if (speed < READ.moving) continue;
+      let near = null, gap = READ.near;
+      for (const s of this.seenDefense) {
+        const g = s.cover ? Math.hypot(s.x - me.x, s.z - me.z) : Infinity;
+        if (g < gap) { gap = g; near = s; }
+      }
+      let e = 0;
+      if (near) {
+        const closing = gap > 1e-6 ? ((me.vx - near.vx) * (near.x - me.x) + (me.vz - near.vz) * (near.z - me.z)) / gap : 0;
+        e = clamp((READ.near - gap) / (READ.near - READ.tight), 0, 1) * (1 - clamp(Math.abs(closing) / (READ.approach * speed), 0, 1));
+      }
+      p.manRead += (e - p.manRead) * Math.min(1, dt / READ.tau);
+    }
+    this.checkDrill();
+  }
+
+  // Start the scramble drill once the quarterback is out of the pocket off
+  // script, and keep it pointed at the side he is on.
+  checkDrill() {
+    const qb = this.byId.QB, off = qb.x - this.pocketX();
+    if (this.drillAt !== null) {
+      if (Math.abs(off) > 2) this.drillSide = Math.sign(off);
+      return;
+    }
+    if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || !this.scrambling()) return;
+    const boot = this.dropPlan?.boot;
+    if (boot && Math.sign(off) === boot) return;
+    this.drillAt = this.time; this.drillSide = Math.sign(off) || 1;
+    const runners = RECEIVERS.map(id => this.byId[id]).filter(p => !p.pickup && this.carrier !== p.id);
+    for (const deep of [false, true]) {
+      const group = runners.filter(p => (p.z - this.spot >= DRILL.split) === deep);
+      group.sort((a, b) => a.x * this.drillSide - b.x * this.drillSide || RECEIVERS.indexOf(a.id) - RECEIVERS.indexOf(b.id));
+      group.forEach((p, lane) => { p.drillDeep = deep; p.drillLane = lane; p.drillZ = p.z; p.sitting = false; });
+    }
+  }
+
+  // One route runner's wanted velocity. The same code runs the live receiver
+  // and the ghost that predict() runs ahead (p.ghost): it changes only the
+  // runner's own fields (a new route is a new array, never an edit) and draws
+  // no random numbers, so a ghost leaves the rep exactly as it found it.
+  // `clock` is the time the runner is at (later than now for a ghost).
+  runRoute(p, cap, clock = this.time) {
+    if (!p.route.length) return ZERO;
+    let want;
+    if (this.drillAt !== null && clock >= this.drillAt + READ.latency) want = this.drillWant(p, cap);
+    else {
+      this.passTeammate(p);
+      this.readRoute(p, clock);
+      const last = p.route.length - 1, end = p.route[last];
+      if (p.sitting) want = seekWant(p, { x: p.sitX, z: p.sitZ }, cap * (p.workBack ? LATE.effort : 1));
+      else {
+        want = routeWant(p, cap);
+        if (p.routeIndex >= last && dist(p, end) < 0.6 && (!RUNS_ON.has(p.kind) || p.extended)) { p.sitting = true; p.sitX = end.x; p.sitZ = end.z; }
+        want = this.avoidWant(p, want, clock);
+      }
+    }
+    if (clock < p.jamUntil) want = { x: want.x * JAM.damp + p.jamSide * JAM.push, z: want.z * JAM.damp };
+    return want;
+  }
+
+  // The decisions along a route (see SIT, BEND and LATE), each taken once.
+  readRoute(p, clock) {
+    const spot = this.spot, last = p.route.length - 1, end = p.route[last];
+    if (p.kind === 'sit' && !p.mode && p.routeIndex >= p.key) {
+      if (p.legAt < 0) p.legAt = clock;
+      if (clock - p.legAt >= SIT.look || dist(p, end) < SIT.arrive) this.sitOrRun(p, clock);
+    }
+    else if (p.kind === 'cross' && p.routeIndex >= p.key && !p.sitting) this.findHole(p);
+    else if (p.kind === 'seam' && !p.converted && p.z - spot >= BEND.at && p.routeIndex <= p.key) this.bendSeam(p, clock);
+    else if (p.kind === 'post' && !p.converted && p.routeIndex >= p.key) this.skinnyPost(p);
+    if (p.sitting && p.kind === 'cross' && !p.workBack && this.crowded(p.sitX, p.sitZ, SIT.crowd)) { p.sitting = false; p.noSit = true; }
+    if (p.sitting && p.kind === 'sit' && p.mode === 'zone') this.slide(p, clock);
+    if (!p.sitting && !p.workBack && VERTICAL.has(p.kind) && clock >= LATE.at && p.z - spot > LATE.depth && this.crowded(p.x, p.z, LATE.covered)) {
+      const qb = this.byId.QB, back = scaled(qb.x - p.x, qb.z - p.z, LATE.back);
+      p.workBack = p.sitting = true; p.sitX = p.x + back.x; p.sitZ = p.z + back.z;
+    }
+    if (!p.extended && !p.sitting && RUNS_ON.has(p.kind) && p.routeIndex >= p.route.length - 1) this.extendRoute(p);
+  }
+
+  // A coverage defender (as seen) within `room` yd of a spot.
+  crowded(x, z, room) {
+    for (const s of this.seenDefense) if (s.cover && Math.hypot(s.x - x, s.z - z) < room) return true;
+    return false;
+  }
+
+  // A coverage defender will be on the spot a receiver is heading for: within
+  // SIT.contest yd of it when he gets there, running on at the velocity seen
+  // (a ghost runs the defense on from now), or driving on it (SIT).
+  spotTaken(p, spot, clock) {
+    const speed = Math.max(2, Math.hypot(p.vx, p.vz)), ahead = clock - this.time + Math.min(SIT.ahead, dist(p, spot) / speed);
+    for (const s of this.seenDefense) {
+      if (!s.cover) continue;
+      const g = Math.hypot(s.x - spot.x, s.z - spot.z);
+      if (Math.hypot(s.x + s.vx * ahead - spot.x, s.z + s.vz * ahead - spot.z) < SIT.contest) return true;
+      if (g < SIT.driveFrom && g > 1e-6 && (s.vx * (spot.x - s.x) + s.vz * (spot.z - s.z)) / g > SIT.drive) return true;
+    }
+    return false;
+  }
+
+  // The nearest coverage defender (as seen) to a spot, or null.
+  nearestSeen(x, z) {
+    let near = null, gap = Infinity;
+    for (const s of this.seenDefense) {
+      const g = s.cover ? Math.hypot(s.x - x, s.z - z) : Infinity;
+      if (g < gap) { gap = g; near = s; }
+    }
+    return near;
+  }
+
+  // Sitting in a zone hole: slide away from a defender who closes on it (SIT).
+  slide(p, clock) {
+    const end = p.route[p.route.length - 1], near = this.nearestSeen(p.sitX, p.sitZ);
+    if (!near || clock - p.slideAt < SIT.every || Math.hypot(near.x - p.sitX, near.z - p.sitZ) >= SIT.crowd) return;
+    const side = Math.abs(near.x - p.sitX) > 0.2 ? Math.sign(p.sitX - near.x) : Math.sign(this.pocketX() - p.sitX) || 1;
+    const x = clamp(p.sitX + side * SIT.slide, end.x - SIT.shift, end.x + SIT.shift);
+    if (Math.abs(x - p.sitX) < 0.3) return;
+    p.sitX = clamp(x, -LATE.edge, LATE.edge); p.slideAt = clock;
+  }
+
+  // A sit route at its decision point: settle in the hole against zone, keep
+  // running away from his man against man (SIT).
+  sitOrRun(p, clock) {
+    const end = p.route[p.route.length - 1], man = p.manRead > READ.man || this.spotTaken(p, end, clock);
+    p.mode = man ? 'man' : 'zone';
+    if (!man) { p.sitting = true; p.sitX = end.x; p.sitZ = end.z; return; }
+    // Away from his leverage; with the man straight behind him, the way the
+    // route breaks, or toward the middle of the field.
+    const near = this.nearestSeen(p.x, p.z), x0 = this.pocketX(), from = p.route.length > 1 ? p.route[p.route.length - 2] : p.start;
+    let side = near && Math.abs(p.x - near.x) > SIT.leverage ? Math.sign(p.x - near.x) : Math.abs(end.x - from.x) > 0.5 ? Math.sign(end.x - from.x) : -Math.sign(p.x - x0) || 1;
+    if (Math.abs(p.x + side * SIT.away) > LATE.edge) side = -side;
+    const to = { x: clamp(p.x + side * SIT.away, -LATE.edge, LATE.edge), z: Math.max(this.spot + 1, p.z - SIT.back) };
+    p.route = [...p.route.slice(0, p.routeIndex), to];
+    p.kind = Math.sign(to.x - x0) === Math.sign(p.x - x0) && Math.abs(to.x - x0) > Math.abs(p.x - x0) ? 'out' : 'cross';
+    p.key = p.routeIndex;
+  }
+
+  // A crosser against zone settles in the first hole on his way (SIT).
+  findHole(p) {
+    if (p.noSit || p.mode === 'man' || p.manRead > READ.man || p.z - this.spot > SIT.deep) return;
+    const from = p.key ? p.route[p.key - 1] : p.start;
+    if (dist(p, from) < SIT.run) return;
+    const speed = Math.hypot(p.vx, p.vz), stop = speed * speed / (2 * 0.85 * p.brake);
+    const x = speed > 0.5 ? p.x + p.vx / speed * stop : p.x, z = speed > 0.5 ? p.z + p.vz / speed * stop : p.z;
+    if (Math.abs(x) > LATE.edge) return;
+    for (const s of this.seenDefense) {
+      if (!s.cover) continue;
+      const g = Math.hypot(s.x - x, s.z - z);
+      if (g < SIT.room || (g > 1e-6 && ((x - s.x) * s.vx + (z - s.z) * s.vz) / g > SIT.closing)) return;
+    }
+    p.mode = 'zone'; p.sitting = true; p.sitX = x; p.sitZ = z;
+  }
+
+  // A seam splits the deep defenders (BEND).
+  // (A ghost runs the deep defenders on at the velocity seen, for at most a
+  // second, to the moment it reaches the read.)
+  bendSeam(p, clock) {
+    p.converted = true;
+    const lag = Math.min(1, clock - this.time);
+    let lo = -WIDTH / 2, hi = WIDTH / 2;
+    for (const s of this.seenDefense) {
+      const sx = s.x + s.vx * lag, sz = s.z + s.vz * lag;
+      if (!s.cover || sz < p.z + SHELL.over || Math.hypot(sx - p.x, sz - p.z) < SHELL.own) continue;
+      if (sx <= p.x) lo = Math.max(lo, sx); else hi = Math.min(hi, sx);
+    }
+    const end = p.route[p.key], x0 = this.pocketX(), side = Math.sign(end.x - x0) || 1;
+    let x = clamp((lo + hi) / 2, end.x - BEND.bend, end.x + BEND.bend);
+    if ((x - x0) * side < BEND.hash) x = x0 + side * BEND.hash;
+    p.route = p.route.map((q, i) => (i === p.key ? { x, z: q.z } : q));
+  }
+
+  // A post against a single-high safety narrows to a skinny post (BEND).
+  skinnyPost(p) {
+    p.converted = true;
+    if (this.shell !== 1) return;
+    const brk = p.key ? p.route[p.key - 1] : p.start;
+    p.route = p.route.map((q, i) => (i >= p.key ? { x: brk.x + (q.x - brk.x) * BEND.skinny, z: q.z } : q));
+  }
+
+  // Out of landmarks, a crosser or a vertical runs on along his last leg
+  // (LATE.edge, LATE.deep).
+  extendRoute(p) {
+    p.extended = true;
+    const n = p.route.length, b = p.route[n - 1], a = n > 1 ? p.route[n - 2] : p.start;
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    if (len < 1e-6) return;
+    const ux = (b.x - a.x) / len, uz = (b.z - a.z) / len;
+    let s = Infinity;
+    if (Math.abs(ux) > 1e-6) s = ((ux > 0 ? 1 : -1) * LATE.edge - b.x) / ux;
+    if (uz > 1e-6) s = Math.min(s, (Math.min(118, this.spot + LATE.deep) - b.z) / uz);
+    if (s > 1 && Number.isFinite(s)) p.route = [...p.route, { x: b.x + ux * s, z: b.z + uz * s }];
+  }
+
+  // The quarterback standing on a landmark (the mesh of a fake): the back
+  // takes it as reached instead of running into him.
+  passTeammate(p) {
+    const to = p.route[p.routeIndex], qb = this.byId.QB;
+    if (p.routeIndex < p.route.length - 1 && dist(qb, to) < 0.7 && dist(p, to) < 1.4) p.routeIndex++;
+  }
+
+  // Step around a defender in his path (AVOID). The side is kept while the
+  // same man is in the way, so he does not dither between two.
+  avoidWant(p, want, clock) {
+    const speed = Math.hypot(want.x, want.z), lag = clock - this.time;
+    if (speed < 2 || lag > AVOID.lookahead) return want;
+    const ux = want.x / speed, uz = want.z / speed, nx = uz, nz = -ux;
+    let best = null, ahead = AVOID.ahead, bx = 0, bz = 0, lat = 0;
+    for (const d of this.defense) {
+      if (d.action === 'tackle' || d.action === 'down') continue;
+      const dx = d.x + d.vx * lag - p.x, dz = d.z + d.vz * lag - p.z, a = dx * ux + dz * uz, l = dx * nx + dz * nz;
+      if (a <= 0.15 || a >= ahead || Math.abs(l) >= AVOID.width || (p.vx - d.vx) * ux + (p.vz - d.vz) * uz < AVOID.closing) continue;
+      best = d; ahead = a; bx = dx; bz = dz; lat = l;
+    }
+    if (!best) { p.avoidId = null; return want; }
+    if (p.avoidId !== best.id || !p.avoidSide) {
+      const next = p.route[Math.min(p.routeIndex + 1, p.route.length - 1)];
+      const toward = (next.x - p.x) * nx + (next.z - p.z) * nz;
+      p.avoidSide = Math.abs(lat) > 0.1 ? -Math.sign(lat) : Math.sign(toward) || 1;
+      p.avoidId = best.id;
+    }
+    // He gives up at most AVOID.off yd of his line: a man who keeps walling
+    // him off is run into (and pushed through), not followed across the field.
+    const ax = p.x + bx + nx * p.avoidSide * AVOID.clear, az = p.z + bz + nz * p.avoidSide * AVOID.clear;
+    const to = p.route[p.routeIndex], line = project(p.routeIndex ? p.route[p.routeIndex - 1] : p.start, to, { x: ax, z: az });
+    if (line.len > 1e-6 && Math.abs((ax - line.x) * line.uz - (az - line.z) * line.ux) > AVOID.off) return want;
+    return scaled(ax - p.x, az - p.z, speed);
+  }
+
+  // The scramble drill (DRILL): work to the quarterback's side.
+  drillWant(p, cap) {
+    const qb = this.byId.QB, side = this.drillSide, spot = this.spot;
+    const x = qb.x + side * ((p.drillDeep ? DRILL.deepLead : DRILL.lead) + DRILL.gap * p.drillLane);
+    const z = p.drillDeep ? Math.max(spot + DRILL.deep, p.drillZ + DRILL.climb) : clamp(p.drillZ, spot + DRILL.low, spot + DRILL.high);
+    return seekWant(p, { x: clamp(x, -DRILL.edge, DRILL.edge), z: Math.min(118, z) }, cap);
+  }
+
+  // A press defender gets his hands on a receiver at the line (JAM). Called
+  // by the coverage with the two players (or their ids) and how long the jam
+  // lasts; draws two numbers from the seeded stream. Returns whether it took.
+  jam(receiver, defender, seconds = 0.4) {
+    const r = typeof receiver === 'string' ? this.byId[receiver] : receiver;
+    const d = typeof defender === 'string' ? this.byId[defender] : defender;
+    if (!r || !d || !RECEIVERS.includes(r.id) || r.team !== 'offense' || this.phase !== 'live' || this.carrier === r.id || this.time < r.jamUntil) return false;
+    const side = Math.abs(r.x - d.x) > 0.2 ? Math.sign(r.x - d.x) : Math.sign(r.x - this.pocketX()) || 1;
+    const win = this.random(), how = this.random();
+    r.jamSide = side;
+    if (win < JAM.clean) { r.jamUntil = this.time + seconds * JAM.quick; return true; }
+    const cost = JAM.cost[0] + (JAM.cost[1] - JAM.cost[0]) * how, shift = side * (JAM.shift[0] + (JAM.shift[1] - JAM.shift[0]) * how);
+    r.jamUntil = this.time + seconds + cost;
+    r.route = r.route.map((q, i) => (i === r.routeIndex && q.z < this.spot + JAM.depth ? { x: clamp(q.x + shift, -LATE.edge, LATE.edge), z: q.z } : q));
+    this.events.push('jam');
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // The quarterback's drop (DROP, FAKE, BOOT): planned at reset from the
+  // formation and the call.
+  planDrop() {
+    if (this.play.type === 'run') return null;
+    const qb = this.byId.QB, under = this.spot - qb.start.z < 2.5;
+    const quick = this.play.family === 'quick' || /quick/i.test(this.play.tag || '');
+    const plan = { x: qb.start.x, depth: under ? DROP.centre : quick ? DROP.quick : DROP.gun, open: under, mesh: null, boot: 0 };
+    const r = this.byId.R, first = r.route[0];
+    if (this.play.type !== 'pa' || !first) return plan;
+    const next = r.route[1] || first, near = project(r.start, first, qb);
+    const nx = near.uz, nz = -near.ux, side = -Math.sign((next.x - first.x) * nx + (next.z - first.z) * nz) || 1;
+    plan.mesh = { x: near.x + nx * side * FAKE.side, z: near.z + nz * side * FAKE.side };
+    plan.depth = DROP.action; plan.open = false;
+    if (/boot/i.test(this.play.id + ' ' + this.play.name)) plan.boot = -Math.sign(next.x - first.x) || (this.config.flip ? -1 : 1);
+    return plan;
+  }
+
+  // The quarterback before he throws, run or cross the line. The stick
+  // always wins; untouched he runs his drop.
+  planPasser(p, amount) {
+    this.qbFacing = null;
+    if (amount >= 0.05) { this.qbSteered = true; return; }
+    if (this.throwIntent || p.action === 'throw') { p.want = ZERO; p.ease = DROP.plant; return; }
+    if (this.qbSteered) { p.want = ZERO; p.ease = DROP.reset; return; }
+    const plan = this.dropPlan, r = this.byId.R;
+    if (!plan) return;
+    if (plan.mesh && !this.fakeDone) {
+      const gap = dist(p, r);
+      this.fakeNear = Math.min(this.fakeNear, gap);
+      if (this.time >= FAKE.max || (this.time >= FAKE.min && (r.pickup || (this.fakeNear < FAKE.mesh && gap > this.fakeNear + FAKE.past)))) this.fakeDone = true;
+      else {
+        p.want = seekWant(p, plan.mesh, speedCap(p, FAKE.effort));
+        this.qbFacing = Math.atan2(r.x - p.x, r.z - p.z);
+        return;
+      }
+    }
+    if (plan.boot) {
+      const at = k => ({ x: this.pocketX() + plan.boot * BOOT.path[k][0], z: this.spot + BOOT.path[k][1] });
+      if (this.bootLeg < BOOT.path.length - 1 && dist(p, at(this.bootLeg)) < BOOT.near) this.bootLeg++;
+      const target = at(this.bootLeg), last = this.bootLeg === BOOT.path.length - 1, cap = speedCap(p, BOOT.effort);
+      p.want = seekWant(p, target, cap, last ? 0 : 0.8 * cap);
+      this.qbFacing = last && dist(p, target) < BOOT.near ? 0 : plan.boot * BOOT.facing;
+      return;
+    }
+    const set = { x: plan.x, z: this.spot - plan.depth };
+    p.want = seekWant(p, set, speedCap(p, plan.open ? DROP.centreEffort : DROP.effort));
+    if (plan.open && dist(p, set) > DROP.setNear) this.qbFacing = DROP.open;
+  }
+
   // Pursuit with reaction latency (plan 4.3): aim from where the target was
-  // `latency` seconds ago, led along the velocity seen then toward an intercept,
-  // with the total lookahead capped at 0.6 s. A cut is invisible to the
-  // defender for `latency` seconds and his own momentum does the rest.
-  // `leverage` (yards, signed: + toward +x) shades the aim to the defender's
-  // side of the carrier's path while he is still far away (LEVERAGE).
+  // `latency` seconds ago, led along the velocity seen then toward an intercept.
+  // A cut is invisible to the defender for `latency` seconds and his own
+  // momentum does the rest. In the open field (pursuing(): after a catch or a
+  // handoff, or a quarterback over the line) he takes an angle to the first
+  // point of the carrier's path he can reach (PURSUIT); otherwise (the rush on
+  // a quarterback still behind the line) the total lookahead is capped at
+  // 0.6 s. `leverage` (yards, signed: + toward +x) shades the aim to the
+  // defender's side of the carrier's path while he is still far away
+  // (LEVERAGE).
   pursue(d, id, cap, edge = 0, leverage = 0) {
     const seen = this.perceive(id, d.latency);
     d.seen = seen;
+    if (this.pursuing()) return this.pursueAngle(d, seen, cap, edge, leverage);
     const qx = seen.x + seen.vx * d.latency - d.x, qz = seen.z + seen.vz * d.latency - d.z;
     const a = seen.vx * seen.vx + seen.vz * seen.vz - cap * cap, b = 2 * (qx * seen.vx + qz * seen.vz), c = qx * qx + qz * qz;
     let s = Infinity;
@@ -613,6 +1139,26 @@ export class Simulation {
     const lead = Math.min(d.latency + s, 0.6);
     const shade = leverageOffset(seen, d, leverage);
     d.aim = { x: seen.x + seen.vx * lead + edge + shade.x, z: seen.z + seen.vz * lead + shade.z };
+    const dx = d.aim.x - d.x, dz = d.aim.z - d.z;
+    if (Math.hypot(dx, dz) < 0.4) return trackWant(d, d.aim, { x: seen.vx, z: seen.vz }, cap);
+    return scaled(dx, dz, cap);
+  }
+
+  // Open-field pursuit (PURSUIT): the earliest point of the carrier's path,
+  // as the defender saw it, that he can reach in time; or, when he cannot get
+  // there, a chase that keeps him inside the carrier.
+  pursueAngle(d, seen, cap, edge, leverage) {
+    let aim = null;
+    for (let t = d.latency; t <= d.latency + PURSUIT.horizon + 1e-9; t += PURSUIT.step) {
+      const q = carrierPath(seen, t);
+      if (Math.hypot(q.x - d.x, q.z - d.z) <= cap * (t - d.latency) + PURSUIT.reach) { aim = q; break; }
+    }
+    if (!aim) {
+      aim = carrierPath(seen, d.latency + PURSUIT.trail);
+      if (Math.abs(aim.x) > PURSUIT.wide && Math.abs(d.x) < Math.abs(aim.x)) aim.x -= Math.sign(aim.x) * PURSUIT.force;
+    }
+    const shade = leverageOffset(seen, d, leverage);
+    d.aim = { x: aim.x + edge + shade.x, z: aim.z + shade.z };
     const dx = d.aim.x - d.x, dz = d.aim.z - d.z;
     if (Math.hypot(dx, dz) < 0.4) return trackWant(d, d.aim, { x: seen.vx, z: seen.vz }, cap);
     return scaled(dx, dz, cap);
@@ -669,8 +1215,9 @@ export class Simulation {
   }
 
   // Soft separation keeps bodies from overlapping. The ball carrier is never
-  // pushed: contact with defenders is resolved by tackling, and teammates step
-  // out of his way (except the quarterback at the mesh).
+  // pushed: contact with defenders is resolved by tackling, so until a tackle
+  // is tried a defender in his way is pushed aside (not run through), and
+  // teammates step out of his way (except the quarterback at the mesh).
   separate() {
     const players = this.players, carrier = this.carrier;
     for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
@@ -679,7 +1226,7 @@ export class Simulation {
       if (d >= r || d < 0.001) continue;
       if (a.id === carrier || b.id === carrier) {
         const other = a.id === carrier ? b : a, sign = a.id === carrier ? 1 : -1;
-        if (other.team !== 'offense' || other.id === 'QB') continue;
+        if (other.id === 'QB' || (this.tackle && (other.id === this.tackle.tackler || this.tackle.helpers.has(other.id)))) continue;
         const push = (r - d) * 0.36;
         other.x += sign * dx / d * push; other.z += sign * dz / d * push;
         continue;
@@ -720,18 +1267,32 @@ export class Simulation {
     // their backs on the rush.
     if ((p.role === 'ol' || p.pickup) && this.inPocket()) return p.assignment && this.byId[p.assignment] ? toward(this.byId[p.assignment]) : 0;
     if (this.tackle && p.id === this.tackle.tackler) return toward(this.byId[this.carrier]);
-    if (p.id === 'QB' && live && !this.crossedLine && p.z < this.spot && speed < 3.5) {
-      if (this.play.type === 'run' && !this.handoff) return toward(this.byId.R);
-      const intent = this.throwIntent ? this.byId[this.throwIntent.id] : p.action === 'throw' && this.pass ? this.pass.target : null;
-      return intent ? toward(intent) : 0;
+    // The quarterback turns to his target to throw, even on the run; on a
+    // play-action fake he faces the back, and under centre he drops opened
+    // up (qbFacing, planPasser); otherwise in the pocket he faces downfield.
+    if (p.id === 'QB' && live && !this.crossedLine && p.z < this.spot) {
+      const run = this.play.type === 'run' && !this.handoff;
+      const intent = run ? null : this.throwIntent ? this.byId[this.throwIntent.id] : p.action === 'throw' && this.pass ? this.pass.target : null;
+      if (intent) return toward(intent);
+      if (this.qbFacing !== null && this.phase === 'live') return this.qbFacing;
+      // Dropping back he keeps his eyes downfield, however fast.
+      if (run ? speed < 3.5 : speed < 3.5 || p.vz < -0.3 * speed) return run ? toward(this.byId.R) : 0;
     }
     if (this.phase === 'air' && p.ballAware && dist(p, this.ball) < 4) return toward(this.ball);
+    // A receiver who has settled shows the quarterback his numbers; the man
+    // the ball is thrown to looks it in once he is under it.
+    if (p.team === 'offense' && RECEIVERS.includes(p.id) && live && p.id !== this.carrier && speed < 3) {
+      if (this.phase === 'air' && this.pass.receiver === p.id) return toward(this.ball);
+      if (p.sitting || this.drillAt !== null) return toward(qb);
+    }
     if (p.team === 'defense' && !p.turned && live) return toward(qb);
     return speed > 0.5 ? Math.atan2(p.vx, p.vz) : p.facing;
   }
 
+  // Every player's recent positions: the defense reads the offense late and
+  // the receivers read the defense late (perceive).
   recordTrails() {
-    for (const p of this.offense) this.trails.get(p.id).push(this.time, p);
+    for (const p of this.players) this.trails.get(p.id).push(this.time, p);
   }
 
   // ---------------------------------------------------------------------------
@@ -808,10 +1369,10 @@ export class Simulation {
       this.finish('Intercepted', 0, 'interception');
       return;
     }
-    // Drops (plan 4.2): a base rate, much more with a defender on him, and a
-    // little more for a bullet from close range.
-    const contested = this.defense.some(d => dist(d, p) < 1.0);
-    const chance = 0.03 + (contested ? 0.25 : 0) + (this.pass.style === 'bullet' && this.pass.distance < 8 ? 0.08 : 0);
+    // Drops (plan 4.2): a base rate, more with a defender on him (CATCH), most
+    // when the defender is between him and the ball, and a little more for a
+    // bullet from close range.
+    const chance = CATCH.base + this.catchContest(p) + (this.pass.style === 'bullet' && this.pass.distance < CATCH.close ? CATCH.bullet : 0);
     if (this.random() < chance) {
       const b = this.ball, side = (this.random() - 0.5) * 2;
       this.ball = { x: b.x, y: Math.max(0.6, b.y), z: b.z, vx: p.vx * 0.3 + side, vy: 2.2, vz: p.vz * 0.3 - b.vz * 0.05 };
@@ -824,6 +1385,22 @@ export class Simulation {
     this.catchAt = this.possessionAt = this.time;
     this.holdBall(p);
     this.events.push('catch');
+  }
+
+  // How contested a catch is (CATCH): the worst defender within reach of
+  // the receiver, by how close he is and whether he is between the receiver
+  // and the incoming ball or trailing behind him.
+  catchContest(p) {
+    const b = this.ball, bx = -b.vx, bz = -b.vz, bl = Math.hypot(bx, bz);
+    let worst = 0;
+    for (const d of this.defense) {
+      const g = dist(d, p);
+      if (g >= CATCH.near || d.engaged || ['stumble', 'tackle', 'down'].includes(d.action)) continue;
+      const front = bl > 0.1 && g > 1e-6 ? ((d.x - p.x) * bx + (d.z - p.z) * bz) / (bl * g) : 0;
+      const close = clamp((CATCH.near - g) / (CATCH.near - CATCH.tight), 0, 1);
+      worst = Math.max(worst, close * (CATCH.trail + (CATCH.front - CATCH.trail) * (front + 1) / 2));
+    }
+    return worst;
   }
 
   // Carried: at the carrier's hands on his right side, velocity zero.
@@ -853,7 +1430,7 @@ export class Simulation {
   // Two men on him at once are not two separate coin flips: once one misses,
   // the next on the same step hits a runner already off balance (TACKLE.help).
   tryTackles(c) {
-    const free = this.defense.filter(d => !d.engaged && d.action !== 'stumble');
+    const free = this.defense.filter(d => !d.engaged && d.action !== 'stumble' && !(dist(d, c) < DIVE_REACH && this.screened(d, c)));
     const reach = free.filter(d => dist(d, c) < REACH).sort((a, b) => dist(a, c) - dist(b, c));
     let missed = false;
     const attempt = (d, odds) => {
@@ -869,6 +1446,20 @@ export class Simulation {
       const stretch = (gap - REACH) / (DIVE_REACH - REACH);
       if (attempt(d, this.tackleChance(d, c) * (0.9 - 0.2 * stretch))) return;
     }
+  }
+
+  // A teammate of the runner's between a defender and him: his body is in
+  // the way (within SCREEN yd of the line between them, short of both ends),
+  // so the defender cannot get his hands on the runner through him.
+  screened(d, c) {
+    const dx = c.x - d.x, dz = c.z - d.z, len2 = dx * dx + dz * dz;
+    if (len2 < 1e-6) return false;
+    for (const o of this.offense) {
+      if (o === c) continue;
+      const t = ((o.x - d.x) * dx + (o.z - d.z) * dz) / len2;
+      if (t > 0.15 && t < 0.85 && Math.hypot(d.x + dx * t - o.x, d.z + dz * t - o.z) < SCREEN) return true;
+    }
+    return false;
   }
 
   // Running at the carrier (not past or away from him).
@@ -944,8 +1535,9 @@ export class Simulation {
     const speed = Math.hypot(c.vx, c.vz), slowed = Math.max(0, speed - (TACKLE_DECEL + GANG_DECEL * t.helpers.size) * dt);
     if (speed > 1e-6) { c.vx *= slowed / speed; c.vz *= slowed / speed; }
     c.latAccel = 0; integrate(c, dt);
-    // The tackler hangs on, closing to arm's length.
-    const gap = Math.max(1e-6, dist(d, c)), hold = Math.max(0.6, gap - 2 * dt);
+    // The tackler hangs on at arm's length, closing to it (or easing out to
+    // it) at 2 yd/s.
+    const gap = Math.max(1e-6, dist(d, c)), hold = gap > 0.6 ? Math.max(0.6, gap - 2 * dt) : Math.min(0.6, gap + 2 * dt);
     d.x = c.x + (d.x - c.x) / gap * hold; d.z = c.z + (d.z - c.z) / gap * hold;
     d.vx = c.vx; d.vz = c.vz; d.latAccel = 0;
     d.phase += slowed * dt;

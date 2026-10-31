@@ -138,11 +138,19 @@ export function readParts(play) {
 export function readText(play) {
   return readParts(play).map(part => part.text ?? String(part.receiver + 1)).join('');
 }
+// Coverage families the defense can call (dist/js/sim/defense.js). `rushers`
+// is the family's usual count; the call itself decides who comes.
 export const COVERAGES = {
-  cover3: { label:'Cover 3 sky', description:'Three deep zones · four underneath', rushers:4 },
-  cover2: { label:'Cover 2', description:'Two deep safeties · five underneath', rushers:4 },
+  cover3: { label:'Cover 3', description:'Three deep zones · four underneath · sky, buzz or cloud rotation', rushers:4 },
+  cover1: { label:'Cover 1', description:'Man across · a free safety deep · a robber, a spy or a fifth rusher', rushers:4 },
+  cover2: { label:'Cover 2', description:'Two deep safeties · five underneath · corners in the flats', rushers:4 },
+  tampa2: { label:'Tampa 2', description:'Cover 2 with the middle linebacker running the deep middle', rushers:4 },
+  cover4: { label:'Cover 4', description:'Quarters: corners carry #1 deep, safeties read #2', rushers:4 },
+  cover6: { label:'Cover 6', description:'Quarters to the strength · Cover 2 to the weak side', rushers:4 },
   man: { label:'2-man', description:'Man coverage · two high safeties', rushers:4 },
-  blitz: { label:'Cover 0 blitz', description:'Six rushers · no deep help', rushers:6 },
+  blitz: { label:'Cover 0 blitz', description:'Six rushers · man across · no deep help', rushers:6 },
+  firezone: { label:'Fire zone', description:'Five rush · a lineman drops · three under, three deep', rushers:5 },
+  creeper: { label:'Sim pressure', description:'Pressure look · four rush, a lineman drops, seven cover', rushers:4 },
   random: { label:'Disguised / random', description:'Read the defense after the snap', rushers:4 },
 };
 export function routeFor(play, id, spot, flip=false) {

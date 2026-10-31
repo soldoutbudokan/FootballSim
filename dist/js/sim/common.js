@@ -56,5 +56,3 @@ export function meetWant(p, target, timeLeft, cap) {
   if (d < 0.25) return ZERO;
   return scaled(dx, dz, Math.min(cap, d / Math.max(0.15, timeLeft)));
 }
-
-// Lateral shade of a pursuit aim point: `leverage` yards along the normal of

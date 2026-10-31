@@ -103,12 +103,27 @@ test('the defense estimates the visible flight without reading the chosen pass t
 });
 
 test('changing to a trips formation moves man assignments without changing their coverage', () => {
-  for (const coverage of ['man', 'blitz']) {
-    const s = new Simulation(8, { offense: 'mesh', coverage });
-    const defender = coverage === 'man' ? 'LB1' : 'LB3';
-    const before = s.byId[defender].x - s.byId.Y.x;
+  // Whoever has a receiver in man lines up over him (unless he shows a deep
+  // shell), before and after the offense changes formation; the family and
+  // the look stay.
+  const covered = s => {
+    const men = s.defense.filter(d => d.assign?.kind === 'man');
+    for (const d of men) {
+      const r = s.byId[d.assign.id];
+      if (r.z > s.spot - 3 && d.z < s.spot + 8) assert.ok(Math.abs(d.x - r.x) < 3, `${s.coverage}: ${d.id} lines up over ${r.id} (${d.x.toFixed(1)} vs ${r.x.toFixed(1)})`);
+    }
+    return new Set(men.map(d => d.assign.id));
+  };
+  for (const coverage of ['man', 'blitz', 'cover1']) for (const seed of [8, 9, 10]) {
+    const s = new Simulation(seed, { offense: 'mesh', coverage });
+    const shell = s.call.shell, before = covered(s), y = s.defense.find(d => d.assign?.id === 'Y');
     s.audible('stick');
     assert.equal(s.coverage, coverage);
-    assert.ok(Math.abs((s.byId[defender].x - s.byId.Y.x) - before) < 0.01);
+    assert.equal(s.call.shell, shell);
+    assert.deepEqual(covered(s), before, 'every receiver still has his man');
+    // Y moved from the left slot to the trips side: his man moved with him
+    // (unless he shows a deep shell and comes down at the snap).
+    const after = s.defense.find(d => d.assign?.id === 'Y');
+    if (after.z < s.spot + 8 && y.z < s.spot + 8) assert.ok(Math.sign(after.x) === Math.sign(s.byId.Y.x) && Math.sign(y.x) !== Math.sign(after.x), `${coverage}/${seed}: Y's man follows him across`);
   }
 });
