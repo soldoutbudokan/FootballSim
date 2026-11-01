@@ -127,3 +127,40 @@ test('changing to a trips formation moves man assignments without changing their
     if (after.z < s.spot + 8 && y.z < s.spot + 8) assert.ok(Math.sign(after.x) === Math.sign(s.byId.Y.x) && Math.sign(y.x) !== Math.sign(after.x), `${coverage}/${seed}: Y's man follows him across`);
   }
 });
+
+// A throw in flight from the quarterback at (0, 35) to (0, 55), as the
+// defense would read it, with nobody else near it.
+function flight(difficulty = 'allpro') {
+  const s = new Simulation(7, { offense: 'mesh', coverage: 'cover3', difficulty });
+  s.snap();
+  s.phase = 'air'; s.carrier = null; s.threw = true; s.time = 2;
+  for (const p of s.players) { p.x = -25; p.z = 20; p.vx = p.vz = 0; }
+  s.ball = { x: 0, y: 1.9, z: 36, vx: 0, vy: 2.5, vz: 20 };
+  s.pass = { receiver: 'X', target: { x: 0, y: 1.6, z: 56 }, duration: 1, elapsed: 0.05, style: 'touch', distance: 20 };
+  return s;
+}
+
+test('a zone defender running deep still sees the throw over his shoulder; a man defender with his back turned does not', () => {
+  for (const [kind, sees] of [['deep', true], ['man', false]]) {
+    const s = flight(), d = s.byId.FS;
+    Object.assign(d, { x: 3, z: 52, facing: 0.9, turned: true, assign: kind === 'man' ? { kind: 'man', id: 'Y' } : { kind: 'deep', x: 0, depth: 26, lo: -12, hi: 12 } });
+    for (let i = 0; i < 60; i++) s.readPass(d, STEP);
+    assert.equal(d.ballAware, sees, kind);
+  }
+});
+
+test('breaking on the ball: a man near the flight gets to it ahead of the catch, a far one rallies, one out of range stays in coverage', () => {
+  const s = flight(), d = s.byId.FS;
+  // Beside the line of the ball, short of where it comes down: he goes to a
+  // point on its line before the catch point, not to the catch point.
+  Object.assign(d, { x: 2, z: 52, vx: 0, vz: 0 });
+  const want = s.breakOnBall(d, s.readFlight(d));
+  assert.ok(want && want.x < 0, 'drives across to the ball');
+  // Too far to get there with the ball: he still runs to where it is caught.
+  Object.assign(d, { x: 18, z: 56 });
+  const rally = s.breakOnBall(d, s.readFlight(d));
+  assert.ok(rally && rally.x < 0 && Math.hypot(rally.x, rally.z) > 0.9 * d.top, 'rallies at full speed');
+  // Forty yards away the throw is not his.
+  Object.assign(d, { x: -26, z: 90 });
+  assert.equal(s.breakOnBall(d, s.readFlight(d)), null);
+});

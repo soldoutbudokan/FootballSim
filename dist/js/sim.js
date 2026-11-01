@@ -447,19 +447,26 @@ const FAKE = { side: 0.9, mesh: 1.8, past: 0.4, min: 0.6, max: 0.9, effort: 0.5 
 // ball, z from the line], yd) at `effort` of his speed, shoulders turned
 // `facing` rad toward the line from his run, moving on within `near` yd.
 const BOOT = { path: [[4, -6.6], [8.5, -6.2], [11.5, -5]], effort: 0.85, facing: 0.7, near: 1.0 };
-// Accuracy. A set throw lands within ± set/2 yd each way of the aim point.
-// Moving adds spread per 7 yd/s of speed: `toward` running at the target,
-// `across` running across the throw and `away` throwing back against his own
-// momentum (across his body); his speed is the larger of now and `reset` of
-// his speed `settle` s ago, so a quarterback who has only just stopped is
-// not set yet. A defender within `near` yd adds up to `pressure` as he
-// closes to `close` yd.
-const THROW = { set: 0.18, toward: 0.6, across: 1.6, away: 2.8, settle: 0.2, reset: 0.6, pressure: 2.8, near: 3.3, close: 0.6 };
-// Contested catches (catchBall): a defender within `near` yd adds to the drop
+// Accuracy. A set throw lands within ± spread/2 yd each way (long or short,
+// left or right) of the aim point. The spread is `set` plus `far` (by style)
+// per yard of the throw past `crisp` yd: a short throw stays on the hands, a
+// 40-yd bullet spreads about 1.4 yd, a touch ball 1.8 and a lob 2.3 (a ball
+// put up with air under it is harder to place). Moving adds spread per
+// 7 yd/s of speed: `toward` running at the target, `across` running across
+// the throw and `away` throwing back against his own momentum (across his
+// body); his speed is the larger of now and `reset` of his speed `settle` s
+// ago, so a quarterback who has only just stopped is not set yet. A defender
+// within `near` yd adds up to `pressure` as he closes to `close` yd.
+const THROW = {
+  set: 0.18, far: { bullet: 0.035, touch: 0.045, lob: 0.06 }, crisp: 5,
+  toward: 0.6, across: 1.6, away: 2.8, settle: 0.2, reset: 0.6, pressure: 2.8, near: 3.3, close: 0.6,
+};
+// Contested catches (catchBall): a defender within `near` yd (close enough
+// to get a hand in or hit the receiver as the ball arrives) adds to the drop
 // chance, up to `front` when he is between the receiver and the ball and
 // `trail` when he trails behind (the receiver shields him), in full within
 // `tight` yd. A bullet from inside `close` yd adds `bullet`.
-const CATCH = { base: 0.03, near: 1.2, tight: 0.6, front: 0.34, trail: 0.14, bullet: 0.08, close: 8 };
+const CATCH = { base: 0.03, near: 1.8, tight: 0.6, front: 0.42, trail: 0.25, bullet: 0.08, close: 8 };
 
 // ---------------------------------------------------------------------------
 export class Simulation {
@@ -611,8 +618,10 @@ export class Simulation {
       target = this.predict(p, duration);
       duration = clamp(dist(qb, target) / speed, 0.42, 2.8);
     }
-    // Accuracy (THROW): set feet, on the move toward, across or away from the
-    // throw, and pressure. The error lands long or short and to either side.
+    // Accuracy (THROW): the length of the throw and its style, set feet, on
+    // the move toward, across or away from the throw, and pressure. The error
+    // lands long or short and to either side.
+    const length = Math.max(0, dist(qb, target) - THROW.crisp) * THROW.far[intent.style];
     const nearest = Math.min(...this.defense.map(d => dist(d, qb)));
     const pressure = clamp((THROW.near - nearest) / (THROW.near - THROW.close), 0, 1);
     const then = this.perceive('QB', THROW.settle);
@@ -621,7 +630,7 @@ export class Simulation {
     const aim = scaled(target.x - qb.x, target.z - qb.z, 1), ux = aim === ZERO ? 0 : aim.x, uz = aim === ZERO ? 1 : aim.z;
     const along = pace > 0.3 ? (vx * ux + vz * uz) / pace : 0;
     const per7 = along >= 0 ? THROW.across + (THROW.toward - THROW.across) * along : THROW.across + (THROW.away - THROW.across) * -along;
-    const spread = THROW.set + pace / 7 * per7 + pressure * THROW.pressure;
+    const spread = THROW.set + length + pace / 7 * per7 + pressure * THROW.pressure;
     const long = (this.random() - 0.5) * spread, wide = (this.random() - 0.5) * spread;
     const error = { x: ux * long + uz * wide, z: uz * long - ux * wide };
     target.x += intent.lead.x * 2.5 + error.x;
@@ -1369,15 +1378,17 @@ export class Simulation {
       this.finish('Intercepted', 0, 'interception');
       return;
     }
-    // Drops (plan 4.2): a base rate, more with a defender on him (CATCH), most
-    // when the defender is between him and the ball, and a little more for a
-    // bullet from close range.
-    const chance = CATCH.base + this.catchContest(p) + (this.pass.style === 'bullet' && this.pass.distance < CATCH.close ? CATCH.bullet : 0);
-    if (this.random() < chance) {
+    // Drops (plan 4.2): a base rate, and a little more for a bullet from
+    // close range. A defender on him (CATCH) can knock it loose as it
+    // arrives, most when he is between him and the ball: a breakup at the
+    // catch. One draw decides both.
+    const drop = CATCH.base + (this.pass.style === 'bullet' && this.pass.distance < CATCH.close ? CATCH.bullet : 0);
+    const roll = this.random();
+    if (roll < drop + this.catchContest(p)) {
       const b = this.ball, side = (this.random() - 0.5) * 2;
       this.ball = { x: b.x, y: Math.max(0.6, b.y), z: b.z, vx: p.vx * 0.3 + side, vy: 2.2, vz: p.vz * 0.3 - b.vz * 0.05 };
-      this.events.push('drop');
-      this.finish('Dropped', 0, 'incomplete');
+      if (roll < drop) { this.events.push('drop'); this.finish('Dropped', 0, 'incomplete'); }
+      else { this.events.push('deflection'); this.finish('Pass broken up', 0, 'incomplete'); }
       return;
     }
     this.completed = true; this.stats.completions++;

@@ -1,5 +1,6 @@
 // Blocking: pass protection and the pass rush (the pocket), run blocking,
 // and how blocked defenders fight through.
+import { RECEIVERS } from '../plays.js';
 import { STEP, clamp, dist, scaled, seekWant, trackWant, speedCap, STUMBLE_SPEED, GET_OFF } from './common.js';
 
 const SHED_RANGE = 1.6, SHED_TIME = 0.3;  // a blocked man reads the ball carrier
@@ -30,13 +31,14 @@ const LAUNCH = { depth: 7, settle: 0.45, still: 1, late: 1.2, wide: 2, min: 4.5,
 // yd/s): moving the launch point beats the collapse. A rusher who has been
 // ridden level with a quarterback who stepped up (`washDepth` yd) and wide of
 // him has lost his angle: `wash` of the rate. The winner rips past at `rip`
-// yd/s along his lane, slipping to the side he won (the move's `slip`), then
-// leans up to `lean` yd that way for `burst` s. Nobody can pick him up
-// for `clear` s, and the beaten blocker stumbles for `beaten` s. Ends lined up
-// more than `edge` yd wide rush the arc, aiming `arc` yd outside the launch
-// point per yard still to go (`arcMin` to `arcMax`) and up to `beyond` yd
-// past it: the arc runs past the launch point, and turning the corner takes
-// a win; the others push their gap (`gaps`, yd from the centre; lined up
+// yd/s, slipping to the side he won (the move's `slip`): he bends at the
+// quarterback, or with less discipline (DISCIPLINE `bend`) carries on up his
+// lane and runs past him; then he leans up to `lean` yd that way for `burst`
+// s. Nobody can pick him up for `clear` s, and the beaten blocker stumbles
+// for `beaten` s. Ends lined up more than `edge` yd wide rush the arc, aiming
+// `arc` yd outside the launch point per yard still to go (`arcMin` to
+// `arcMax`) and up to `beyond` yd past it: the arc runs past the launch
+// point, and turning the corner takes a win; the others push their gap (`gaps`, yd from the centre; lined up
 // without a called gap, within `gap` yd of the centre), bending to the launch
 // point by its depth. Rushers re-aim at the quarterback once they have seen
 // him move off the launch point (`moved` yd, blended over a yard), or when
@@ -51,18 +53,19 @@ const POCKET = {
   square: 0.95, engage: 1.3, part: 2.2, ramp: 1.4, power: 2.5, help: 0.5, helpRange: 1.6,
   box: 4.4, close: 1.5, near: 3.5, loose: 3, onMove: 0.25, wash: 0.35, washDepth: 0.5, bend: 0.6,
   beaten: 0.5, clear: 0.5, burst: 0.5, lean: 0.6, rip: 5.5,
-  edge: 3.5, arc: 1.0, arcMin: 2.0, arcMax: 4.2, beyond: 0.8, gap: 2.4, gaps: { A: 0.8, B: 2.4, C: 4.2 },
+  edge: 3.5, arc: 1.0, arcMin: 1.5, arcMax: 3.0, beyond: 0.8, gap: 2.4, gaps: { A: 0.8, B: 2.4, C: 4.2 },
   moved: 1, chase: 3, effort: 0.92, pickup: 1.2, backCost: 2, own: 1.5,
 };
 // Pass-rush matchups: `push` is how fast the pair gives ground (yd/s), `win`
-// the base hazard (per second at `ramp`) and `shed` the base chance to come
-// off the block when the quarterback leaves the pocket.
+// the hazard at Pro (per second at `ramp`; DISCIPLINE `plan` scales it) and
+// `shed` the base chance to come off the block when the quarterback leaves
+// the pocket.
 const MATCHUP = {
-  edge: { push: 0.75, win: 0.32, shed: 0.85 },    // an end on a tackle: slow to collapse, likelier to win
-  inside: { push: 1.1, win: 0.22, shed: 0.6 },    // a tackle on a guard: a steady push
-  nose: { push: 1.2, win: 0.2, shed: 0.55 },      // a nose on the centre
-  blitzer: { push: 0.6, win: 0.36, shed: 0.8 },   // a linebacker or back on a lineman: quick, light
-  back: { push: 1.6, win: 0.8, shed: 0.9 },       // anyone on a back: he gives ground fast
+  edge: { push: 0.75, win: 0.77, shed: 0.85 },    // an end on a tackle: slow to collapse, likelier to win
+  inside: { push: 1.1, win: 0.53, shed: 0.6 },    // a tackle on a guard: a steady push
+  nose: { push: 1.2, win: 0.48, shed: 0.55 },     // a nose on the centre
+  blitzer: { push: 0.6, win: 0.86, shed: 0.8 },   // a linebacker or back on a lineman: quick, light
+  back: { push: 1.6, win: 1.9, shed: 0.9 },       // anyone on a back: he gives ground fast
 };
 // Rush moves, drawn when the rep locks up. `push` and `win` scale the
 // matchup; `slip` is how far to the side the winner rips per yard forward
@@ -117,11 +120,20 @@ const SCRAMBLE = {
 // Discipline by difficulty (never speed): `recognise` (s, see SCRAMBLE),
 // `shed` (scales the chance to get off a block), `stunt` (chance of an
 // end-tackle twist on a rep), `pa` (s a lineman plays the run on a
-// play-action fake).
+// play-action fake), `plan` (scales the chance to win a rep: an All-pro
+// rusher reads his blocker's set, picks the move it gives him and has a
+// counter ready; a Rookie picks a move and runs it into the man), `bend`
+// (how far a winner turns at the quarterback rather than running on up his
+// lane: 0 runs the arc past him, 1 flattens straight at him), `jump` (s
+// after the snap a called blitzer from the second level goes: he times the
+// count instead of reacting to the ball, GET_OFF; a Rookie does not) and
+// `tip` (the share of called blitzers who give it away before the snap,
+// creeping or staring at their gap, so the line counts them and knows they
+// come; fixed by the man's number, no draw).
 const DISCIPLINE = {
-  rookie: { recognise: 0.2, shed: 0.75, stunt: 0.08, pa: 0.9 },
-  pro: { recognise: 0.12, shed: 1, stunt: 0.15, pa: 0.75 },
-  allpro: { recognise: 0.06, shed: 1.15, stunt: 0.22, pa: 0.6 },
+  rookie: { recognise: 0.2, shed: 0.75, stunt: 0.08, pa: 0.9, plan: 0.25, bend: 0, jump: 0.28, tip: 0.8 },
+  pro: { recognise: 0.12, shed: 1, stunt: 0.15, pa: 0.75, plan: 1, bend: 0.7, jump: 0.2, tip: 0 },
+  allpro: { recognise: 0.06, shed: 1.15, stunt: 0.22, pa: 0.6, plan: 4, bend: 1, jump: 0.12, tip: 0 },
 };
 // Play action: until he reads pass a defensive lineman fits his gap `fit` yd
 // on his side of the line at `effort` of top speed, and once blocked holds
@@ -132,7 +144,25 @@ const PLAY_ACTION = { fit: 0.3, effort: 0.5, push: 0.3 };
 // is 2^(-`weak` to +`strong`) for the whole rep times 2^(±`lock`) for his
 // matchup (uniform in the exponent, from draws the rep makes anyway); see
 // rushStrength.
-const SPREAD = { weak: 1.6, strong: 1, lock: 0.6 };
+const SPREAD = { weak: 2.6, strong: 1, lock: 0.6 };
+// The protection's rules (see protect). The count at the snap takes in every
+// lineman, anyone walked up within `walk` yd of the line and `edge` yd of the
+// ball, and anyone in the box (`deep` by `wide` yd). The line sees a man come
+// `read` s after he goes, and sees a counted man drop once he was, `read` s
+// ago, `gone` yd deeper than he lined up (twice that to the side) or backing
+// off at `away` yd/s. A lineman's zone is `zone` yd either side of his set
+// (the centre and the slide side shifted `slide` yd toward the slide); he
+// keeps a man who strays up to `keep` yd farther, and anyone `inside` yd
+// behind the line is anyone's. A counted man who has not shown either way is
+// worth `maybe` yd of trips: a spare sets up on him, nobody leaves a rusher
+// for him. The matching looks at `most` threats at a time (an exact search).
+const PROTECT = { walk: 2.5, edge: 8, deep: 6, wide: 5.5, read: 0.3, gone: 1, away: 2, zone: 2.5, slide: 1.6, keep: 1, inside: 2.5, maybe: 8, most: 8 };
+// After the throw a rusher who has seen the ball go (his reaction latency
+// after the release) comes off his block and runs to where it comes down
+// (as he reads the flight), carried on along the line of the receiver he
+// sees under it (the nearest within `mark` yd) for as long as he needs to
+// get there past the ball, at most `lead` s.
+const PEEL = { mark: 4, lead: 1.5 };
 // Twists. An end and the tackle beside him trade lanes: in a T-E game the
 // tackle goes first, slanting across the guard's face into the C gap, and
 // the end loops behind him into the B gap; in an E-T game the end crashes
@@ -215,6 +245,14 @@ export const protection = {
   },
 
   discipline() { return DISCIPLINE[this.config.difficulty] || DISCIPLINE.pro; },
+
+  // When a defender moves after the snap: his reaction to the ball (GET_OFF),
+  // but a called blitzer from the second level times the snap count and goes
+  // with it (the difficulty's `jump`).
+  getOff(d) {
+    const get = GET_OFF[d.role];
+    return d.rushing && d.role !== 'dl' && !(d.rush?.at > 0) ? Math.min(get, this.discipline().jump) : get;
+  },
 
   // How well this rusher's rep is going (SPREAD): the rep's strength times
   // his move's. It scales his win rate, and its square root his push and
@@ -405,38 +443,62 @@ export const protection = {
     if (d) { d.lock = null; d.disengage = null; }
   },
 
-  // Pass protection. A man who stops rushing is let go at once. Pairs
-  // already locked fight it out (contest); a twist is passed off; then the
-  // free blockers (linemen who are neither locked nor beaten, and the back
-  // while he checks or once he has blocked) are matched to the free rushers
-  // (assignProtection) and lock up with them on contact. A spare blocker
-  // picks up any free rusher who comes within reach.
+  // Pass protection, by the rules a line plays by rather than by knowing who
+  // comes (PROTECT). At the snap the line makes its call from the look
+  // (callProtection): who it counts and which way it slides. Each step the
+  // threats it accounts for (threat: the counted men it has not seen drop,
+  // and anyone it has seen come) are matched to the blockers who have no
+  // man (assignProtection), each lineman within his zone, the back to a man
+  // he has seen come; with more threats than blockers the one who would
+  // arrive last is the quarterback's. A lineman who has a man he is sure of
+  // keeps him (he is committed) until he sees him drop, the man leaves his
+  // zone or gets past him, someone else has him, or the man who beat him
+  // has recovered to take him back; so a man the count missed, or one who
+  // shows up where a committed man was, can come free. Pairs already locked
+  // fight it out (contest); a twist is passed off or loses the looper; a
+  // blocker with no man picks up any free rusher who comes within reach.
+  // Once a rusher sees the ball thrown he comes off his block (PEEL). On a
+  // scramble everyone is matched afresh among the rushers, within reach.
   protect(dt) {
-    const st = this.rushState(), rushers = this.rushers(), rb = this.byId.R;
+    const st = this.rushState(), rushers = this.rushers(), rb = this.byId.R, qb = this.byId.QB, scramble = this.scrambling();
     if (st.stunt && !(this.byId[st.stunt.pen].rushing && this.byId[st.stunt.loop].rushing)) st.stunt = null;
+    if (!st.call) st.call = this.callProtection();
     for (const o of this.line) this.keepLock(o);
     this.keepLock(rb);
+    for (const d of rushers) if (d.lock && this.sawThrow(d)) this.unlock(this.byId[d.lock], d);
     this.markContain(st, rushers);
     for (const d of rushers) if (d.lock) this.contest(this.byId[d.lock], d, dt);
     this.passOff(st);
+    this.loseLooper(st);
     const catching = this.phase === 'air' && this.pass.receiver === 'R';
     if (catching && rb.lock) this.unlock(rb, this.byId[rb.lock]);
     // A back with a hot route runs it; one lined up in the backfield checks.
     const back = !this.hotRoutes.R && rb.start.z < this.spot - 3 && this.carrier !== 'R' && !catching && !rb.released;
     const blockers = this.line.filter(o => !o.lock && this.time >= o.beatenUntil);
     if (back && !rb.lock && this.time >= rb.beatenUntil) blockers.push(rb);
-    const free = rushers.filter(d => !d.lock);
-    const plan = this.assignProtection(blockers, free);
+    const threats = scramble ? rushers : this.defense.filter(d => this.threat(d, st));
     for (const o of this.line) if (!blockers.includes(o)) o.assignment = o.lock;
     if (!blockers.includes(rb)) rb.assignment = rb.lock;
+    // Committed linemen keep their men (a recovered blocker gets back the
+    // man who beat him); the rest, and the back, are matched to the threats
+    // nobody has.
+    const taken = new Set();
     for (const o of blockers) {
-      const d = plan.get(o.id);
-      o.assignment = d ? d.id : null;
-      if (d && this.canLock(o, d)) this.lock(o, d);
+      const d = o.assignment ? this.byId[o.assignment] : null;
+      const owner = d && blockers.some(q => q !== o && q.lostTo === d.id), past = d && dist(d, qb) < dist(o, qb);
+      if (!d || o.role !== 'ol' || scramble || owner || past || d.lock || taken.has(d.id) || !threats.includes(d) || !this.declared(d) || !this.inZone(o, d, PROTECT.keep)) o.assignment = null;
+      else taken.add(d.id);
+    }
+    const open = blockers.filter(o => !o.assignment), loose = threats.filter(d => !d.lock && !taken.has(d.id)).slice(0, PROTECT.most);
+    const plan = this.assignProtection(open, loose);
+    for (const o of open) { const d = plan.get(o.id); o.assignment = d ? d.id : null; }
+    for (const o of blockers) {
+      const d = o.assignment ? this.byId[o.assignment] : null;
+      if (d && d.rushing && this.canLock(o, d)) this.lock(o, d);
     }
     for (const o of blockers) {
       if (o.lock || o.assignment) continue;
-      const d = free.find(q => !q.lock && this.canLock(o, q));
+      const d = rushers.find(q => !q.lock && this.canLock(o, q));
       if (d) this.lock(o, d);
     }
     // The back blocks only once he has a man; with none by the end of his
@@ -447,12 +509,71 @@ export const protection = {
     if (back && (rb.lock || rb.assignment || rb.blocked)) { this.passSet(rb, rushers); rb.pickup = rb.lock || rb.assignment || 'QB'; }
   },
 
+  // The protection's call from the look at the snap: the count (every
+  // lineman, and anyone walked up within `walk` yd of the line and `edge` yd
+  // of the ball, or in the box, within `deep` and `wide` yd, and any blitzer
+  // who tipped it, DISCIPLINE `tip`, whom the line is sure of) and the slide:
+  // toward the side with more of them (on a tie away from the back, or to
+  // the play's right), the back taking the other side.
+  callProtection() {
+    const x0 = this.pocketX(), count = new Set(), side = { [-1]: 0, 1: 0 };
+    const tip = this.discipline().tip, tipped = new Set();
+    for (const d of this.defense) {
+      const deep = d.start.z - this.spot, off = d.start.x - x0, a = Math.abs(off);
+      if (d.rushing && d.role !== 'dl' && (d.number * 0.618034) % 1 < tip) tipped.add(d.id);
+      if (!(d.role === 'dl' || tipped.has(d.id) || (deep < PROTECT.walk && a < PROTECT.edge) || (deep < PROTECT.deep && a < PROTECT.wide))) continue;
+      count.add(d.id);
+      if (a >= 0.5) side[Math.sign(off)]++;
+    }
+    const back = this.byId.R.start.x - x0;
+    const slide = side[1] !== side[-1] ? Math.sign(side[1] - side[-1]) : Math.abs(back) > 0.5 ? -Math.sign(back) : this.config.flip ? -1 : 1;
+    return { count, slide, tipped, dropped: new Set() };
+  },
+
+  // A man the protection is accounting for: one it counted until it sees him
+  // drop, or a rusher it did not count once he declares (`read` s after he
+  // goes).
+  threat(d, st) {
+    if (d.rushing && this.declared(d)) return true;
+    if (!st.call.count.has(d.id) || st.call.dropped.has(d.id)) return false;
+    if (!d.rushing && this.dropped(d)) { st.call.dropped.add(d.id); return false; }
+    return true;
+  },
+
+  // A rusher the line is sure of: a lineman, or a man it has seen come
+  // (`read` s after he goes). A counted man who has not shown either way is
+  // only a maybe (see assignProtection).
+  declared(d) {
+    return d.role === 'dl' || this.passRush?.call?.tipped.has(d.id) || this.time >= (d.rush?.at > 0 ? d.rush.at : this.getOff(d)) + PROTECT.read;
+  },
+
+  // The line has seen this man drop: `read` s ago he was more than `gone` yd
+  // deeper than he lined up (twice that to the side), or backing off at
+  // `away` yd/s.
+  dropped(d) {
+    const p = this.perceive(d.id, PROTECT.read);
+    return p.z - d.start.z > PROTECT.gone || Math.abs(p.x - d.start.x) > 2 * PROTECT.gone || p.vz > PROTECT.away;
+  },
+
+  // A blocker's zone. A lineman takes the rushers within `zone` (+ `extra`)
+  // yd of his set point, anyone outside the tackles counting as at the
+  // tackle's set; the centre and the linemen on the slide side work a gap
+  // (`slide` yd) that way. A man through the line (`inside` yd behind it)
+  // and the man who beat him are anyone's; the back has the whole width.
+  inZone(o, d, extra = 0) {
+    if (o.role !== 'ol' || o.lostTo === d.id || d.z < this.spot - PROTECT.inside) return true;
+    const x0 = this.pocketX(), slide = this.passRush.call.slide;
+    const lt = this.setPoint(this.byId.LT).x, rt = this.setPoint(this.byId.RT).x, set = this.setPoint(o).x;
+    const shift = (set - x0) * slide >= -0.5 ? PROTECT.slide * slide : 0;
+    return Math.abs(clamp(d.x, lt, rt) - set - shift) <= PROTECT.zone + extra;
+  },
+
   // A blocker lets go of a man who has stopped rushing (he drops into
-  // coverage) and forgets an assignment who has.
+  // coverage): he felt him go, so the line knows he has dropped.
   keepLock(o) {
-    const d = o.lock ? this.byId[o.lock] : null;
+    const d = o.lock ? this.byId[o.lock] : null, call = this.rushState().call;
+    if (d && !d.rushing && call) call.dropped.add(d.id);
     if (d && (!d.rushing || d.lock !== o.id)) this.unlock(o, d.lock === o.id ? d : null);
-    else if (!d && o.assignment && !this.byId[o.assignment]?.rushing) o.assignment = null;
   },
 
   // A twist crossing the line: the blocker on the penetrator hands him to
@@ -471,6 +592,18 @@ export const protection = {
     this.lock(next, d);
     sk.passed = true;
     this.events.push('pass-off');
+  },
+
+  // The looper crossing behind the penetrator: the man who had him cannot
+  // follow him through the penetrator's block. Unless the line passes the
+  // twist off he is free until someone inside picks him up.
+  loseLooper(st) {
+    const sk = st.stunt;
+    if (!sk || sk.passed || sk.lost) return;
+    const pen = this.byId[sk.pen], loop = this.byId[sk.loop];
+    if (Math.sign(loop.x - pen.x) === Math.sign(loop.start.x - pen.start.x)) return;
+    const o = this.line.find(q => q.assignment === loop.id && !q.lock);
+    if (o) { sk.lost = o.id; o.assignment = null; }
   },
 
   // One blocker's step in protection. Locked, stay square between the
@@ -515,15 +648,27 @@ export const protection = {
 
   // A blocker can only take on a rusher he is in front of (nearer the
   // quarterback): a beaten man must get back between them first. A rusher
-  // who has just shed his man is not his again at once, and on a scramble a
-  // blocker must be in the rusher's path to the quarterback.
+  // who has just shed his man is not his again at once; a looper lost to a
+  // twist is not his man's, and nobody takes a man who has seen the ball
+  // thrown. On a scramble a blocker must be in the rusher's path to the
+  // quarterback, and a rusher chasing him (he has seen him go) runs around
+  // a blocker rather than into him: only the locks he already has hold him.
   canLock(o, d) {
     const qb = this.byId.QB, since = this.time - d.wonAt;
     if (dist(o, d) >= POCKET.engage || since < POCKET.clear || dist(o, qb) >= dist(d, qb)) return false;
+    const scramble = this.scrambling();
     if (d.shedFrom === o.id && since < SCRAMBLE.relock) return false;
-    if (!this.scrambling()) return true;
+    if (this.lostLooper(o, d) || this.sawThrow(d)) return false;
+    if (!scramble) return true;
+    if (this.sawOut(d)) return false;
     const toO = scaled(o.x - d.x, o.z - d.z, 1), toQB = scaled(qb.x - d.x, qb.z - d.z, 1);
     return toO.x * toQB.x + toO.z * toQB.z > SCRAMBLE.path;
+  },
+
+  // This blocker lost this looper to the twist (see loseLooper).
+  lostLooper(o, d) {
+    const st = this.passRush, sk = st && st.players === this.players ? st.stunt : null;
+    return !!sk && !sk.passed && sk.lost === o.id && sk.loop === d.id;
   },
 
   // Blocker and rusher lock up. The rusher draws how much pressure it takes
@@ -566,16 +711,18 @@ export const protection = {
       rate += POCKET.loose * closing * (1 - (1 - POCKET.onMove) * moving);
     }
     if (d.z < qb.z + POCKET.washDepth && Math.abs(d.x - qb.x) > 1.2) rate *= POCKET.wash;
-    d.have += rate * this.rushStrength(d) * dt;
+    d.have += rate * this.rushStrength(d) * this.discipline().plan * dt;
     if (d.have < d.need) return;
     this.unlock(o, d);
     o.beatenUntil = this.time + POCKET.beaten; o.action = 'stumble'; o.actionTime = POCKET.beaten; o.lostTo = d.id;
     o.vx *= STUMBLE_SPEED; o.vz *= STUMBLE_SPEED;
     // The rip, swim or drive: over a quarter second (the juke blend) the
-    // rusher goes from his push to `rip` yd/s along his lane and to the side
-    // he won (a bull rusher straight through). With a quarterback who has
-    // stepped up, an edge rusher's lane takes him behind him: a loop.
-    const ref = this.freeRef(d), aim = d.rushMove === 'bull' ? ref : this.laneAim(d, ref);
+    // rusher goes from his push to `rip` yd/s and to the side he won (a bull
+    // rusher straight through), bent from his lane toward the quarterback by
+    // the difficulty's `bend`. An undisciplined end runs on up the arc, and
+    // with a quarterback who has stepped up his lane takes him behind him.
+    const ref = this.freeRef(d), lane = d.rushMove === 'bull' ? ref : this.laneAim(d, ref), bend = this.discipline().bend;
+    const aim = { x: lane.x + (ref.x - lane.x) * bend, z: lane.z + (ref.z - lane.z) * bend };
     const to = scaled(aim.x - d.x, aim.z - d.z, 1), turn = -Math.sign(to.z) * d.winSide || d.winSide;
     const past = scaled(to.x - turn * to.z * move.slip, to.z + turn * to.x * move.slip, POCKET.rip);
     d.juke = { t: 0, from: { x: d.vx, z: d.vz }, to: past };
@@ -618,23 +765,25 @@ export const protection = {
     return clamp(this.matchup(o, d).shed * this.discipline().shed * (1 - (1 - SCRAMBLE.square) * square), 0.05, 0.97);
   },
 
-  // Protection: block the most dangerous rushers, those who would reach the
-  // quarterback first, so the one left free is the farthest; among those
-  // choices take the shortest trips (so the line slides toward an overload),
-  // keep last step's man, give a recovered blocker the man who beat him
-  // (`own` yd, so the spare stays free to help), and use the back only when
-  // the line runs out. On a scramble a lineman only takes a man within
-  // reach: nobody runs across the formation. Exact search over every
-  // matching (at most six blockers and seven rushers).
+  // Protection: block the most dangerous threats, those who would reach the
+  // quarterback first, so the one left free is the farthest (a counted man
+  // who has not shown is only a maybe, PROTECT); among those choices take
+  // the shortest trips, keep last step's man, give a recovered blocker the
+  // man who beat him (`own` yd, so the spare stays free to help), and use the
+  // back only when the line runs out. Nobody takes a man already past him; a
+  // lineman takes only a man in his zone (inZone), and on a scramble only a
+  // man within reach: nobody runs across the formation. The back takes only
+  // a man he has seen come. Exact search over every matching (at most six
+  // blockers and eight threats).
   assignProtection(blockers, rushers) {
     const qb = this.byId.QB, n = blockers.length, k = rushers.length, full = 1 << k, scramble = this.scrambling();
     const plan = new Map();
     if (!n || !k) return plan;
-    const cost = blockers.map(o => rushers.map(d => scramble && o.role === 'ol' && dist(o, d) > SCRAMBLE.reach ? Infinity
+    const cost = blockers.map(o => rushers.map(d => dist(d, qb) < dist(o, qb) || (scramble ? o.role === 'ol' && dist(o, d) > SCRAMBLE.reach : !this.inZone(o, d) || this.lostLooper(o, d) || (o.role === 'rb' && !(d.rushing && this.declared(d)))) ? Infinity
       : dist(o, this.squarePoint(d)) - (o.assignment === d.id ? 1 : 0) - (o.lostTo === d.id ? POCKET.own : 0) + (o.role === 'rb' ? POCKET.backCost : 0)));
     // Leaving a rusher free costs far more than any trip, and more the sooner
     // he would arrive (about 2 yd of trips per yard nearer the quarterback).
-    const free = rushers.map(d => 100 - 14 * dist(d, qb) / d.top);
+    const free = rushers.map(d => scramble || this.declared(d) ? 100 - 14 * dist(d, qb) / d.top : PROTECT.maybe);
     const best = Array.from({ length: n + 1 }, () => new Float64Array(full));
     const pick = Array.from({ length: n }, () => new Int8Array(full));
     for (let mask = 0; mask < full; mask++) for (let j = 0; j < k; j++) if (!(mask & 1 << j)) best[n][mask] += free[j];
@@ -698,6 +847,7 @@ export const protection = {
   // a lineman first plays the run (PLAY_ACTION).
   rushWant(d) {
     d.turned = true;
+    if (this.sawThrow(d)) return this.peelWant(d);
     const st = this.rushState(), lane = this.laneOf(d), qb = this.byId.QB;
     if (this.sawOut(d)) return this.scrambleWant(d, lane);
     const contain = this.containAim(d, true);
@@ -712,6 +862,20 @@ export const protection = {
     const aim = this.laneAim(d, this.freeRef(d), lane);
     d.aim = aim;
     return scaled(aim.x - d.x, aim.z - d.z, cap);
+  },
+
+  // The ball is out and he has seen it go (PEEL).
+  sawThrow(d) { return this.phase === 'air' && this.pass.elapsed >= d.latency; },
+
+  // A rusher's pursuit after the throw (PEEL): to where the ball comes down,
+  // carried on along the line of the receiver running under it.
+  peelWant(d) {
+    const flight = this.readFlight(d), end = flight.target, cap = speedCap(d, 1);
+    let mark = null, near = PEEL.mark;
+    for (const id of RECEIVERS) { const r = this.byId[id], g = r ? dist(r, end) : Infinity; if (g < near) { near = g; mark = r; } }
+    const lead = mark ? clamp(dist(d, end) / cap - flight.remaining, 0, PEEL.lead) : 0;
+    d.aim = { x: end.x + (mark ? mark.vx * lead : 0), z: end.z + (mark ? mark.vz * lead : 0) };
+    return scaled(d.aim.x - d.x, d.aim.z - d.z, cap);
   },
 
   // A rusher who has seen the quarterback leave the pocket. The end on the

@@ -12,12 +12,15 @@ import { GET_OFF } from './common.js';
 
 export const DIFFICULTY = {
   // Difficulty changes reads, anticipation and the coordinator's craft, never
-  // bodies or catching odds. `contain`: yards outside a scrambling quarterback
-  // the edge rusher on his side keeps (rush lane discipline). `carry`: yards
-  // past the line where an underneath defender gives up a vertical he is
-  // carrying when no deep man has taken it. `help`: how far a defender with
-  // an empty zone leans toward the most open receiver near him (share of the
-  // way from his landmark). `anticipate`: how much of a receiver's change of
+  // bodies or catching odds. `latency`: how late (s) a defender reads a ball
+  // carrier he chases or a quarterback he rushes; `chase`: how late he reads
+  // a receiver he chases after the catch (he has watched the ball into his
+  // hands); `read`: how late a coverage man reads a receiver. `contain`:
+  // yards outside a scrambling quarterback the edge rusher on his side keeps
+  // (rush lane discipline). `carry`: yards past the line where an
+  // underneath defender gives up a vertical he is carrying when no deep man
+  // has taken it. `help`: how far a defender with an empty zone leans toward
+  // the most open receiver near him (share of the way from his landmark). `anticipate`: how much of a receiver's change of
   // speed a coverage man reads into where he is going (a receiver sinking
   // into a break), on top of `routeLead` s of his seen velocity.
   // The coordinator: `menu` is the list of families he calls; `situ` how
@@ -29,12 +32,13 @@ export const DIFFICULTY = {
   // after the snap when a linebacker reads a handoff and fills (safeties and
   // corners later), `bite` s a linebacker steps up on a play fake before he
   // drops, both scaled by how much the offense has been running. `eyes`: the
-  // share of the quarterback's throwing motion a robber drives on.
-  rookie: { latency: 0.40, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06, anticipate: 0, contain: 0.3, carry: 16, help: 0.2,
+  // share of the quarterback's throwing motion a robber drives on (and a
+  // deep middle splitting two verticals leans to).
+  rookie: { latency: 0.40, chase: 0.25, read: 0.30, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06, anticipate: 0, contain: 0.3, carry: 16, help: 0.2,
     menu: 'rookie', situ: 0.5, disguise: 0.1, late: 0, scout: 0, runRead: 0.75, bite: 0.55, eyes: 0 },
-  pro: { latency: 0.28, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, anticipate: 0.5, contain: 1.0, carry: 21, help: 0.45,
+  pro: { latency: 0.28, chase: 0.21, read: 0.24, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, anticipate: 0.5, contain: 1.0, carry: 21, help: 0.45,
     menu: 'pro', situ: 0.8, disguise: 0.35, late: 0.25, scout: 0.5, runRead: 0.6, bite: 0.42, eyes: 0.5 },
-  allpro: { latency: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, anticipate: 1, contain: 1.5, carry: Infinity, help: 0.7,
+  allpro: { latency: 0.18, chase: 0.17, read: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, anticipate: 1, contain: 1.5, carry: Infinity, help: 0.7,
     menu: 'allpro', situ: 1, disguise: 0.5, late: 0.4, scout: 1, runRead: 0.45, bite: 0.3, eyes: 1 },
 };
 
@@ -79,11 +83,12 @@ const DOWNS = {
   second: { cover3: 1.0, cover1: 1.0, cover2: 1.2, tampa2: 1.2, cover4: 1.2, cover6: 1.1, man: 1.0, blitz: 0.9, firezone: 1.1, creeper: 1.2 },
 };
 // Field position: inside the 5 the deep zones vanish (man, zero, pressure);
-// in the red zone the shells compress and man rises; backed up, the defense
-// attacks.
+// in the red zone the shells compress, man and two-deep rise and the
+// three-deep pressures with a lineman in the seam fade (the end line is
+// the deep help, the seams are the danger); backed up, the defense attacks.
 const FIELD = {
-  goal: { cover3: 0.7, cover1: 1.4, cover2: 0.8, tampa2: 0.5, cover4: 0.9, cover6: 0.7, man: 1.5, blitz: 1.5, firezone: 1.0, creeper: 0.85 },
-  red: { cover3: 0.8, cover1: 1.5, cover2: 0.9, tampa2: 0.7, cover4: 1.1, cover6: 0.8, man: 1.6, blitz: 1.3, firezone: 1.0, creeper: 0.9 },
+  goal: { cover3: 0.6, cover1: 1.4, cover2: 0.9, tampa2: 0.6, cover4: 0.6, cover6: 0.5, man: 1.8, blitz: 1.4, firezone: 0.8, creeper: 0.5 },
+  red: { cover3: 0.8, cover1: 1.5, cover2: 1.2, tampa2: 1.0, cover4: 0.7, cover6: 0.6, man: 1.8, blitz: 1.2, firezone: 1.0, creeper: 0.6 },
   backed: { cover3: 1.2, cover1: 1.1, cover2: 0.9, tampa2: 0.8, cover4: 0.9, cover6: 0.9, man: 0.9, blitz: 1.3, firezone: 1.3, creeper: 1.1 },
 };
 // Formation fits: quarters against two by two, Cover 6 and a sky rotation
@@ -204,7 +209,11 @@ function roles(s) {
 // seams; halves split at the ball.
 const THIRD = 12;
 const deep = (x, depth, lo, hi) => ({ kind: 'deep', x, depth, lo, hi });
-const third = side => side < 0 ? deep(-19, 23, -Infinity, -THIRD) : side > 0 ? deep(19, 23, THIRD, Infinity) : deep(0, 26, -THIRD, THIRD);
+const third = (side, shade = 0) => side < 0 ? deep(-19, 23, -Infinity, -THIRD) : side > 0 ? deep(19, 23, THIRD, Infinity) : deep(shade, 26, -THIRD, THIRD);
+// Against three receivers to one side the post safety starts POST_SHADE yd
+// toward them (his zone stays the same).
+const POST_SHADE = 3;
+const postShade = lay => (lay.nums[lay.strength].length >= 3 ? lay.strength * POST_SHADE : 0);
 const half = side => deep(side * 12, 25, side < 0 ? -Infinity : 0, side < 0 ? 0 : Infinity);
 const under = (role, x, depth) => ({ kind: 'under', role, x, depth });
 const quarter = (role, side) => ({ kind: 'quarter', role, side });
@@ -254,10 +263,10 @@ function assignments(call, lay) {
     case 'cover3':
       if (call.variant === 'cloud') {
         jobs[R.cb(e)] = under('flat', e * 23, 5); jobs[R.safety(e)] = third(e);
-        jobs[R.safety(-e)] = third(0); jobs[R.cb(-e)] = third(-e);
+        jobs[R.safety(-e)] = third(0, postShade(lay)); jobs[R.cb(-e)] = third(-e);
         jobs[R.ol(e)] = under('curl', e * 9, 9); jobs[R.mike] = under('hook', -e * 4, 9); jobs[R.ol(-e)] = under('curlflat', -e * 13, 7);
       } else {
-        jobs[R.cb(-s)] = third(-s); jobs[R.cb(s)] = third(s); jobs.FS = third(0);
+        jobs[R.cb(-s)] = third(-s); jobs[R.cb(s)] = third(s); jobs.FS = third(0, postShade(lay));
         jobs[R.will] = under('curlflat', -s * 13, 7); jobs[R.mike] = under('hook', -s * 4, 9);
         if (call.variant === 'buzz') { jobs.SS = under('hook', s * 5, 9); jobs[R.sam] = under('curlflat', s * 13, 7); }
         else { jobs[R.sam] = under('hook', s * 5, 9); jobs.SS = under('curlflat', s * 13, 7); }
@@ -265,7 +274,7 @@ function assignments(call, lay) {
       if (call.spy) jobs[R.mike] = { kind: 'spy' };
       break;
     case 'cover1': {
-      jobs.FS = { ...deep(0, 17, -Infinity, Infinity), free: true };
+      jobs.FS = { ...deep(postShade(lay), 17, -Infinity, Infinity), free: true };
       const pool = ['CB1', 'CB2', 'SS', 'LB1', 'LB2', 'LB3'], map = matchMan(pool, lay, s);
       men = [...map.keys()];
       const extra = pool.find(id => !map.has(id));
@@ -321,7 +330,7 @@ function assignments(call, lay) {
     case 'firezone':
       // Five rush, three under, three deep: a lineman drops into the seam or
       // the hook and two second-level men come.
-      jobs.CB1 = third(-1); jobs.CB2 = third(1); jobs.FS = third(0);
+      jobs.CB1 = third(-1); jobs.CB2 = third(1); jobs.FS = third(0, postShade(lay));
       if (call.variant === 'tackle') {
         drop(R.dt(e), under('hook', e * 2, 8));
         blitz(R.sam, 'edge', s); blitz(R.will, 'edge', -s);
@@ -339,7 +348,7 @@ function assignments(call, lay) {
     case 'creeper': {
       // Four rush and seven cover: a lineman drops and a second-level man
       // replaces him in the rush, sometimes on a delay.
-      jobs.CB1 = third(-1); jobs.CB2 = third(1); jobs.FS = third(0);
+      jobs.CB1 = third(-1); jobs.CB2 = third(1); jobs.FS = third(0, postShade(lay));
       const at = call.delay;
       if (call.variant === 'tackle') {
         drop(R.dt(e), call.spy ? { kind: 'spy' } : under('hole', 0, 8));
@@ -362,7 +371,7 @@ function assignments(call, lay) {
   const help = call.coverage !== 'blitz';
   for (const id of men) Object.assign(jobs[id], {
     press: call.press && id.startsWith('CB'),
-    lev: call.lev, help, cushion: help ? 5 : 6, jam: call.jam,
+    lev: call.lev, help, cushion: help ? 4 : 5, jam: call.jam,
   });
   // Against a bunch, the men on it banjo: they settle who takes whom by
   // the release (in, out and up) instead of chasing through the traffic.

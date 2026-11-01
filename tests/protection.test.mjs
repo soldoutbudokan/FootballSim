@@ -11,6 +11,7 @@ const gap = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const run = (s, t, input = () => ({})) => { while (s.phase === 'live' && s.time < t - 1e-9) s.step(STEP, input(s)); };
 const quantile = (a, p) => { const v = [...a].sort((x, y) => x - y); return v[Math.floor(p * (v.length - 1))]; };
 const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+const clampUnit = v => Math.max(-1, Math.min(1, v));
 // The four linemen rush and nobody else, whatever the coordinator called.
 function fourMan(s) {
   for (const d of s.defense) { d.rushing = d.role === 'dl'; if (d.role !== 'dl') d.rush = undefined; }
@@ -136,18 +137,19 @@ test('a lineman who drops out of the rush frees his blocker, who does not follow
   assert.ok(dropped >= 4, 'drops ' + dropped);
 });
 
-// Five rush from the snap (the four linemen and a linebacker) and a second
-// linebacker comes on a count: `at` s after the snap, through the A gap.
-// Until then he holds where he lined up (the coordinator's part of the
-// contract, done here by hand).
+// Five rush from the snap: the four linemen and the middle linebacker, whom
+// the line counted (he is in the box), through the B gap. A linebacker
+// lined up outside the box, whom it did not count, comes on a count: `at` s
+// after the snap, through the A gap. Until then he holds where he lined up
+// (the coordinator's part of the contract, done here by hand).
 function simPressure(seed, at) {
   const s = rep(seed), qb = s.byId.QB, x0 = s.pocketX();
   const backers = s.defense.filter(d => d.role === 'lb').sort((a, b) => Math.abs(a.x - x0) - Math.abs(b.x - x0));
-  const [late, early] = backers, flip = s.config.flip ? -1 : 1;
+  const [early, late] = backers, flip = s.config.flip ? -1 : 1;
   for (const d of s.defense) { d.rushing = d.role === 'dl' || d === early; if (d.role !== 'dl') d.rush = undefined; }
   early.rush = { lane: 'blitz', side: flip * (Math.sign(early.x - x0) || 1), gap: 'B', at: 0 };
   late.rush = { lane: 'blitz', side: flip * (Math.sign(late.x - x0) || -1), gap: 'A', at };
-  return { s, qb, late };
+  return { s, qb, late, early };
 }
 
 function playCount(b, at, end, each = () => {}) {
@@ -160,34 +162,132 @@ function playCount(b, at, end, each = () => {}) {
   }
 }
 
-test('a delayed blitzer is picked up by the back while he checks, and gets home once the back has released', () => {
-  let picked = 0, unblocked = 0, home = 0, reps = 0;
+test('the line takes the blitzer it counted; one it missed is the back\'s while he checks, and free once he has gone', () => {
+  let picked = 0, unblocked = 0, home = 0, reps = 0, line = 0;
   for (let seed = 1; seed <= 8; seed++) {
-    // On a 0.5 s count the back is still checking: he (or the line, sliding
-    // to the blitz) picks him up.
+    // On a 0.5 s count the back is still checking: he picks the late man up
+    // (now and then a lineman does, or the back cannot get across in time).
     const a = simPressure(seed, 0.5);
     let blocked = false;
     playCount(a, 0.5, 2.2, () => { blocked ||= !!a.late.lock; });
     if (a.s.byId.R.blocked && blocked) picked++;
     // On a 1.5 s count the back has gone into his route and every lineman
-    // has a man: the blitzer, or whoever the line leaves to take him, is
-    // free at the quarterback.
+    // has a man: the late blitzer is free at the quarterback. The counted
+    // man was the line's.
     const b = simPressure(seed, 1.5);
-    let reached = null, taken = false, back = false;
+    let reached = null, taken = false, back = false, early = null;
     playCount(b, 1.5, 3.5, s => {
       taken ||= !!b.late.lock;
       back ||= b.late.lock === 'R';
+      early ||= b.early.lock;
       if (reached === null && s.time > 1.5 && s.rushers().some(d => !d.lock && gap(d, b.qb) < 1.5)) reached = s.time;
     });
+    if (early && early !== 'R') line++;
     if (!b.s.byId.R.released) continue;
     reps++;
     assert.ok(!back, `${seed}: the released back does not come back for him`);
     if (!taken) unblocked++;
     if (reached !== null && reached < 1.5 + 2.1) home++;
   }
-  assert.ok(picked >= 6, `picked up in ${picked}/8`);
-  assert.ok(reps >= 6 && unblocked >= reps - 2, `the late blitzer came unblocked in ${unblocked}/${reps}`);
+  assert.ok(picked >= 4, `picked up in ${picked}/8`);
+  assert.ok(line >= 6, `the line took the man it counted in ${line}/8`);
+  assert.ok(reps >= 6 && unblocked >= reps - 1, `the late blitzer came unblocked in ${unblocked}/${reps}`);
   assert.ok(home >= reps - 2, `a free rusher got home within 2.1 s of the count in ${home}/${reps}`);
+});
+
+test('the protection call: the count takes the line, the walked-up men and the box, and the line slides to the bigger side', () => {
+  for (let seed = 1; seed <= 6; seed++) {
+    for (const flip of [false, true]) {
+      const s = new Simulation(seed, { offense: 'mesh', coverage: 'blitz', difficulty: 'pro', mode: 'reps', flip }), x0 = s.pocketX();
+      s.snap();
+      s.step(STEP); s.step(STEP); run(s, 0.1);
+      const call = s.passRush.call;
+      for (const d of s.defense) {
+        const deep = d.start.z - s.spot, wide = Math.abs(d.start.x - x0);
+        if (d.role === 'dl' || (deep < 2 && wide < 7)) assert.ok(call.count.has(d.id), `${seed}: ${d.id} on the line or walked up is counted`);
+        if (deep > 7 || wide > 9) assert.ok(!call.count.has(d.id), `${seed}: ${d.id} deep or wide is not`);
+      }
+      const side = k => s.defense.filter(d => call.count.has(d.id) && Math.sign(d.start.x - x0) === k && Math.abs(d.start.x - x0) >= 0.5).length;
+      if (side(1) !== side(-1)) assert.equal(call.slide, Math.sign(side(1) - side(-1)), `${seed}: slides to the side with more`);
+    }
+    // A mirrored formation gets the mirrored call.
+    const [plain, mirror] = [false, true].map(flip => { const s = new Simulation(seed, { offense: 'mesh', coverage: 'cover3', difficulty: 'pro', mode: 'reps', flip }); s.snap(); run(s, 0.1); return s.passRush.call; });
+    assert.deepEqual([...mirror.count].sort(), [...plain.count].sort(), `${seed}: the same men counted`);
+    assert.equal(mirror.slide, -plain.slide, `${seed}: the mirrored slide`);
+  }
+});
+
+test('a counted linebacker who drops frees his blocker only once the line sees him go', () => {
+  let freed = 0, cases = 0;
+  for (let seed = 1; seed <= 10; seed++) {
+    const s = fourMan(rep(seed)), x0 = s.pocketX();
+    s.snap();
+    run(s, 0.1);
+    // A lineman set on a linebacker in the box (a maybe) and not on a rusher.
+    const o = s.line.find(q => q.assignment && s.byId[q.assignment].role === 'lb');
+    if (!o) continue;
+    const d = s.byId[o.assignment];
+    assert.ok(Math.abs(d.start.x - x0) < 6, `${seed}: ${d.id} was in the box`);
+    let gone = null, kept = null;
+    while (s.phase === 'live' && s.time < 1.5) {
+      s.step(STEP);
+      if (gone === null && s.passRush.call.dropped.has(d.id)) { gone = s.time; kept = o.assignment === d.id; }
+    }
+    // A spy or a man who stays in the box is never seen to go.
+    if (d.z - d.start.z < 2) continue;
+    cases++;
+    assert.ok(gone !== null && gone > 0.4, `${seed}: ${d.id} seen dropping at ${gone}`);
+    if (!kept && o.assignment !== d.id) freed++;
+  }
+  assert.ok(cases >= 4 && freed === cases, `freed ${freed}/${cases}`);
+});
+
+test('six rushers get home sooner than four, and a called blitzer times the snap', () => {
+  // First rusher within 1.5 yd of a quarterback who holds the ball at Pro,
+  // the coordinator's own Cover 0 calls against its four-man calls.
+  const first = coverage => {
+    const out = [];
+    for (let seed = 1; seed <= 24; seed++) {
+      const s = new Simulation(seed, { offense: 'mesh', coverage, difficulty: 'pro', mode: 'reps' }), qb = s.byId.QB;
+      s.snap();
+      let t = null;
+      while (s.phase === 'live' && t === null && s.time < 6) { s.step(STEP); if (s.rushers().some(d => gap(d, qb) < 1.5)) t = s.time; }
+      out.push(t ?? 6);
+    }
+    return quantile(out, 0.5);
+  };
+  const six = first('blitz'), four = first('cover3');
+  assert.ok(six < four - 0.25 && six > 2, `six ${six.toFixed(2)} s, four ${four.toFixed(2)} s`);
+  // A blitzer goes on the count at Pro and All-pro; at Rookie he reacts to
+  // the ball like everyone else.
+  const moving = (difficulty, at) => {
+    const s = new Simulation(3, { offense: 'mesh', coverage: 'blitz', difficulty, mode: 'reps' });
+    s.snap();
+    run(s, at);
+    return s.defense.filter(d => d.rushing && d.role !== 'dl').map(d => Math.hypot(d.vx, d.vz));
+  };
+  assert.ok(moving('pro', 0.26).every(v => v > 0.3) && moving('allpro', 0.16).every(v => v > 0.1), 'timed blitzers are moving');
+  assert.ok(moving('rookie', 0.26).every(v => v === 0), 'a Rookie blitzer waits for the ball');
+});
+
+test('once the ball is thrown the rushers come off their blocks and run to it', () => {
+  let reps = 0, turned = 0;
+  for (let seed = 1; seed <= 10; seed++) {
+    const s = fourMan(rep(seed));
+    s.snap();
+    run(s, 1.8);
+    if (s.phase !== 'live' || !s.rushers().some(d => d.lock) || !s.requestThrow('X', 'lob')) continue;
+    while (s.phase === 'live') s.step(STEP);
+    const t0 = s.time;
+    while (s.phase === 'air' && s.time < t0 + 0.6) s.step(STEP);
+    if (s.phase !== 'air') continue;
+    reps++;
+    // Off their blocks within their reaction time, every one of them heading
+    // downfield after the ball instead of at the passer.
+    assert.ok(s.rushers().every(d => !d.lock && !d.engaged), `${seed}: nobody still blocked ${s.pass.elapsed.toFixed(2)} s after the throw`);
+    if (s.rushers().every(d => d.want.z > 2)) turned++;
+  }
+  assert.ok(reps >= 6 && turned >= reps - 1, `the rush turned to the ball in ${turned}/${reps}`);
 });
 
 test('a twist crosses the line and the protection exchanges men', () => {
@@ -218,10 +318,13 @@ test('a twist crosses the line and the protection exchanges men', () => {
   assert.ok(exchanged >= twists * 0.6, `exchanged in ${exchanged}/${twists}`);
 });
 
-test('against four rushers at Pro the pocket holds about 2.5-3 s, with a real spread', () => {
+// First rusher within 1.5 yd of a quarterback who holds the ball, four man
+// rush, 32 seeds. Nobody blocked at all gets there in about 2.1-2.3 s (the
+// linemen's bodies), so every level stays above that floor.
+function firstPressure(difficulty) {
   const first = [];
   for (let seed = 1; seed <= 32; seed++) {
-    const s = fourMan(rep(seed, { stunt: undefined })), qb = s.byId.QB;
+    const s = fourMan(rep(seed, { stunt: undefined, difficulty })), qb = s.byId.QB;
     s.snap();
     let t = null;
     while (s.phase === 'live' && t === null && s.time < 6) {
@@ -230,9 +333,48 @@ test('against four rushers at Pro the pocket holds about 2.5-3 s, with a real sp
     }
     first.push(t ?? 6);
   }
-  const med = quantile(first, 0.5), lo = quantile(first, 0.1), hi = quantile(first, 0.9);
-  assert.ok(med > 2.5 && med < 3.3, `median first pressure ${med.toFixed(2)} s`);
-  assert.ok(lo > 1.8 && hi - lo > 0.8, `p10 ${lo.toFixed(2)} s, p90 ${hi.toFixed(2)} s`);
+  return { med: quantile(first, 0.5), lo: quantile(first, 0.1), hi: quantile(first, 0.9) };
+}
+
+test('against four rushers the pocket holds about 3.2 s at Rookie, 2.6 at Pro and 2.4 at All-pro, with a real spread', () => {
+  // The rush plan (DISCIPLINE.plan) and finishing (bend) change by level;
+  // the bodies do not.
+  const rookie = firstPressure('rookie'), pro = firstPressure('pro'), allpro = firstPressure('allpro');
+  const f = r => `${r.med.toFixed(2)} [${r.lo.toFixed(2)}-${r.hi.toFixed(2)}]`;
+  assert.ok(rookie.med > 2.9 && rookie.med < 3.6, 'Rookie ' + f(rookie));
+  assert.ok(pro.med > 2.45 && pro.med < 2.9, 'Pro ' + f(pro));
+  assert.ok(allpro.med > 2.25 && allpro.med < 2.65, 'All-pro ' + f(allpro));
+  assert.ok(rookie.med > pro.med + 0.35 && pro.med > allpro.med + 0.1, `ordered: ${f(rookie)}, ${f(pro)}, ${f(allpro)}`);
+  for (const r of [rookie, pro, allpro]) assert.ok(r.lo > 1.8 && r.hi - r.lo > 0.6, 'spread ' + f(r));
+  const tops = level => rep(1, { difficulty: level }).defense.map(d => d.top).join();
+  assert.equal(tops('rookie'), tops('allpro'), 'the same bodies at every level');
+});
+
+test('a rusher who beats his man bends at the quarterback; a Rookie runs on up the arc', () => {
+  // A locked end well upfield of the quarterback wins with a speed rush (the
+  // win forced at 1.2 s). His rip heads at the quarterback, slipped outside
+  // by the move's slip (about 19 degrees) at All-pro; at Rookie it carries
+  // on up his arc, wider of him.
+  const rips = difficulty => {
+    const out = [];
+    for (let seed = 1; seed <= 12; seed++) {
+      const s = fourMan(rep(seed, { difficulty })), qb = s.byId.QB;
+      s.snap();
+      run(s, 1.2);
+      const d = s.rushers().find(q => q.lock && s.laneOf(q).edge && q.z > qb.z + 2.5);
+      if (!d || s.phase !== 'live') continue;
+      d.rushMove = 'speed'; d.winSide = s.laneOf(d).side; d.have = d.need;
+      s.step(STEP);
+      if (d.wonAt !== s.time || !d.juke) continue;
+      const v = d.juke.to, to = gap(d, qb), speed = Math.hypot(v.x, v.z);
+      out.push(Math.acos(clampUnit((v.x * (qb.x - d.x) + v.z * (qb.z - d.z)) / (speed * to))) * 180 / Math.PI);
+    }
+    assert.ok(out.length >= 6, `${difficulty}: forced wins ${out.length}`);
+    return mean(out);
+  };
+  const rookie = rips('rookie'), allpro = rips('allpro');
+  assert.ok(allpro < 22, `All-pro winners rip within ${allpro.toFixed(0)} degrees of him`);
+  assert.ok(rookie > allpro + 20, `Rookie ${rookie.toFixed(0)} vs All-pro ${allpro.toFixed(0)} degrees`);
 });
 
 test('play action holds the defensive line for a beat', () => {
