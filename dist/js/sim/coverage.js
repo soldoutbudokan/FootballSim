@@ -23,6 +23,9 @@ const ROTATE = { window: 1.2, side: 1, back: 0.9 };
 const COVER = {
   window: 8.5, stick: 2,   // an underneath man matches within `window` yd across his landmark; his own man gets `stick` yd more room and is `stick` yd cheaper
   flat: 3, flatWide: 11,   // a curl/flat man takes a receiver in his flat (`flatWide` yd or more off the ball, short) first: `flat` yd cheaper
+  flatLook: 0.6,           // ... reading a release by where it will be in `flatLook` s, from his first step
+  back: 8,                 // the hole player drops no deeper than this while the back is still a checkdown in front of him
+  slant: 6, under: 8, hash: 7, inward: 2,  // a hook or curl man outside the hash takes #1 breaking inside (a slant, a dig) `slant` yd cheaper; a flat man a short release coming inside him (faster than `inward` yd/s) `under` yd dearer
   outward: 1.5, declare: 1, settled: 3,  // a flat route: moving out faster than `outward` yd/s and than upfield, or under `settled` yd/s after `declare` s
   wall: 4, wallTo: 14,     // a curl/flat man walls #2's vertical to `wallTo` yd: `wall` yd cheaper
   carryAt: 7,              // a matched receiver going upfield past this depth is carried like man coverage
@@ -54,24 +57,29 @@ const SETTLE = { post: 20, half: 18, third: 17 };
 // is short of it: nobody is behind him. A man on top runs with the receiver
 // once he is within `run` yd of the defender (of the middle's landmark).
 const OVER = { base: 0.9, speed: 0.3, from: 12, to: 20, level: 0.3, hip: 0.8, middle: 2, keep: 1, keepSpeed: 0.1, run: 8 };
-// Quarters (Cover 4 and the strong side of Cover 6). A corner carries #1 on
-// anything vertical past `carry` yd (keeping him while he stays past
-// `settle`); otherwise he squats over #1, keeping `squat` yd of cushion
-// (more the faster #1 comes) and never shallower than `floor`. A safety reads #2: while #2 is still short and
-// coming, he sits `read` yd over him (never shallower than `readFloor`);
-// vertical, he carries him; out or under, he robs the window on his side
-// (#1's curl or in-cut first, `first` yd cheaper, or a crosser coming into
-// it; nearest to `robX`, `robZ`) from inside, `rob` yd deeper than his man
-// between `robFloor` and `robTop` yd.
-const QUARTERS = { settled: 1.2, carry: 8, settle: 8, squat: 2.2, floor: 7, outside: 1.2, rob: 1.5, robFloor: 6, robTop: 18, inside: 2, robX: 9, robZ: 12, first: 3, read: 5, readFloor: 9 };
+// Quarters (Cover 4 and the strong side of Cover 6). A corner opens and
+// carries #1 once he is past `bail` yd and running upfield faster than
+// `bailSpeed` yd/s, or on anything vertical past `carry` yd (keeping him
+// while he stays past `settle`); otherwise he squats over #1, keeping
+// `squat` yd of cushion (more the faster #1 comes) and never shallower than
+// `floor`. A safety reads #2: while #2 is still short and coming, he sits
+// `read` yd over him (never shallower than `readFloor`); vertical, he
+// carries him, until #2 flattens (moving across more than `flatten` times
+// as fast as upfield); out or under, he robs the window on his side (#1's
+// curl or in-cut first, `first` yd cheaper, or a crosser coming into it;
+// nearest to `robX`, `robZ`) from inside, `rob` yd deeper than his man
+// between `robFloor` and `robTop` yd, and over the top of #1's post or
+// dig however deep it goes (he caps #1 for the corner).
+const QUARTERS = { settled: 1.2, carry: 8, settle: 8, bail: 5, bailSpeed: 5, flatten: 2, squat: 2.2, floor: 7, outside: 1.2, rob: 1.5, robFloor: 6, robTop: 18, inside: 2, robX: 9, robZ: 12, first: 3, read: 5, readFloor: 9 };
 // Man technique. Press: mirror at the line for `press` s, then trail. Trail
 // (with help over the top): a step (`trail` yd) behind on a vertical, `lev`
 // yd to the leverage side; otherwise squeezed `under` yd deeper. Off: start
 // `cushion` yd deep (from the call) and give it up at `close` yd per yard
-// the receiver gains, never closer than `top`. With no help he stays on top;
+// the receiver gains, never closer than `top`, over where the receiver will
+// be `ahead` s on. With no help he stays on top;
 // beaten for the top on a vertical, he sits in the hip pocket, `pocket` yd
 // off him toward the quarterback.
-const MAN = { hip: 0.5, press: 0.45, lev: 0.6, trail: 0.5, under: 0.6, close: 0.7, top: 1.2, jamRange: 1.3, jamUntil: 0.9, pocket: 0.8 };
+const MAN = { hip: 0.5, press: 0.45, lev: 0.6, trail: 0.5, under: 0.6, close: 0.7, top: 1.2, ahead: 0.13, jamRange: 1.3, jamUntil: 0.9, pocket: 0.8 };
 // The plaster rule: once the quarterback scrambles, or holds the ball past
 // `hold` s, every zone defender takes the nearest receiver man to man
 // (keeping his man unless another is `keep` yd nearer) and nobody leaves
@@ -94,7 +102,12 @@ const BANJO = { at: 0.55, look: 0.5 };
 const LANE = { zone: 0.5, anchor: 0.08, man: 0.25 };
 // Within `near` yd short of the goal line (z = `line`) an underneath or man
 // defender sits `side` yd on the goal-line side of his receiver.
-const GOAL = { line: 110, near: 5, side: 0.7 };
+const GOAL = { line: 110, near: 5, side: 0.7, end: 119.5 };
+// Inside the 20 (`zone` yd from the goal line) the end line is everybody's
+// deep help: a deep man on top of a receiver, or helping on one, plays him
+// in phase, `over` yd over him, instead of keeping a cushion or his
+// landmark depth.
+const RED = { zone: 20, over: 1 };
 // Seeing the ball: a man defender sees it within his field of view (the
 // cosine of the angle off his facing above `man`); a zone defender, whose
 // eyes are on the quarterback, sees it over either shoulder too, even
@@ -231,6 +244,10 @@ export const coverage = {
       else if (a.kind === 'under' || a.kind === 'rat') unders.push({ d, role: a.kind === 'rat' ? 'rat' : a.role, side: Math.sign(a.x), x: a.x * flip, z: Math.min(115, spot + a.depth), depth: a.depth, job: null });
       else rest.push({ d, job: { kind: a.kind } });
     }
+    // The hole player sees the back: while the back is still a checkdown (in
+    // the backfield or short), the hole and the pole, with nobody to match,
+    // drop no deeper than COVER.back.
+    const checkdown = lay.backs.some(id => seen[id] && seen[id].z < spot + 4);
     // A receiver is carried (by an underneath man last step, or manned) when
     // his man is within `close` yd of him.
     const near = (d, id) => dist(d, seen[id]) < COVER.close;
@@ -245,10 +262,11 @@ export const coverage = {
     for (const q of quarters) {
       const [one, two] = (lay.nums[q.side] || []).filter(id => seen[id]);
       const kept = id => q.d.job?.primary === id;
-      const deepNow = id => { const r = seen[id]; return r.z > spot + QUARTERS.carry && r.vz > 1 || (kept(id) && r.z > spot + QUARTERS.settle && r.vz > -1); };
+      const deepNow = id => { const r = seen[id]; return r.z > spot + QUARTERS.carry && r.vz > 1 || (kept(id) && r.z > spot + QUARTERS.settle && r.vz > -1 && Math.abs(r.vx) < QUARTERS.flatten * Math.max(0, r.vz) + 1); };
       const out = q.side * flip;
       if (q.role === 'corner') {
-        if (one && !owned.has(one) && deepNow(one)) top(q, one);
+        const bails = one && seen[one].z > spot + QUARTERS.bail && seen[one].vz > QUARTERS.bailSpeed && upfield(seen[one]);
+        if (one && !owned.has(one) && (deepNow(one) || bails)) top(q, one);
         else q.job = one ? { kind: 'squat', id: one, out } : { kind: 'spot', x: q.side * 16 * flip, z: spot + 10 };
         continue;
       }
@@ -272,7 +290,8 @@ export const coverage = {
         if (cost < best) { best = cost; rob = id; }
       }
       rob ||= one;
-      q.job = rob ? { kind: 'rob', id: rob, out: Math.sign(seen[rob].x - this.pocketX()) || out } : { kind: 'spot', x: q.side * 8 * flip, z: spot + 12 };
+      const cap = rob === one && seen[one].z > spot + QUARTERS.carry && seen[one].vz > 1;
+      q.job = rob ? { kind: 'rob', id: rob, cap, out: Math.sign(seen[rob].x - this.pocketX()) || out } : { kind: 'spot', x: q.side * 8 * flip, z: spot + 12 };
     }
 
     // Deep zones: each owns the verticals between its `lo` and `hi` (play
@@ -294,7 +313,10 @@ export const coverage = {
     // How loose a receiver is: the nearest coverage defender to him but one.
     const coverers = this.defense.filter(d => !d.rushing && !d.engaged && d.action !== 'stumble');
     const looseness = (id, but) => { let g = Infinity; for (const q of coverers) if (q !== but) g = Math.min(g, dist(q, seen[id])); return g; };
-    for (const z of deeps) {
+    // (Run again below when an underneath man hands a vertical off this step,
+    // so the deep man takes him on the same step.)
+    const deepJobs = () => { for (const z of deeps) {
+      z.job = null;
       const prev = z.d.job?.threats || [];
       // The most dangerous first: the deepest and fastest, and for a deep
       // middle the nearest the middle of the field (a seam before a go).
@@ -310,7 +332,8 @@ export const coverage = {
         z.job = { kind: 'split', a, b, w, primary: w > 0.75 ? a : w < 0.25 ? b : null, floor: z.floor, middle: z.middle };
       }
       if (z.job) z.job.threats = threats;
-    }
+    } };
+    deepJobs();
     // A deep man has a receiver when he is assigned to him alone and on top
     // of him: deeper by `top` to `over` yd and within `topWidth` across.
     const onTop = (d, r, width) => d.z > r.z + COVER.top && d.z < r.z + COVER.over && Math.abs(d.x - r.x) < width;
@@ -328,15 +351,29 @@ export const coverage = {
     // than upfield) or settled there once the routes have declared; #1
     // releasing from his split is not a flat route.
     const flatRoute = r => r.vx * Math.sign(r.x) > Math.max(COVER.outward, r.vz) || (this.time > COVER.declare && Math.hypot(r.vx, r.vz) < COVER.settled);
-    const inFlat = (u, r) => Math.sign(r.x) === Math.sign(u.x) && Math.abs(r.x) > COVER.flatWide && r.z < spot + 6 && r.z > spot - 2 && flatRoute(r);
+    // (`look` s ahead: a curl/flat man's first step reads where the release is headed.)
+    const inFlat = (u, r, look = 0) => Math.sign(r.x) === Math.sign(u.x) && Math.abs(r.x + r.vx * look) > COVER.flatWide && r.z < spot + 6 && r.z > spot - 2 && flatRoute(r);
     // A curl/flat or seam/flat man reads #2 on his side: while #2 is going
     // upfield short of `wallTo` yd he walls the seam (`wall` yd cheaper),
     // unless a receiver shows in his flat.
     const walls = (u, id, r) => flatRole(u) && u.side && lay.nums[u.side]?.[1] === id && upfield(r) && r.z < spot + COVER.wallTo
       && !ids.some(k => k !== id && inFlat(u, seen[k]));
-    // He leaves #1's vertical stem to the deep third outside him.
+    // He leaves #1's vertical stem to the deep third outside him, and a short
+    // release coming inside him (faster than `inward` yd/s, a little faster
+    // still to give up one he has) to the hooks, `under` yd dearer.
     const leaves = (u, id, r) => flatRole(u) && u.side && lay.nums[u.side]?.[0] === id && upfield(r);
+    const inside = (u, id, r) => flatRole(u) && r.z < spot + 6 && r.vx * Math.sign(u.x) < -COVER.inward - (u.d.match === id ? 1 : 0);
+    // A hook or curl man passes a release to the flat on to the flat defender
+    // on that side and, dropping outside the hash (`hash` yd or wider), walls
+    // #1 coming inside (a slant, a dig) instead.
+    const hookRole = u => u.role === 'hook' || u.role === 'curl';
+    // (Once he has #1 he keeps walling him until #1 turns upfield; he never
+    // carries #1's vertical, the corner's and the deep half's.)
+    const passes = (u, r) => hookRole(u) && unders.some(f => flatRole(f) && !f.d.carrying && inFlat(f, r, COVER.flatLook));
+    const walling = (u, id) => hookRole(u) && Math.abs(u.x) >= COVER.hash && lay.nums[u.side]?.[0] === id;
+    const wallsIn = (u, id, r) => walling(u, id) && r.z < spot + 12 && (u.d.match === id && !upfield(r) || r.vx * Math.sign(u.x) < -COVER.outward);
     const taken = new Set();
+    let handed = false;
     for (const u of unders) {
       const d = u.d, r = seen[d.match];
       if (d.handed && (!seen[d.handed] || seen[d.handed].z < spot + COVER.carryAt - 1)) d.handed = null;
@@ -346,10 +383,11 @@ export const coverage = {
       // route shows and a deep man has #1 in his zone; a curl/flat man waits
       // until the deep man is on top.
       const flat = flatRole(u) && r.z > spot + 8 && (u.role === 'flat' ? deepOwns(d.match) : deepHas(d.match)) && ids.some(id => id !== d.match && inFlat(u, seen[id]));
-      if (deepHas(d.match) || r.z > spot + carryLimit(u) || flat) { d.handed = d.match; d.match = null; d.carrying = false; }
+      if (deepHas(d.match) || r.z > spot + carryLimit(u) || flat) { d.handed = d.match; d.match = null; d.carrying = false; handed = true; }
       else if (!upfield(r) && r.z < spot + COVER.carryAt) d.carrying = false;
       else taken.add(d.match);
     }
+    if (handed) deepJobs();
     const pairs = [];
     for (const u of unders) {
       const d = u.d;
@@ -358,11 +396,14 @@ export const coverage = {
       for (const id of ids) {
         // A flat defender's window runs out to the sideline on his side.
         const r = seen[id], mine = d.match === id, wide = flatRole(u) && Math.sign(r.x) === Math.sign(u.x) && Math.abs(r.x) > Math.abs(u.x);
-        if (taken.has(id) || id === d.handed || r.z < spot - 2 || (!wide && Math.abs(r.x - u.x) > window + (mine ? COVER.stick : 0))) continue;
+        if (taken.has(id) || id === d.handed || r.z < spot - 2 || (!wide && !wallsIn(u, id, r) && Math.abs(r.x - u.x) > window + (mine ? COVER.stick : 0))) continue;
+        // A back still checking for a rusher behind the line is nobody's yet.
+        if (r.z < spot && lay.backs.includes(id) && !this.byId[id].released) continue;
         if (!mine && (r.z > spot + Math.min(u.role === 'rat' ? RAT.deep : skill.carry, 18) || (r.z > spot + COVER.carryAt && deepHas(id)))) continue;
         // A curl/flat defender takes the flat first; the hooks wall the
         // inside; a robber jumps crossers; the pole runner takes the seam.
-        let cost = Math.hypot(r.x - u.x, r.z - u.z) - (mine ? COVER.stick : 0) - (flatRole(u) && inFlat(u, r) ? COVER.flat : 0) - (walls(u, id, r) ? COVER.wall : 0) + (leaves(u, id, r) ? COVER.wall : 0);
+        let cost = Math.hypot(r.x - u.x, r.z - u.z) - (mine ? COVER.stick : 0) - (flatRole(u) && inFlat(u, r, COVER.flatLook) ? COVER.flat : 0) - (walls(u, id, r) ? COVER.wall : 0) - (wallsIn(u, id, r) ? COVER.slant : 0)
+          + (leaves(u, id, r) ? COVER.wall : 0) + (inside(u, id, r) ? COVER.under : 0) + (passes(u, r) ? COVER.flat : 0);
         if (u.role === 'rat' && Math.abs(r.vx) > Math.abs(r.vz)) cost -= RAT.crosser;
         if (u.role === 'pole' && upfield(r) && Math.abs(px(r) - this.pocketX() * flip) < POLE.width) cost -= POLE.cost;
         pairs.push({ u, id, cost });
@@ -375,7 +416,7 @@ export const coverage = {
       const d = u.d;
       if (!d.carrying && !matched.has(u)) d.match = null;
       const r = seen[d.match];
-      if (r && !d.carrying && upfield(r) && r.z > spot + COVER.carryAt) d.carrying = true;
+      if (r && !d.carrying && upfield(r) && r.z > spot + COVER.carryAt && !walling(u, d.match)) d.carrying = true;
       if (d.match) u.job = { kind: d.carrying ? 'man' : 'zone', id: d.match, tech: 'top', x: u.x, z: u.z, deep: u.role === 'pole' ? POLE.depth : 16 };
     }
 
@@ -405,7 +446,8 @@ export const coverage = {
         let near = COVER.reach;
         for (const k of ids) { const r = seen[k], g = dist(u.d, r); if (r.z > spot + LEAN.from && upfield(r) && g < near) { near = g; id = k; } }
       }
-      u.job = id ? { kind: 'lean', id, w: skill.help, x: u.x, z: u.z, lo: spot + 2, hi: spot + 16 } : { kind: 'spot', x: u.x, z: u.z };
+      const z = checkdown && (u.role === 'hole' || u.role === 'pole') ? Math.min(u.z, spot + COVER.back) : u.z;
+      u.job = id ? { kind: 'lean', id, w: skill.help, x: u.x, z, lo: spot + 2, hi: spot + 16 } : { kind: 'spot', x: u.x, z };
     }
     for (const z of deeps) {
       if (z.job) continue;
@@ -440,11 +482,11 @@ export const coverage = {
       if (seen[id]) {
         const sx = lay.at[id]?.x || 0, out = (sx ? Math.sign(sx) : Math.sign(m.d.start.x * flip) || 1) * flip;
         const pressing = a.press && this.time < GET_OFF[m.d.role] + MAN.press;
-        // Corners press and trail, or play off; linebackers and safeties play
-        // in phase from where they line up, or with no help over the top
-        // keep the cushion they line up with.
+        // With help over the top, corners press and trail or play off, and
+        // linebackers and safeties play in phase from where they line up;
+        // with none, everybody stays on top of his man.
         const corner = m.d.role === 'cb';
-        const tech = pressing ? 'press' : !corner ? (a.help ? 'trail' : 'off') : a.help ? (a.press ? 'trail' : 'off') : a.press ? 'top' : 'off';
+        const tech = pressing ? 'press' : !a.help ? 'top' : !corner ? 'trail' : a.press ? 'trail' : 'off';
         m.job = { kind: 'man', id, tech, lev: a.lev, out, cushion: corner ? a.cushion : Math.min(a.cushion, m.d.start.z - spot) };
         // A pressed receiver: the corner gets his hands on him once, at the line.
         const r = this.byId[id];
@@ -523,8 +565,11 @@ export const coverage = {
         const lane = this.laneOffset(r, MAN.pocket);
         target = { x: r.x + lane.x + r.vx * lead, z: r.z + lane.z + r.vz * lead };
       } else if (job.tech === 'off') {
+        // The cushion is kept over where he will be `ahead` s on, the same
+        // at every level: leading by the difficulty's routeLead here would
+        // give more ground the better he reads.
         const cushion = Math.max(MAN.top, job.cushion - MAN.close * Math.max(0, r.z - spot));
-        target = { x: r.x + lev * MAN.lev + r.vx * lead, z: r.z + cushion + r.vz * lead };
+        target = { x: r.x + lev * MAN.lev + r.vx * lead, z: r.z + cushion + r.vz * MAN.ahead };
       } else target = { x: r.x + r.vx * lead, z: r.z + MAN.top + r.vz * lead };
       if (job.tech !== 'press') this.goalSide(r, target);
       return { want: trackWant(d, target, v, cap), threat: r };
@@ -578,7 +623,7 @@ export const coverage = {
       return { want: trackWant(d, target, { x: r.vx * 0.5, z: r.z + 6 > d.z ? ahead : 0 }, cap, 1.6), threat: r };
     }
     if (job.kind === 'rob') {
-      const z = r.z + QUARTERS.rob, lo = spot + QUARTERS.robFloor, hi = spot + QUARTERS.robTop;
+      const z = r.z + QUARTERS.rob, lo = spot + QUARTERS.robFloor, hi = job.cap ? GOAL.end : spot + QUARTERS.robTop;
       const target = { x: r.x - job.out * QUARTERS.inside, z: clamp(z, lo, hi) };
       return { want: trackWant(d, target, { x: r.vx * 0.85, z: z > lo && z < hi ? r.vz : 0 }, cap, 2), threat: r };
     }
@@ -587,13 +632,14 @@ export const coverage = {
       // man stays deeper than him.
       const ax = r.x + r.vx * 0.3, az = r.z + r.vz * 0.3;
       let z = clamp(job.z + (az - job.z) * job.w, job.lo, job.hi), vz = r.vz * job.w;
-      if (job.over) z = Math.max(z, r.z + 2);
+      const red = GOAL.line - spot <= RED.zone;
+      if (job.over) z = Math.max(z, r.z + (red ? RED.over : 2));
       // A deep man comes down only on a receiver who has declared short: one
       // still in his stem (going upfield) could be a vertical, so the middle
       // of the field keeps its landmark depth and an outside man stays on
       // top of him (deepOver), running with him; both shade only across.
       if (job.floor && r.vz > LEAN.stem) {
-        if (job.keep) z = Math.max(z, job.keep);
+        if (job.keep && !red) z = Math.max(z, job.keep);
         else { z = this.deepOver(d, job, r).z; vz = r.vz; }
       }
       // A free underneath man helps on a vertical by sinking under it on the
@@ -613,9 +659,10 @@ export const coverage = {
   // closing to in phase (k, 0 to 1) an outside man is.
   deepOver(d, job, r) {
     const spot = this.spot, v = Math.max(0, r.vz);
-    if (job.middle) return { z: Math.max(job.z, r.z + OVER.keep + v * OVER.keepSpeed), k: 0 };
+    if (GOAL.line - spot <= RED.zone) return { z: Math.min(GOAL.end, r.z + RED.over), k: 1 };
+    if (job.middle) return { z: Math.min(GOAL.end, Math.max(job.z, r.z + OVER.keep + v * OVER.keepSpeed)), k: 0 };
     const k = clamp((r.z - spot - OVER.from) / (OVER.to - OVER.from), 0, 1);
-    return { z: Math.max(spot + (job.floor ?? COVER.floor), r.z + (OVER.base + v * OVER.speed) * (1 - k) + OVER.level * k), k };
+    return { z: Math.min(GOAL.end, Math.max(spot + (job.floor ?? COVER.floor), r.z + (OVER.base + v * OVER.speed) * (1 - k) + OVER.level * k)), k };
   },
 
   // A receiver as a coverage man reads him: where he was `latency` s ago,

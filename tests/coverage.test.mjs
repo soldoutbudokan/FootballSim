@@ -54,18 +54,20 @@ test('an underneath defender carries a seam until the deep middle takes it at Al
   const released = { rookie: [], pro: [] };
   for (const difficulty of ['rookie', 'pro', 'allpro']) for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
     const s = rep('verts', 'cover3', difficulty, seed, true), carrying = new Map();
-    let carried = false;
+    let carried = false, deepBefore = false;
     run(s, 3.6, () => {
       const y = s.byId.Y;
-      // Where a carrier gives the seam up to nobody: no other carrier and
-      // no deep man on it.
-      const nobody = !s.defense.some(q => q.job?.primary === 'Y' || (q.carrying && q.match === 'Y'));
+      // Where a carrier gives the seam up to nobody: no other carrier, and no
+      // deep man had it before he let go (a deep man takes a handed-off seam
+      // on the same step).
       for (const d of s.defense) {
         const now = d.carrying && d.match === 'Y';
         carried ||= now;
-        if (carrying.get(d.id) && !now && nobody && released[difficulty]) released[difficulty].push(y.z - s.spot);
+        const others = s.defense.some(q => q !== d && q.carrying && q.match === 'Y');
+        if (carrying.get(d.id) && !now && !deepBefore && !others && released[difficulty]) released[difficulty].push(y.z - s.spot);
         carrying.set(d.id, now);
       }
+      deepBefore = s.defense.some(q => q.job?.primary === 'Y');
       // All-pro: nobody releases him to nobody.
       if (difficulty === 'allpro' && y.z > s.spot + 9) assert.ok(s.defense.some(d => d.match === 'Y' || d.job?.primary === 'Y'), `${seed} ${s.time.toFixed(2)}: the seam is nobody's`);
     });
@@ -155,8 +157,9 @@ function openness(coverage, difficulty, seeds = [1, 2]) {
 test('zone coverage tightens with difficulty: Rookie leaves more open men than Pro, Pro more than All-pro', () => {
   // Cover 2's levels sit closer together (about 10 %, 7 % and 6 % open over
   // seeds 1-6 since Rookie reads receivers at 0.30 s instead of 0.40), so it
-  // samples more seeds against a smaller margin. Cover 3 spreads about 12 points.
-  for (const [coverage, seeds, margin] of [['cover3', [1, 2], 0.1], ['cover2', [1, 2, 3, 4, 5, 6], 0.035]]) {
+  // samples more seeds against a smaller margin. Cover 3 spreads about 9-10
+  // points (its hooks now pass flat releases on and wall #1 at every level).
+  for (const [coverage, seeds, margin] of [['cover3', [1, 2], 0.08], ['cover2', [1, 2, 3, 4, 5, 6], 0.035]]) {
     const [rookie, pro, allpro] = ['rookie', 'pro', 'allpro'].map(k => openness(coverage, k, seeds));
     const shares = [rookie, pro, allpro].map(v => (100 * v).toFixed(1) + '%').join(' > ');
     assert.ok(rookie > pro && pro > allpro, coverage + ': ' + shares);

@@ -98,7 +98,7 @@ test('predict() follows the live receiver through a route conversion', () => {
   // and a post that turns skinny after the prediction. (A rep with body
   // contact, which the ghost cannot foresee, is left out.)
   let checked = 0;
-  for (const [offense, coverage, id, from, ahead] of [['verts', 'cover3', 'Y', 1.0, 1.5], ['verts', 'cover3', 'A', 1.0, 1.5], ['verts', 'cover2', 'Y', 1.0, 1.5], ['verts', 'cover2', 'A', 1.0, 1.5], ['mills', 'cover3', 'B', 1.4, 1.5]]) for (let seed = 1; seed <= 4; seed++) {
+  for (const [offense, coverage, id, from, ahead] of [['verts', 'cover3', 'Y', 1.0, 1.5], ['verts', 'cover3', 'A', 1.0, 1.5], ['verts', 'cover2', 'Y', 1.0, 1.5], ['verts', 'cover2', 'A', 1.0, 1.5], ['mills', 'cover3', 'B', 1.4, 1.5]]) for (let seed = 1; seed <= 6; seed++) {
     const s = run(rep(offense, coverage, seed), from), p = s.byId[id];
     if (s.phase !== 'live' || p.converted || p.mode) continue;
     const before = p.route.slice(), ghost = s.predict(p, ahead), random = s.random();

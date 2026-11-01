@@ -461,12 +461,29 @@ const THROW = {
   set: 0.18, far: { bullet: 0.035, touch: 0.045, lob: 0.06 }, crisp: 5,
   toward: 0.6, across: 1.6, away: 2.8, settle: 0.2, reset: 0.6, pressure: 2.8, near: 3.3, close: 0.6,
 };
+// Placement. A quarterback puts the ball where only his man can get it. He
+// reads each defender's leverage on the receiver: where the man is from him
+// now, carried on at his own speed against the receiver's run to the catch
+// for up to `carry` s, and able to close `adjust` of his top speed more once
+// he reads the ball, `react` s after the release. A man who can get within
+// `near` yd of the catch (fully within `tight`) pushes the ball away from
+// his side. The catch point moves up to `shift` yd away from the defenders,
+// square to the throw or back toward the quarterback (the back shoulder); a
+// push beyond the receiver, who cannot outrun his route, turns to the side
+// it already leans, or to the outside. The ball comes in `hands` yd off his
+// body that way, at his far shoulder, and the miss leans the same way: the
+// part of the error toward the defenders folds back. None of this on throws
+// shorter than `from` yd, all of it from `full` yd. The ball arrives `catch`
+// yd high by style: a lob drops in over the receiver's shoulder, above a man
+// trailing him.
+const PLACE = { carry: 1, adjust: 0.35, react: 0.5, near: 2, tight: 0.6, shift: 1, hands: 0.45, from: 15, full: 25, catch: { bullet: 1.6, touch: 1.65, lob: 1.8 } };
+
 // Contested catches (catchBall): a defender within `near` yd (close enough
 // to get a hand in or hit the receiver as the ball arrives) adds to the drop
 // chance, up to `front` when he is between the receiver and the ball and
 // `trail` when he trails behind (the receiver shields him), in full within
 // `tight` yd. A bullet from inside `close` yd adds `bullet`.
-const CATCH = { base: 0.03, near: 1.8, tight: 0.6, front: 0.42, trail: 0.25, bullet: 0.08, close: 8 };
+const CATCH = { base: 0.03, near: 1.8, tight: 0.6, front: 0.5, trail: 0.3, bullet: 0.08, close: 8 };
 
 // ---------------------------------------------------------------------------
 export class Simulation {
@@ -633,18 +650,54 @@ export class Simulation {
     const spread = THROW.set + length + pace / 7 * per7 + pressure * THROW.pressure;
     const long = (this.random() - 0.5) * spread, wide = (this.random() - 0.5) * spread;
     const error = { x: ux * long + uz * wide, z: uz * long - ux * wide };
-    target.x += intent.lead.x * 2.5 + error.x;
-    target.z += intent.lead.z * 2.5 + error.z;
+    // Placement (PLACE): away from the defenders, the miss folded the same way.
+    const place = this.placement(qb, p, target, duration, ux, uz), into = error.x * place.ux + error.z * place.uz;
+    if (into < 0) { error.x -= 2 * into * place.k * place.ux; error.z -= 2 * into * place.k * place.uz; }
+    target.x += intent.lead.x * 2.5 + error.x + place.ux * PLACE.shift * place.k;
+    target.z += intent.lead.z * 2.5 + error.z + place.uz * PLACE.shift * place.k;
     target.x = clamp(target.x, -29, 29); target.z = clamp(target.z, 0, 119);
     this.qbFacing = null;
-    // The ball leaves the throwing (right) hand, a little ahead of the body.
-    const fx = Math.sin(qb.facing), fz = Math.cos(qb.facing);
+    // The ball leaves the throwing (right) hand, a little ahead of the body,
+    // and comes in at the receiver's far shoulder.
+    const fx = Math.sin(qb.facing), fz = Math.cos(qb.facing), hands = PLACE.hands * place.k;
     const from = { x: qb.x + fz * 0.25 + fx * 0.35, y: 1.85, z: qb.z - fx * 0.25 + fz * 0.35 };
-    const to = { ...target, y: 1.6 }, v = flightVelocity(from, to, duration);
+    const to = { x: clamp(target.x + place.ux * hands, -29.5, 29.5), y: PLACE.catch[intent.style], z: clamp(target.z + place.uz * hands, 0, 119.5) };
+    const v = flightVelocity(from, to, duration);
     this.ball = { ...from, vx: v.x, vy: v.y, vz: v.z };
-    this.pass = { target: to, receiver: p.id, duration, elapsed: 0, style: intent.style, pressure, spread, error, distance: Math.hypot(to.x - from.x, to.z - from.z), attempted: new Set() };
+    this.pass = { target: { ...target, y: to.y }, receiver: p.id, duration, elapsed: 0, style: intent.style, pressure, spread, error, place, distance: Math.hypot(to.x - from.x, to.z - from.z), attempted: new Set() };
     this.threw = true; this.stats.attempts++; this.phase = 'air'; this.carrier = null; this.throwIntent = null;
     this.events.push('throw');
+  }
+
+  // Where to put the ball against the defenders around the catch (PLACE):
+  // the unit direction away from them (`ux`, `uz`) and how hard they push
+  // it there (`k`, 0 to 1), for a throw to `p` meeting him at `target`
+  // after `duration` s; (ux, uz) is the throw's direction.
+  placement(qb, p, target, duration, ux, uz) {
+    const len = clamp((dist(qb, target) - PLACE.from) / (PLACE.full - PLACE.from), 0, 1), carry = Math.min(duration, PLACE.carry);
+    // The receiver's run to the catch, on average.
+    const rx = (target.x - p.x) / duration, rz = (target.z - p.z) / duration;
+    let vx = 0, vz = 0;
+    if (len > 0) for (const d of this.defense) {
+      // From his spot at the catch to the catch point.
+      let gx = p.x - d.x + (rx - d.vx) * carry, gz = p.z - d.z + (rz - d.vz) * carry, g = Math.hypot(gx, gz);
+      const gap = Math.max(0, g - PLACE.adjust * d.top * Math.max(0, duration - PLACE.react));
+      const w = clamp((PLACE.near - gap) / (PLACE.near - PLACE.tight), 0, 1);
+      if (!w) continue;
+      // Carried on right onto the spot, he comes from where he is now.
+      if (g < 0.3) { gx = p.x - d.x; gz = p.z - d.z; g = Math.hypot(gx, gz); }
+      if (g > 1e-6) { vx += w * gx / g; vz += w * gz / g; }
+    }
+    const m = Math.hypot(vx, vz);
+    if (m < 1e-6) return { ux: 0, uz: 0, k: 0 };
+    // In the throw's frame: along it (beyond the receiver +) and across it
+    // (toward the near sideline +).
+    let nx = uz, nz = -ux;
+    if (nx * (target.x - this.pocketX()) < 0) { nx = -nx; nz = -nz; }
+    let a = (vx * ux + vz * uz) / m, l = (vx * nx + vz * nz) / m;
+    if (a > 0) { l += (Math.abs(l) > 0.2 ? Math.sign(l) : 1) * a; a = 0; }
+    const sx = a * ux + l * nx, sz = a * uz + l * nz, s = Math.hypot(sx, sz) || 1;
+    return { ux: sx / s, uz: sz / s, k: Math.min(1, m) * len };
   }
 
   // A deliberate hard plant (plan 4.1). Momentum-consistent: forward speed

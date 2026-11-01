@@ -4,16 +4,21 @@
 // coaching cue). He never reads the defense's call, jobs or reads.
 //
 // Every TIME.look s after the drop sets he scores each receiver's openness
-// (yards): separation from the nearest defender at the ball's arrival and
-// now, less a penalty for each defender who can get a hand on the ball in
-// the throwing lane. The receiver is carried along his route at full speed
-// for the flight time; defenders along their velocity, then closing on the
-// catch point once they have seen the throw. He throws to the first read if
-// it is open, then to the best open man (open enough for his AGGRESSION),
-// takes the checkdown late, escapes or throws it away under pressure and
-// never holds the ball past TIME.hold. A seeded reaction delay, the time it
-// takes to hold the button for the style, and an occasional late throw
-// stand between deciding and the ball leaving his hand.
+// (yards) for each style of throw: how far the nearest defender is still
+// short of the catch point when the ball gets there, and the separation
+// now, less the throw's spread and a cost for each defender who can get a
+// hand on the ball before the receiver. The receiver is carried along his
+// route at full speed until the ball arrives; each defender keeps his run
+// until he reacts (to the route if he is on the receiver, to the ball once
+// it is out if not) and then sprints for the spot. He picks the style that
+// leaves his man most open, never lobs into a man near the spot and never
+// winds up a throw the rush will not give him time for. He throws to the
+// first read if it is open (or to a man running free), then to the best
+// open man (open enough for his AGGRESSION), takes the checkdown late,
+// escapes or throws it away under pressure and never holds the ball past
+// TIME.hold. A seeded reaction delay, the time it takes to hold the button
+// for the style, and an occasional late throw stand between deciding and
+// the ball leaving his hand.
 import { plays } from './game.mjs';
 import { generator, clamp, gap, lerp, topSpeed, blocked, nearest, closing, travel } from './util.mjs';
 import { runway } from './carrier.mjs';
@@ -39,27 +44,53 @@ const BALL = { bullet: 28, touch: 22, lob: 16, min: 0.42, max: 2.8 };
 // A receiver slows into a break: each break costs `cut` s at top speed per
 // 180 degrees of turn.
 const ROUTE = { cut: 0.35 };
-// Defenders at the ball's arrival: carried along their velocity for at most
-// `horizon` s, then closing on the catch point at `close` yd/s once they
-// have seen the throw (`react` s after the ball is out). Fitted by throwing
-// to random receivers at random times: this matches the mean separation at
-// the catch and correlates 0.48 with it (a gentle 3 yd/s closing: 0.37).
-const READ = { horizon: 1.2, react: 0.45, close: 5 };
-// Openness, in yards: `arrive` of the separation at the catch point plus
-// `now` of the separation now (at most `nowCap` more than at arrival), less
-// `lane` for each defender in the throwing lane (in full when he is on the
-// line of the ball). A defender is in the lane when the ball passes him
-// below `height` yd within his reach: `reach` yd, growing at `grow` yd/s
-// once he has reacted (`react` s), to `reachMax`. A bullet from under
-// `close` yd is harder to catch (`closeCost`); a lob with a defender over the
-// top costs `overTop`.
-const OPEN = { arrive: 0.7, now: 0.3, nowCap: 2, lane: 2.5, height: 2.6, reach: 0.9, grow: 3, react: 0.35, reachMax: 3, close: 8, closeCost: 0.3, overTop: 1 };
+// Defenders, as he reads them. A man playing the receiver (within `near`
+// yd of him, or of his run until the ball is out, as a corner he runs at;
+// or already running at the catch point, within `heading` of it at
+// `moving` yd/s or more) runs the receiver's route `lag` s late, from where
+// he is; one beyond `far` yd keeps his own run (for at most `horizon` s: a
+// drop settles); in between, in proportion. Each reads the ball `react` s
+// after it is out (a deep man over the top breaks on it then) and sprints
+// for the spot at `speed` of his top speed, accelerating at `accel` yd/s²
+// from his speed that way and losing `cut` s at top speed per 180 degrees
+// of turn. On random throws (any receiver, style and time) the margin
+// this gives correlates 0.35 with the separation at the catch; the old
+// model (his own line for 1.2 s, then 5 yd/s at the spot): 0.11.
+const READ = { lag: 0.2, react: 0.3, horizon: 0.6, near: 3, far: 6, heading: Math.cos(60 * Math.PI / 180), moving: 4, speed: 1, accel: 6, cut: 0.1 };
+// The throw's spread (yd), as in the simulation's THROW table: `set` plus
+// `far` per yard past `crisp` by style, `moving` per 7 yd/s of his own
+// speed, and up to `pressure` with a defender inside `near` yd (fully at
+// `close`). The ball leaves 1.85 yd up and comes in `catch` yd up by style.
+const THROW = { set: 0.18, far: { bullet: 0.035, touch: 0.045, lob: 0.06 }, crisp: 5, moving: 1.6, pressure: 2.8, near: 3.3, close: 0.6, catch: { bullet: 1.6, touch: 1.65, lob: 1.8 } };
+// Openness, in yards: `arrive` of the margin at the catch point (how far
+// the nearest defender is still short of it when the ball gets there, less
+// than zero when he is there first; counted up to `cap`) plus `now` of the
+// separation now (at most `nowCap` more than the margin), less `miss` of
+// the throw's spread and `lane` for each defender who can get a hand on the
+// ball before the receiver does: one within `reach` yd of its path (in full
+// on it) while it is low enough to play (`low` to `high` yd up, `dl` for a
+// lineman), more than `front` yd short of the catch, and at least `after`
+// s out of the hand (no defender can play it sooner). A bullet from under
+// `close` yd is harder to catch (`closeCost`). A lob, or any ball thrown
+// `lobFrom` yd or more, needs `lob` yd of margin: he does not throw it up
+// into a defender. A lob is no throw under `lobFrom` yd, and with the
+// nearest man over the top it costs `overTop`, since a long miss is his
+// ball. A man in trail (`trailing`) counts `trail` yd farther off: he must
+// play the ball through the receiver, and fewer of his are picks.
+const OPEN = {
+  arrive: 0.7, cap: 8, now: 0.3, nowCap: 2, miss: 0.3, lane: 1.5, reach: 0.8, low: 0.55, high: 2.55, dl: 2.15, front: 3, after: 0.3, samples: 16,
+  close: 8, closeCost: 0.3, lob: 2, lobFrom: 20, overTop: 0.5, trail: 1, trailGap: 5, trailBehind: 0.5,
+};
 // What it takes to throw: openness of `start` yd at aggression 0, `span`
 // less at aggression 1, easing by `decay` yd/s after the first read to a
-// floor of `floor` (`floorSpan` less at aggression 1). The checkdown needs
-// `checkdown`; under pressure anyone at `panic` (plus `panicSpan` × caution);
-// at the end of the hold, anyone at `last`.
-const NEED = { start: 3.4, span: 1.8, decay: 0.4, floor: 1.6, floorSpan: 0.6, checkdown: 1.2, panic: 1.0, panicSpan: 0.6, last: 0.6 };
+// floor of `floor` (`floorSpan` less at aggression 1). While he is on his
+// first read, another man must be `free` yd more open and at least `short`
+// yd downfield to catch his eye. A throw caught `deep` yd downfield or more
+// needs `deepCut` yd less (in proportion from `short` yd): worth the risk
+// of a breakup (the margin rule above keeps it from a pick). The checkdown
+// needs `checkdown`; under pressure anyone at `panic` (plus `panicSpan` ×
+// caution); at the end of the hold, anyone at `last`.
+const NEED = { start: 2.8, span: 1.6, decay: 0.6, floor: 1.2, floorSpan: 0.6, free: 2, short: 10, deep: 30, deepCut: 1, checkdown: 1.0, panic: 1.0, panicSpan: 0.6, last: 0.6 };
 // Choosing among open men: openness counts `open` (less `openSpan` ×
 // aggression), expected yards `value` (plus `valueSpan` × aggression), and
 // each step down the progression costs `order`.
@@ -69,8 +100,9 @@ const SCORE = { open: 1.1, openSpan: 0.6, value: 0.12, valueSpan: 0.18, order: 0
 // faster than `closing` yd/s: escape now. Arriving within `hot` s (from
 // inside `hotRange` yd): throw hot and drift away. Arriving before he could
 // get a throw off (his reaction plus `act` s): throw it away if nobody is
-// open at all.
-const PRESSURE = { near: 1.8, closing: 0.5, hot: 0.9, hotRange: 5, reach: 0.95, act: 0.12 };
+// open at all. The first to arrive from inside `clock` yd sets the time he
+// has: a throw that would leave his hand later is no throw.
+const PRESSURE = { near: 1.8, closing: 0.5, hot: 1.0, hotRange: 6.5, reach: 0.95, act: 0.12, clock: 10 };
 // The pocket: a set quarterback stays `depth` yd behind the line when he
 // steps up and `edge` yd inside the sideline; `drop` yd is a set drop (an
 // under-centre drop is finished by hand); `box` yd wide of the centre is
@@ -135,6 +167,7 @@ export class Quarterback {
     this.scrambling = 0;     // the scramble heading (radians), 0 in the pocket
     this.escapes = 0;        // looks spent escaping a rusher
     this.escape = '';        // the last escape: step up, slide left or right
+    this.clock = Infinity;   // s until the first free rusher gets to him
     this.note = 'drop';
   }
 
@@ -167,6 +200,7 @@ export class Quarterback {
     if (this.decision || this.threwAway) { this.hold(); return; }
     this.move(sim, threat);
     if (this.pending) return;
+    this.clock = threat.clock;
     const pressured = !!(threat.near || threat.hot);
     if (t < this.first && !(pressured && t >= TIME.hot)) { this.note = t < 0.6 ? 'drop' : this.note; return; }
     this.evaluate(sim);
@@ -188,8 +222,8 @@ export class Quarterback {
     let need = Math.max(NEED.floor - NEED.floorSpan * a, NEED.start - NEED.span * a - NEED.decay * Math.max(0, since - TIME.firstRead));
     let pool = since < TIME.firstRead ? this.order.slice(0, 1) : this.order, why = since < TIME.firstRead ? 'first read' : 'best open';
     if (threat.near || threat.hot) { pool = this.order; need = Math.min(need, NEED.panic + NEED.panicSpan * (1 - a)); why = 'hot'; }
-    let best = this.best(pool, need);
-    if (best) return { id: best, why };
+    let best = this.best(pool, need, NEED.free);
+    if (best) return { id: best, why: pool.includes(best) ? why : 'free' };
     const check = this.looks[this.checkdown];
     if (t >= TIME.checkdown && check?.available && check.open >= NEED.checkdown) return { id: this.checkdown, why: 'checkdown' };
     // About to be sacked: a throw would not get out in time, so throw it
@@ -204,12 +238,18 @@ export class Quarterback {
     return null;
   }
 
-  best(pool, need) {
+  // The best man open enough: `need` yd for the reads in `pool`, `free`
+  // more for anyone else, less for a deep throw (NEED).
+  best(pool, need, free = Infinity) {
     const a = this.aggression;
     let best = null, top = -Infinity;
-    pool.forEach(id => {
+    this.order.forEach(id => {
       const look = this.looks[id];
-      if (!look || !look.available || look.open < need) return;
+      if (!look || !look.available) return;
+      const read = pool.includes(id);
+      if (!read && look.depth < NEED.short) return;
+      const bar = need + (read ? 0 : free) - NEED.deepCut * clamp((look.depth - NEED.short) / (NEED.deep - NEED.short), 0, 1);
+      if (look.open < bar) return;
       const score = look.open * (SCORE.open - SCORE.openSpan * a) + look.value * (SCORE.value + SCORE.valueSpan * a) - SCORE.order * this.order.indexOf(id);
       if (score > top) { top = score; best = id; }
     });
@@ -229,12 +269,12 @@ export class Quarterback {
     for (const id of RECEIVERS) if (sim.byId[id]) this.looks[id] = this.look(sim, qb, sim.byId[id], id);
   }
 
-  // The best throw to one receiver: the style that leaves him most open.
+  // The best throw to one receiver: the style that leaves him most open,
+  // the quicker ball when it is close.
   look(sim, qb, p, id) {
     const now = nearest(sim.defense, p).gap;
-    const styles = gap(qb, p) < 20 ? ['bullet', 'touch'] : ['touch', 'lob'];
     let best = null;
-    for (const style of styles) {
+    for (const style of ['bullet', 'touch', 'lob']) {
       const option = this.option(sim, qb, p, id, style, now);
       if (!best || option.open > best.open + 0.05) best = option;
     }
@@ -250,51 +290,108 @@ export class Quarterback {
       at = this.ahead(p, id, wait + flight);
       flight = clamp(gap(qb, at) / BALL[style], BALL.min, BALL.max);
     }
-    let sep = Infinity, close = null, room = 15;
+    const length = gap(qb, at), arrive = wait + flight;
+    let sep = Infinity, close = null, room = 15, lane = 0;
     for (const d of sim.defense) {
-      const e = this.defenderAt(d, wait, flight, at), g = Math.hypot(e.x - at.x, e.z - at.z);
-      if (g < sep) { sep = g; close = e; }
-      if (e.z > at.z - 1) room = Math.min(room, g);
+      // A blocked man stays on his block and cannot play the ball.
+      const free = !blocked(d), on = free ? this.on(d, p, wait, flight, at) : 0;
+      let short = this.short(d, free ? wait + READ.react : Infinity, at.x, at.z, arrive);
+      if (on > 0) short = lerp(short, this.mirror(d, p, id, wait, flight, at), on);
+      if (this.trailing(d, p, at)) short += OPEN.trail;
+      if (short < sep) { sep = short; close = d; }
+      if (d.z > at.z - 1) room = Math.min(room, Math.max(0, short));
+      if (free) lane += this.inLane(d, lerp(wait + READ.react, READ.lag, on), qb, at, style, wait, flight, length);
     }
-    const lane = this.lane(sim, qb, at, flight, wait);
-    let open = OPEN.arrive * sep + OPEN.now * Math.min(now, sep + OPEN.nowCap) - OPEN.lane * lane;
-    if (style === 'bullet' && gap(qb, at) < OPEN.close) open -= OPEN.closeCost;
-    if (style === 'lob' && close && close.z > at.z && sep < 6) open -= OPEN.overTop;
+    const spread = this.spread(sim, qb, length, style);
+    let open = OPEN.arrive * Math.min(sep, OPEN.cap) + OPEN.now * Math.min(now, Math.max(0, sep) + OPEN.nowCap) - OPEN.miss * spread - OPEN.lane * lane;
+    if (style === 'bullet' && length < OPEN.close) open -= OPEN.closeCost;
+    if (wait > this.clock || (style === 'lob' && length < OPEN.lobFrom) || ((style === 'lob' || length >= OPEN.lobFrom) && sep < OPEN.lob)) open = -Infinity;
+    else if (style === 'lob' && close && close.z > at.z && sep < 6) open -= OPEN.overTop;
     const depth = at.z - this.spot;
-    return { style, at: { x: at.x, z: at.z }, flight, arriveSep: sep, lane, open, depth, value: depth + SCORE.yac * Math.min(room, SCORE.yacCap), lead: this.lead(at, close, sep) };
+    return { style, at: { x: at.x, z: at.z }, flight, arriveSep: sep, lane, spread, open, depth, value: depth + SCORE.yac * Math.min(room, SCORE.yacCap), lead: this.lead(at, close && this.toward(close, at, sep), sep) };
   }
 
-  // Where a defender will be when the ball arrives: on his line for the
-  // wait and the start of the flight, then closing on the catch point.
-  defenderAt(d, wait, flight, at) {
-    if (blocked(d)) return d;
-    const h = Math.min(wait + flight, READ.horizon);
-    let x = d.x + d.vx * h, z = d.z + d.vz * h;
-    const reach = READ.close * Math.max(0, flight + TIME.release - READ.react);
-    const dx = at.x - x, dz = at.z - z, g = Math.hypot(dx, dz);
-    if (g > 0.3) { const k = Math.min(reach, g - 0.3) / g; x += dx * k; z += dz * k; }
-    return { x, z };
-  }
-
-  // How many defenders can get a hand on the ball on its way (0 = a clean lane).
-  lane(sim, qb, at, flight, wait) {
-    const fx = qb.x, fz = qb.z, dx = at.x - fx, dz = at.z - fz, len2 = dx * dx + dz * dz;
-    if (len2 < 1) return 0;
-    let danger = 0;
-    for (const d of sim.defense) {
-      if (blocked(d)) continue;
-      let s = clamp(((d.x - fx) * dx + (d.z - fz) * dz) / len2, 0, 1);
-      const h = Math.min(wait + s * flight, READ.horizon);
-      const px = d.x + d.vx * h, pz = d.z + d.vz * h;
-      s = clamp(((px - fx) * dx + (pz - fz) * dz) / len2, 0, 1);
-      if (s < 0.06 || s > 0.88) continue;
-      const y = 1.85 - 0.25 * s + 0.5 * GRAVITY * flight * flight * s * (1 - s);
-      if (y > OPEN.height) continue;
-      const off = Math.hypot(fx + dx * s - px, fz + dz * s - pz);
-      const reach = Math.min(OPEN.reachMax, OPEN.reach + OPEN.grow * Math.max(0, s * flight + TIME.release - OPEN.react));
-      if (off < reach) danger += 1 - off / reach;
+  // How much a defender is playing this receiver (0 to 1, READ).
+  on(d, p, wait, flight, at) {
+    const sx = at.x - p.x, sz = at.z - p.z, len2 = sx * sx + sz * sz;
+    const u = len2 > 1e-6 ? clamp(((d.x - p.x) * sx + (d.z - p.z) * sz) / len2, 0, wait / (wait + flight)) : 0;
+    let on = clamp((READ.far - Math.hypot(p.x + sx * u - d.x, p.z + sz * u - d.z)) / (READ.far - READ.near), 0, 1);
+    const speed = Math.hypot(d.vx, d.vz), g = gap(d, at);
+    if (speed > 0.5 && g > 1e-6) {
+      const cos = (d.vx * (at.x - d.x) + d.vz * (at.z - d.z)) / (speed * g);
+      on = Math.max(on, clamp((cos - READ.heading) / (1 - READ.heading), 0, 1) * clamp(speed / READ.moving, 0, 1));
     }
-    return danger;
+    return on;
+  }
+
+  // How far a man playing the receiver is still short of the catch point
+  // when the ball gets there: he runs the receiver's route `lag` s late
+  // (where the receiver goes, he goes, from where he is) until he reads the
+  // ball, then sprints for the spot from the receiver's speed and heading.
+  mirror(d, p, id, wait, flight, at) {
+    const lag = READ.lag, read = wait + READ.react;
+    const was = { x: p.x - p.vx * lag, z: p.z - p.vz * lag };
+    const then = this.ahead(p, id, Math.max(0, read - lag)), next = this.ahead(p, id, Math.max(0, read - lag) + 0.1);
+    const ox = d.x + then.x - was.x, oz = d.z + then.z - was.z, dx = at.x - ox, dz = at.z - oz, g = Math.hypot(dx, dz);
+    if (g < 1e-6) return 0;
+    const hx = next.x - then.x, hz = next.z - then.z, step = Math.hypot(hx, hz), top = topSpeed(d) * READ.speed;
+    const speed = Math.min(top, step / 0.1), along = step > 1e-6 ? speed * (hx * dx + hz * dz) / (step * g) : 0;
+    const turn = step > 1e-6 ? Math.acos(clamp((hx * dx + hz * dz) / (step * g), -1, 1)) / Math.PI : 0;
+    return g - Math.max(0, travel(Math.max(0, along), top, flight - READ.react, READ.accel) - top * READ.cut * turn);
+  }
+
+  // How far a defender is still short of the point (x, z) in `t` s (less
+  // than zero when he gets there first): he keeps his run until `commit` s
+  // (never, for a blocked man), then sprints for it, turning as a runner
+  // must.
+  short(d, commit, x, z, t) {
+    const h = Math.min(t, commit, READ.horizon);
+    const ox = d.x + d.vx * h, oz = d.z + d.vz * h, dx = x - ox, dz = z - oz, g = Math.hypot(dx, dz);
+    if (t <= commit || g < 1e-6) return g;
+    const speed = Math.hypot(d.vx, d.vz), along = speed > 0.1 ? (d.vx * dx + d.vz * dz) / g : 0;
+    const turn = speed > 0.5 ? Math.acos(clamp(along / speed, -1, 1)) / Math.PI : 0;
+    const top = topSpeed(d) * READ.speed;
+    return g - Math.max(0, travel(Math.max(0, along), top, t - commit, READ.accel) - top * READ.cut * turn);
+  }
+
+  // A man chasing the receiver from behind (within `trailGap` yd, at
+  // least `trailBehind` yd back along his run to the catch) has to play
+  // the ball through him: the ball is put out in front, away from him.
+  trailing(d, p, at) {
+    const rx = at.x - p.x, rz = at.z - p.z, run = Math.hypot(rx, rz);
+    return run > 1 && gap(d, p) < OPEN.trailGap && ((d.x - p.x) * rx + (d.z - p.z) * rz) / run < -OPEN.trailBehind;
+  }
+
+  // Where the nearest defender comes from: `short` yd back from the catch
+  // point toward him (for the lead).
+  toward(d, at, short) {
+    const dx = d.x - at.x, dz = d.z - at.z, g = Math.hypot(dx, dz) || 1, k = Math.max(0.3, short) / g;
+    return { x: at.x + dx * k, z: at.z + dz * k };
+  }
+
+  // How much of a hand one defender can get on the ball before the
+  // receiver (0 to 1): the ball's path sampled while it is low enough for
+  // him to play and short of the catch.
+  inLane(d, commit, qb, at, style, wait, flight, length) {
+    if (length < 1) return 0;
+    const high = d.role === 'dl' ? OPEN.dl : OPEN.high, rise = 0.5 * GRAVITY * flight * flight, end = THROW.catch[style];
+    let best = Infinity;
+    for (let k = 1; k < OPEN.samples; k++) {
+      const s = k / OPEN.samples, u = s * flight;
+      if ((1 - s) * length < OPEN.front) break;
+      if (u < OPEN.after) continue;
+      const y = 1.85 + (end - 1.85) * s + rise * s * (1 - s);
+      if (y < OPEN.low || y > high) continue;
+      best = Math.min(best, this.short(d, commit, qb.x + (at.x - qb.x) * s, qb.z + (at.z - qb.z) * s, wait + u));
+    }
+    return clamp(1 - best / OPEN.reach, 0, 1);
+  }
+
+  // The spread of the throw (THROW): its length and style, his own speed,
+  // and a rusher in his face.
+  spread(sim, qb, length, style) {
+    const rush = nearest(sim.defense, qb).gap, pressure = clamp((THROW.near - rush) / (THROW.near - THROW.close), 0, 1);
+    return THROW.set + Math.max(0, length - THROW.crisp) * THROW.far[style] + Math.hypot(qb.vx, qb.vz) / 7 * THROW.moving + pressure * THROW.pressure;
   }
 
   // Lead (the arrow keys, -1/0/1 a side): away from a defender who will be
@@ -352,16 +449,17 @@ export class Quarterback {
   // (hot), or close enough that only a throw away beats the sack.
   threat(sim) {
     const qb = sim.byId.QB;
-    let near = null, hot = null, sack = false;
+    let near = null, hot = null, sack = false, clock = Infinity;
     for (const d of sim.defense) {
       if (blocked(d)) continue;
       const g = gap(d, qb), c = closing(d, qb), eta = Math.max(0, g - PRESSURE.reach) / Math.max(0.5, c);
       if (g < PRESSURE.near && c > PRESSURE.closing && (!near || g < near.gap)) near = { d, gap: g, closing: c };
       if (g < PRESSURE.hotRange && c > 1 && eta < PRESSURE.hot && (!hot || eta < hot.eta)) hot = { d, gap: g, eta };
       if (c > 0 && eta < this.reaction + PRESSURE.act) sack = true;
+      if (g < PRESSURE.clock && c > 1) clock = Math.min(clock, eta);
     }
     const n = nearest(sim.defense, qb);
-    return { near, hot, sack, gap: n.gap, who: n.d?.id };
+    return { near, hot, sack, clock, gap: n.gap, who: n.d?.id };
   }
 
   hold() { this.input.x = 0; this.input.z = 0; this.input.sprint = false; }
@@ -429,4 +527,4 @@ export class Quarterback {
 }
 
 // The tables, for experiments that tune the quarterback himself.
-export const TUNING = { TIME, BALL, ROUTE, READ, OPEN, NEED, SCORE, PRESSURE, POCKET };
+export const TUNING = { TIME, BALL, ROUTE, READ, THROW, OPEN, NEED, SCORE, PRESSURE, POCKET };

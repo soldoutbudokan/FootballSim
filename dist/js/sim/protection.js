@@ -34,15 +34,18 @@ const LAUNCH = { depth: 7, settle: 0.45, still: 1, late: 1.2, wide: 2, min: 4.5,
 // yd/s, slipping to the side he won (the move's `slip`): he bends at the
 // quarterback, or with less discipline (DISCIPLINE `bend`) carries on up his
 // lane and runs past him; then he leans up to `lean` yd that way for `burst`
-// s. Nobody can pick him up for `clear` s, and the beaten blocker stumbles
-// for `beaten` s. Ends lined up more than `edge` yd wide rush the arc, aiming
-// `arc` yd outside the launch point per yard still to go (`arcMin` to
-// `arcMax`) and up to `beyond` yd past it: the arc runs past the launch
-// point, and turning the corner takes a win; the others push their gap (`gaps`, yd from the centre; lined up
-// without a called gap, within `gap` yd of the centre), bending to the launch
-// point by its depth. Rushers re-aim at the quarterback once they have seen
-// him move off the launch point (`moved` yd, blended over a yard), or when
-// within `chase` yd of him. Linemen rush at `effort` of top speed, blitzers
+// s, flat out. Nobody can pick him up for `clear` s, and the beaten blocker
+// stumbles for `beaten` s. A rusher nobody has (no blocker assigned to him)
+// takes the straight lane to the launch point, skirting the blocks in his
+// way by `skirt` yd (straightLane). Ends lined up more than `edge` yd wide
+// rush the arc, aiming `arc` yd outside the launch point per yard still to
+// go (`arcMin` to `arcMax`) and up to `beyond` yd past it: the arc runs past
+// the launch point, and turning the corner takes a win; the others push
+// their gap (`gaps`, yd from the centre; lined up without a called gap,
+// within `gap` yd of the centre), bending to the launch point by its depth.
+// Rushers re-aim at the quarterback once they have seen him move off the
+// launch point (`moved` yd, blended over a yard), or when within `chase` yd
+// of him. Linemen rush at `effort` of top speed, blitzers
 // flat out. The back checks for a free rusher until `pickup` s after the snap
 // and blocks him if one comes (unless he has a hot route); once he has
 // blocked he stays in. Using him costs `backCost` yd in the protection count,
@@ -52,7 +55,7 @@ const POCKET = {
   tackle: { kick: 0.9, depth: 2.0, reach: 2.4 }, guard: { kick: 0.15, depth: 1.2, reach: 2.2 }, centre: { kick: 0, depth: 1.1, reach: 2.4 },
   square: 0.95, engage: 1.3, part: 2.2, ramp: 1.4, power: 2.5, help: 0.5, helpRange: 1.6,
   box: 4.4, close: 1.5, near: 3.5, loose: 3, onMove: 0.25, wash: 0.35, washDepth: 0.5, bend: 0.6,
-  beaten: 0.5, clear: 0.5, burst: 0.5, lean: 0.6, rip: 5.5,
+  beaten: 0.5, clear: 0.5, burst: 0.5, lean: 0.6, rip: 6.2, skirt: 1.2,
   edge: 3.5, arc: 1.0, arcMin: 1.5, arcMax: 3.0, beyond: 0.8, gap: 2.4, gaps: { A: 0.8, B: 2.4, C: 4.2 },
   moved: 1, chase: 3, effort: 0.92, pickup: 1.2, backCost: 2, own: 1.5,
 };
@@ -105,8 +108,8 @@ const MOVE_MIX = { edge: [0.5, 0.2], inside: [0.25, 0.45], blitzer: [0.5, 0.1] }
 // difficulty's contain outside the point where he can meet the quarterback's
 // path (`lead` s ahead at least, `leadMax` at most), holding his depth
 // `front` to `hold` yd in front of it until he is outside him, then
-// squeezing to `front`; once he is outside him, level or in
-// front (give or take `close` yd), within `attack` yd, he takes him on. A
+// squeezing to `front`; within `attack` yd, level with him or in front
+// (give or take `close` yd), he takes him on. A
 // free contain man does this as soon as he sees the quarterback run toward
 // his side at `roll` yd/s, before he is out. Inside rushers chase with
 // `inside` yd of inside-out leverage. Linemen keep riding the man they have;
@@ -131,7 +134,7 @@ const SCRAMBLE = {
 // creeping or staring at their gap, so the line counts them and knows they
 // come; fixed by the man's number, no draw).
 const DISCIPLINE = {
-  rookie: { recognise: 0.2, shed: 0.75, stunt: 0.08, pa: 0.9, plan: 0.25, bend: 0, jump: 0.28, tip: 0.8 },
+  rookie: { recognise: 0.2, shed: 0.75, stunt: 0.08, pa: 0.9, plan: 0.25, bend: 0.5, jump: 0.28, tip: 0.8 },
   pro: { recognise: 0.12, shed: 1, stunt: 0.15, pa: 0.75, plan: 1, bend: 0.7, jump: 0.2, tip: 0 },
   allpro: { recognise: 0.06, shed: 1.15, stunt: 0.22, pa: 0.6, plan: 4, bend: 1, jump: 0.12, tip: 0 },
 };
@@ -173,8 +176,9 @@ const PEEL = { mark: 4, lead: 1.5 };
 // rushes it. The line passes the stunt off (`pickup`: the share of reps it
 // sees it): when the penetrator crosses into the next man's zone, that man
 // takes him if he is free and within `reach` yd more than the lock range,
-// and the first blocker is free for the looper.
-const STUNT = { depth: 1.2, slant: 2.5, behind: 0.7, near: 0.8, loop: 1.1, pickup: 0.75, reach: 0.5 };
+// and the first blocker is free for the looper. A called pressure with more
+// than `most` rushers brings its own picture: the line does not twist on it.
+const STUNT = { depth: 1.2, slant: 2.5, behind: 0.7, near: 0.8, loop: 1.1, pickup: 0.75, reach: 0.5, most: 5 };
 
 export const protection = {
   // While the quarterback holds a called pass, the line protects the pocket
@@ -289,12 +293,12 @@ export const protection = {
   // A twist between an end and the tackle beside him, on a seeded share of
   // pass reps: `roll` is the rep's draw (one on every pass rep, so the
   // stream does not depend on the front), whose remainder also picks the
-  // side, the game and whether the line sees it. `config.stunt` can force
-  // one ({ kind: 'TE' | 'ET', side: -1 | 1, picked }) or rule it out
-  // ('none').
+  // side, the game and whether the line sees it; none on a pressure with
+  // more than STUNT `most` rushers. `config.stunt` can force one ({ kind:
+  // 'TE' | 'ET', side: -1 | 1, picked }) or rule it out ('none').
   planStunt(roll) {
     const chance = this.discipline().stunt, forced = this.config.stunt;
-    if (forced === 'none' || (!forced && roll >= chance)) return null;
+    if (forced === 'none' || (!forced && (roll >= chance || this.rushers().length > STUNT.most))) return null;
     const u = forced ? roll : roll / chance, x0 = this.pocketX();  // uniform again, given a twist
     const side = forced?.side || (u < 0.5 ? -1 : 1), kind = forced?.kind || (u * 2 % 1 < 0.5 ? 'TE' : 'ET');
     const dl = this.defense.filter(d => d.rushing && d.role === 'dl' && !(d.rush?.at > 0) && Math.sign(d.start.x - x0) === side);
@@ -854,14 +858,42 @@ export const protection = {
     if (contain === 'attack') return this.pursue(d, 'QB', speedCap(d, 1));
     if (contain) { d.aim = contain; return scaled(contain.x - d.x, contain.z - d.z, speedCap(d, 1)); }
     const cap = speedCap(d, lane.blitzer ? 1 : POCKET.effort), since = this.time - d.wonAt;
-    if (since < POCKET.burst) return this.pursue(d, 'QB', cap, d.winSide * POCKET.lean * (1 - since / POCKET.burst));
+    if (since < POCKET.burst) return this.pursue(d, 'QB', speedCap(d, 1), d.winSide * POCKET.lean * (1 - since / POCKET.burst));
     if (d.wonAt > 0 || dist(d, qb) < POCKET.chase) return this.pursue(d, 'QB', speedCap(d, 1));
     if (this.readsRun(d)) return seekWant(d, { x: lane.x, z: this.spot + PLAY_ACTION.fit }, speedCap(d, PLAY_ACTION.effort));
     const twist = this.twistAim(d, lane);
     if (twist) return seekWant(d, twist, speedCap(d, 0.9), 2);
-    const aim = this.laneAim(d, this.freeRef(d), lane);
+    const aim = this.unblocked(d) ? this.straightLane(d, this.freeRef(d), lane) : this.laneAim(d, this.freeRef(d), lane);
     d.aim = aim;
     return scaled(aim.x - d.x, aim.z - d.z, cap);
+  },
+
+  // Nobody is blocking him or set to: no lineman or back has him.
+  unblocked(d) {
+    if (d.lock) return false;
+    for (const o of this.line) if (o.assignment === d.id) return false;
+    return this.byId.R.assignment !== d.id;
+  },
+
+  // The free man's straight lane to `ref`: straight at it, around the
+  // nearest body in the way (a lineman, or a rusher locked with one, ahead
+  // of him within `skirt` yd of the line), passing `skirt` yd beside it: on
+  // the outside for an edge rusher, who keeps contain, else on the side the
+  // line already passes it.
+  straightLane(d, ref, lane) {
+    const dx = ref.x - d.x, dz = ref.z - d.z, len = Math.hypot(dx, dz);
+    if (len < 0.5) return ref;
+    const ux = dx / len, uz = dz / len;
+    let aim = ref, best = len;
+    for (const o of this.players) {
+      if (o === d || !(o.role === 'ol' || (o.team === 'defense' && o.lock))) continue;
+      const along = (o.x - d.x) * ux + (o.z - d.z) * uz, off = (o.x - d.x) * uz - (o.z - d.z) * ux;
+      if (along <= 0 || along >= best || Math.abs(off) >= POCKET.skirt) continue;
+      // Which side of it: + is to the right of his run, (uz, -ux).
+      const by = lane.edge && Math.abs(uz) > 0.3 ? lane.side * Math.sign(uz) : off > 0 ? -1 : 1;
+      best = along; aim = { x: o.x + by * uz * POCKET.skirt, z: o.z - by * ux * POCKET.skirt };
+    }
+    return aim;
   },
 
   // The ball is out and he has seen it go (PEEL).
@@ -897,16 +929,16 @@ export const protection = {
   // it is his key): outside the point where he can meet the
   // quarterback's path, holding his depth `front` to `hold` yd in front of
   // it (he does not retreat after him) until he is outside him, then
-  // squeezing to `front` yd; once he is within `attack` yd,
-  // outside him and level or in front, or squarely in front of him (`close`
-  // yd upfield), he takes him on ('attack').
+  // squeezing to `front` yd; once he is within `attack` yd, level with him
+  // or in front (give or take `close` yd), he takes him on ('attack'), from
+  // outside or, if the quarterback has got outside him, from there: he does
+  // not run around him to win his edge back.
   containAim(d, rolling = false) {
     const st = this.rushState(), now = this.watchQB(d);
     if (rolling && (this.carrier !== 'QB' || Math.abs(now.vx) < SCRAMBLE.roll)) return null;
     const roll = rolling ? Math.sign(now.vx) : Math.sign(this.seenQB(d).x - st.launch.x) || 1;
     if ((roll > 0 ? st.containR : st.containL) !== d.id) return null;
-    const outside = roll * (d.x - now.x) > 0 && d.z > now.z - SCRAMBLE.close;
-    if ((outside || d.z > now.z + SCRAMBLE.close) && dist(d, now) < SCRAMBLE.attack) return 'attack';
+    if (d.z > now.z - SCRAMBLE.close && dist(d, now) < SCRAMBLE.attack) return 'attack';
     const lead = clamp(dist(d, now) / speedCap(d, 1), SCRAMBLE.lead, SCRAMBLE.leadMax);
     const px = now.x + now.vx * lead, pz = now.z + now.vz * lead, ahead = roll * (d.x - now.x) > 0 ? SCRAMBLE.front : clamp(d.z - pz, SCRAMBLE.front, SCRAMBLE.hold);
     return { x: px + roll * ((this.skill.contain ?? 1) + SCRAMBLE.width), z: pz + ahead };

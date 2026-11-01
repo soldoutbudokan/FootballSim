@@ -27,7 +27,9 @@ export const DIFFICULTY = {
   // strongly the situation (down, distance, field, formation) steers the
   // call (an exponent on its multipliers); `disguise` the
   // share of calls shown from another shell; `late` the share of disguises
-  // whose rotation is held past the snap; `scout` how much the scouting
+  // whose rotation is held past the snap, `hold` the shortest hold (s; a
+  // better coordinator holds the look just long enough to fool the
+  // quarterback's first look, no longer); `scout` how much the scouting
   // report steers the call (0 not at all, 1 in full). Run fits: `runRead` s
   // after the snap when a linebacker reads a handoff and fills (safeties and
   // corners later), `bite` s a linebacker steps up on a play fake before he
@@ -35,11 +37,11 @@ export const DIFFICULTY = {
   // share of the quarterback's throwing motion a robber drives on (and a
   // deep middle splitting two verticals leans to).
   rookie: { latency: 0.40, chase: 0.25, read: 0.30, ballReaction: 0.42, judgment: 1.8, routeLead: 0.06, anticipate: 0, contain: 0.3, carry: 16, help: 0.2,
-    menu: 'rookie', situ: 0.5, disguise: 0.1, late: 0, scout: 0, runRead: 0.75, bite: 0.55, eyes: 0 },
+    menu: 'rookie', situ: 0.5, disguise: 0.1, late: 0, hold: 0.45, scout: 0, runRead: 0.75, bite: 0.55, eyes: 0 },
   pro: { latency: 0.28, chase: 0.21, read: 0.24, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, anticipate: 0.5, contain: 1.0, carry: 21, help: 0.45,
-    menu: 'pro', situ: 0.8, disguise: 0.35, late: 0.25, scout: 0.5, runRead: 0.6, bite: 0.42, eyes: 0.5 },
+    menu: 'pro', situ: 0.8, disguise: 0.35, late: 0.25, hold: 0.3, scout: 0.5, runRead: 0.6, bite: 0.42, eyes: 0.5 },
   allpro: { latency: 0.18, chase: 0.17, read: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, anticipate: 1, contain: 1.5, carry: Infinity, help: 0.7,
-    menu: 'allpro', situ: 1, disguise: 0.5, late: 0.4, scout: 1, runRead: 0.45, bite: 0.3, eyes: 1 },
+    menu: 'allpro', situ: 1, disguise: 0.5, late: 0.4, hold: 0.15, scout: 1, runRead: 0.45, bite: 0.3, eyes: 1 },
 };
 
 export const DEFENSE = [
@@ -71,6 +73,11 @@ const MENUS = {
   allpro: FAMILIES,
 };
 const TWO_HIGH = new Set(['cover2', 'tampa2', 'cover4', 'cover6', 'man']);
+// How far (yd) a one-high free safety cheats toward the weak side when the
+// call is two-deep (he spins to the weak half or quarter).
+const ONE_HIGH_CHEAT = 2.5;
+// How far off the ball (yd) a linebacker who rushes creeps outside the mug look.
+const CREEP = 3;
 // What a neutral down (1st and 10 between the 20s against two by two) calls.
 const BASE = { cover3: 1.5, cover1: 1.0, cover2: 1.2, tampa2: 1.05, cover4: 1.15, cover6: 1.0, man: 0.8, blitz: 0.55, firezone: 0.8, creeper: 0.85 };
 // Situation multipliers. Short yardage (2 or less) brings the box down and
@@ -83,12 +90,13 @@ const DOWNS = {
   second: { cover3: 1.0, cover1: 1.0, cover2: 1.2, tampa2: 1.2, cover4: 1.2, cover6: 1.1, man: 1.0, blitz: 0.9, firezone: 1.1, creeper: 1.2 },
 };
 // Field position: inside the 5 the deep zones vanish (man, zero, pressure);
-// in the red zone the shells compress, man and two-deep rise and the
-// three-deep pressures with a lineman in the seam fade (the end line is
-// the deep help, the seams are the danger); backed up, the defense attacks.
+// in the red zone the shells compress, man (Cover 1 bracketing the inside)
+// and the three-deep zones that play everything in front of them rise, and
+// the pole runner and the quarters' seam reads fade (the end line is the
+// deep help, the seams are the danger); backed up, the defense attacks.
 const FIELD = {
-  goal: { cover3: 0.6, cover1: 1.4, cover2: 0.9, tampa2: 0.6, cover4: 0.6, cover6: 0.5, man: 1.8, blitz: 1.4, firezone: 0.8, creeper: 0.5 },
-  red: { cover3: 0.8, cover1: 1.5, cover2: 1.2, tampa2: 1.0, cover4: 0.7, cover6: 0.6, man: 1.8, blitz: 1.2, firezone: 1.0, creeper: 0.6 },
+  goal: { cover3: 1.0, cover1: 1.2, cover2: 1.0, tampa2: 0.6, cover4: 0.6, cover6: 0.5, man: 1.8, blitz: 1.6, firezone: 0.8, creeper: 0.5 },
+  red: { cover3: 1.3, cover1: 1.3, cover2: 1.2, tampa2: 0.8, cover4: 0.9, cover6: 0.6, man: 1.8, blitz: 1.4, firezone: 1.1, creeper: 0.7 },
   backed: { cover3: 1.2, cover1: 1.1, cover2: 0.9, tampa2: 0.8, cover4: 0.9, cover6: 0.9, man: 0.9, blitz: 1.3, firezone: 1.3, creeper: 1.1 },
 };
 // Formation fits: quarters against two by two, Cover 6 and a sky rotation
@@ -144,6 +152,20 @@ export const SHELLS = {
   creeper: ['mug', 'two-high', 'one-high', 'base'],
 };
 const SHELL_WEIGHT = { 'two-high': 1.6, 'one-high': 0.8, base: 0.7, mug: 0.35 };
+// Looks a call cannot get out of in time are never shown: Cover 0 shows
+// the mug or the base look (its man safeties cannot start 12 yd off their
+// men); a safety who rushes cannot start 12 yd deep; the
+// two-deep zones never walk their hole or pole runner up into the mug (a
+// 12 yd drop from the line); and Cover 1 from two-high is the robber call
+// only (the down safety is the robber; a pressure or a spy would leave him
+// a slot to reach).
+function makeable(family, variant, shell) {
+  if (family === 'blitz') return shell === 'mug' || shell === 'base';
+  if ((family === 'cover2' || family === 'tampa2') && shell === 'mug') return false;
+  if ((family === 'firezone' || family === 'creeper') && variant === 'safety') return shell === 'mug' || shell === 'one-high';
+  if (family === 'cover1' && variant !== 'rat') return shell !== 'two-high';
+  return true;
+}
 // Share of calls with the corners pressed (the rest play off or squat).
 const PRESS = { cover3: 0.25, cover1: 0.6, cover2: 0.45, tampa2: 0.4, cover4: 0.1, cover6: 0.2, man: 0.7, blitz: 0.6, firezone: 0.25, creeper: 0.25 };
 // Man leverage: share of calls with outside leverage (help inside from the
@@ -214,6 +236,11 @@ const third = (side, shade = 0) => side < 0 ? deep(-19, 23, -Infinity, -THIRD) :
 // toward them (his zone stays the same).
 const POST_SHADE = 3;
 const postShade = lay => (lay.nums[lay.strength].length >= 3 ? lay.strength * POST_SHADE : 0);
+// How far across (yd) Cover 1's free safety can help over the top of a man.
+const FREE_REACH = 9;
+// The red zone (yd to the goal line) and how far either side of the ball
+// (yd) Cover 1's free safety brackets the inside receivers there.
+const RED_ZONE = 20, BRACKET = 9;
 const half = side => deep(side * 12, 25, side < 0 ? -Infinity : 0, side < 0 ? 0 : Infinity);
 const under = (role, x, depth) => ({ kind: 'under', role, x, depth });
 const quarter = (role, side) => ({ kind: 'quarter', role, side });
@@ -252,8 +279,12 @@ function matchMan(defenders, lay, s) {
 }
 
 // The jobs and rushers of a call against a formation.
-function assignments(call, lay) {
+function assignments(call, lay, togoal = 75) {
   const s = lay.strength, R = roles(s), jobs = {}, rush = {};
+  // Inside the 20 Cover 1 brackets the inside: the free safety takes only
+  // the verticals within BRACKET yd of the ball, and a wide receiver's man
+  // plays him alone, on top (the end line is his deep help).
+  const red = togoal <= RED_ZONE, wide = red ? BRACKET : Infinity;
   for (const id of ['DE1', 'DT1', 'DT2', 'DE2']) rush[id] = { lane: null, at: 0 };
   const blitz = (id, lane, side, gap, at = 0) => { rush[id] = { lane, side, gap, at }; delete jobs[id]; };
   const drop = (id, job) => { delete rush[id]; jobs[id] = job; };
@@ -274,12 +305,16 @@ function assignments(call, lay) {
       if (call.spy) jobs[R.mike] = { kind: 'spy' };
       break;
     case 'cover1': {
-      jobs.FS = { ...deep(postShade(lay), 17, -Infinity, Infinity), free: true };
-      const pool = ['CB1', 'CB2', 'SS', 'LB1', 'LB2', 'LB3'], map = matchMan(pool, lay, s);
+      jobs.FS = { ...deep(postShade(lay), 17, -wide, wide), free: true };
+      // From a two-high look the strong safety is 12 yd deep: too far to
+      // reach a slot in time, so he comes down to the robber's job and the
+      // linebackers and corners take the five receivers.
+      const down = call.shell === 'two-high';
+      const pool = down ? ['CB1', 'CB2', 'LB1', 'LB2', 'LB3'] : ['CB1', 'CB2', 'SS', 'LB1', 'LB2', 'LB3'], map = matchMan(pool, lay, s);
       men = [...map.keys()];
-      const extra = pool.find(id => !map.has(id));
-      if (call.variant === 'pressure') blitz(extra, extra === 'SS' ? 'edge' : 'blitz', extra === 'SS' ? s : -s, 'A');
-      else jobs[extra] = call.variant === 'spy' ? { kind: 'spy' } : { kind: 'rat', x: 0, depth: 9 };
+      const extra = down ? 'SS' : pool.find(id => !map.has(id));
+      if (call.variant === 'pressure' && extra) blitz(extra, extra === 'SS' ? 'edge' : 'blitz', extra === 'SS' ? s : -s, 'A');
+      else if (extra) jobs[extra] = call.variant === 'spy' ? { kind: 'spy' } : { kind: 'rat', x: down ? s * 3 : 0, depth: 9 };
       for (const [d, r] of map) jobs[d] = { kind: 'man', id: r };
       break;
     }
@@ -367,12 +402,15 @@ function assignments(call, lay) {
     }
   }
   // Man technique from the call: press or off, inside or outside leverage,
-  // trailing with help over the top or staying on top with none.
-  const help = call.coverage !== 'blitz';
-  for (const id of men) Object.assign(jobs[id], {
-    press: call.press && id.startsWith('CB'),
-    lev: call.lev, help, cushion: help ? 4 : 5, jam: call.jam,
-  });
+  // trailing with help over the top or staying on top with none. In Cover 1
+  // the only help is the free safety in the middle: a receiver split wider
+  // than FREE_REACH yd from him has none (2-man has a half over everybody,
+  // Cover 0 nobody).
+  for (const id of men) {
+    const r = lay.at[jobs[id].id];
+    const help = call.coverage === 'blitz' ? false : call.coverage === 'cover1' ? !!r && Math.abs(r.x - postShade(lay)) < Math.min(FREE_REACH, wide) : true;
+    Object.assign(jobs[id], { press: call.press && id.startsWith('CB'), lev: call.lev, help, cushion: 4, jam: call.jam });
+  }
   // Against a bunch, the men on it banjo: they settle who takes whom by
   // the release (in, out and up) instead of chasing through the traffic.
   if (lay.bunch && men.length) {
@@ -423,6 +461,9 @@ function showSpots(call, lay, plan, togoal) {
     else if (r) spots[id] = { x: r.x + side * 0.6, z: 4.5 };
     else spots[id] = { x: side * 4.2, z: lay.heavy >= 4 ? 4.2 : 4.8 };
   }
+  // From any other look a linebacker who rushes at the snap creeps up to
+  // CREEP yd (a delayed rusher shows his drop).
+  if (!mug) for (const id of ['LB1', 'LB2', 'LB3']) if (rush[id] && !(rush[id].at > 0)) spots[id].z = Math.min(spots[id].z, CREEP);
   // The mug look always shows two men walked up, whether they come or not.
   if (mug) for (const id of [R.mike, R.ol(-s), R.ol(s)]) {
     if (walked.length >= 2 || walked.includes(id) || jobs[id]?.kind === 'man') continue;
@@ -430,15 +471,20 @@ function showSpots(call, lay, plan, togoal) {
     spots[id] = { x: side * 0.85, z: 1.7 }; walked.push(id);
   }
   // Safeties by shell; a man safety in the mug or base look sits over his man.
+  // A one-high free safety who has to spin to the weak side's deep half or
+  // quarter cheats a little that way (still in the middle).
+  const spins = TWO_HIGH.has(call.coverage);
   const safety = {
     'two-high': { SS: { x: s * 9.5, z: 12.5 }, FS: { x: -s * 9.5, z: 13 } },
-    'one-high': { FS: { x: s * 1.2, z: 14 }, SS: { x: s * 6, z: 8.5 } },
+    'one-high': { FS: { x: spins ? -s * ONE_HIGH_CHEAT : s * 1.2, z: 14 }, SS: { x: s * 6, z: 8.5 } },
     base: { FS: { x: -s * 5.5, z: 10.5 }, SS: { x: s * 6, z: 9.5 } },
     mug: { FS: { x: -s * 5.5, z: 10.5 }, SS: { x: s * 6, z: 9 } },
   }[shell];
   for (const id of ['FS', 'SS']) {
     const job = jobs[id];
     if (rush[id] && mug) spots[id] = rushSpot(id, rush[id]);
+    // A safety who rushes from any other look creeps down to the box.
+    else if (rush[id]) spots[id] = { ...safety[id], z: Math.min(safety[id].z, 7) };
     else if (job?.kind === 'man' && at(job.id) && (mug || shell === 'base' || (shell === 'one-high' && id === 'SS'))) {
       const r = at(job.id);
       spots[id] = { x: r.x + inside(r.x) * 1.5, z: 6.5 };
@@ -463,7 +509,7 @@ function showSpots(call, lay, plan, togoal) {
 
 // The defenders' specs for this call against a formation.
 function alignment(call, formation, spot) {
-  const lay = readFormation(formation), plan = assignments(call, lay);
+  const lay = readFormation(formation), plan = assignments(call, lay, 110 - spot);
   const spots = showSpots(call, lay, plan, 110 - spot), { jobs, rush } = plan;
   call.layout = lay; call.men = plan.men;
   call.rushers = DEFENSE.map(p => p.id).filter(id => rush[id]);
@@ -626,7 +672,7 @@ export const defense = {
     // The shell: the natural look, or a disguise. Deep completions bring more
     // two-high looks; short yardage shows more of the mug and the one-high
     // box, passing downs more two-high and pressure looks.
-    const list = SHELLS[variant === 'cloud' ? 'cloud' : family], shells = {};
+    const list = SHELLS[variant === 'cloud' ? 'cloud' : family].filter(sh => makeable(family, variant, sh)), shells = {};
     list.forEach((sh, i) => {
       let w = i === 0 ? 1 - skill.disguise : skill.disguise * SHELL_WEIGHT[sh] / list.slice(1).reduce((a, k) => a + SHELL_WEIGHT[k], 0);
       if (sh === 'two-high') w *= (1 + tend.deep) * (short ? 0.6 : long ? 1.4 : 1);
@@ -637,8 +683,8 @@ export const defense = {
     const total = Object.values(shells).reduce((a, b) => a + b, 0);
     for (const sh in shells) shells[sh] /= total;
     const shell = choose(shells, u[4]), disguised = shell !== list[0];
-    const timing = disguised && u[5] < skill.late ? 'late' : 'snap', hold = 0.3 + 0.3 * u[6];
-    const red = togoal <= 20;
+    const timing = disguised && u[5] < skill.late ? 'late' : 'snap', hold = skill.hold + 0.15 * u[6];
+    const red = togoal <= RED_ZONE;
     const press = u[7] < Math.min(0.9, PRESS[family] + 0.2 * tend.quick + (red ? 0.2 : 0) - (TWO_HIGH.has(family) ? 0 : 0.15 * tend.deep));
     const lev = u[8] < (OUTSIDE[family] ?? 0.5) ? 'outside' : 'inside';
     const fronts = FRONTS.map((f, i) => (long && i === 3 ? 2 : short && i === 0 ? 1.5 : short && i === 3 ? 0.5 : 1));

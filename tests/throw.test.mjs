@@ -44,3 +44,33 @@ test('a set throw spreads with its length and its style, and short throws stay c
   assert.ok(mean(misses) > 0.35, `a deep lob misses its spot by ${mean(misses).toFixed(2)} yd on average`);
   assert.ok(Math.max(...short) < 0.5, `a shallow cross spreads ${Math.max(...short).toFixed(2)} yd at most`);
 });
+
+test('a deep ball goes away from the man on the receiver, the miss folded the same way', () => {
+  // Verts against man: every deep receiver has a defender on him. The catch
+  // point moves square to the throw or back toward the quarterback (never
+  // beyond the receiver), the ball comes in at the far shoulder, a miss
+  // toward the defender folds back, and a lob drops in high.
+  let placed = 0, full = 0;
+  for (let seed = 1; seed <= 12; seed++) for (const id of ['X', 'B']) for (const style of ['touch', 'lob']) {
+    const s = new Simulation(seed, { offense: 'verts', coverage: 'man', difficulty: 'pro', mode: 'reps', stunt: 'none' });
+    s.snap();
+    run(s, 2.0);
+    if (s.phase !== 'live' || !s.requestThrow(id, style)) continue;
+    const qb = { x: s.byId.QB.x, z: s.byId.QB.z };
+    for (let i = 0; i < 60 && s.phase === 'live'; i++) s.step(STEP);
+    const pass = s.pass;
+    if (!pass || pass.distance < 25) continue;
+    assert.equal(pass.target.y, style === 'lob' ? 1.8 : 1.65, 'catch height by style');
+    const { ux, uz, k } = pass.place;
+    if (k < 0.5) continue;
+    placed++;
+    const dx = pass.target.x - qb.x, dz = pass.target.z - qb.z, len = Math.hypot(dx, dz);
+    assert.ok((ux * dx + uz * dz) / len < 0.2, `${seed} ${id} ${style}: never beyond the receiver`);
+    // The flight ends at the far shoulder: `hands` off the catch point that way.
+    const b = s.ball, t = pass.duration - pass.elapsed, end = { x: b.x + b.vx * t, z: b.z + b.vz * t };
+    const off = (end.x - pass.target.x) * ux + (end.z - pass.target.z) * uz;
+    assert.ok(off > 0.3 * k && Math.hypot(end.x - pass.target.x, end.z - pass.target.z) < 0.5, `${seed} ${id} ${style}: the ball comes in ${off.toFixed(2)} yd to his far side`);
+    if (k > 0.999) { full++; assert.ok(pass.error.x * ux + pass.error.z * uz > -1e-9, `${seed} ${id} ${style}: the miss leans away from the defender`); }
+  }
+  assert.ok(placed >= 12 && full >= 6, `placed ${placed}, fully ${full}`);
+});

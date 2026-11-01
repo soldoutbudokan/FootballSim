@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation, STEP } from '../dist/js/sim.js';
+import { speedCap } from '../dist/js/sim/common.js';
 
 const rep = (seed, options = {}) => new Simulation(seed, { offense: 'mesh', coverage: 'cover3', difficulty: 'pro', mode: 'reps', stunt: 'none', ...options });
 const gap = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -350,11 +351,11 @@ test('against four rushers the pocket holds about 3.2 s at Rookie, 2.6 at Pro an
   assert.equal(tops('rookie'), tops('allpro'), 'the same bodies at every level');
 });
 
-test('a rusher who beats his man bends at the quarterback; a Rookie runs on up the arc', () => {
+test('a rusher who beats his man bends at the quarterback; a Rookie bends only part way', () => {
   // A locked end well upfield of the quarterback wins with a speed rush (the
   // win forced at 1.2 s). His rip heads at the quarterback, slipped outside
-  // by the move's slip (about 19 degrees) at All-pro; at Rookie it carries
-  // on up his arc, wider of him.
+  // by the move's slip (about 19 degrees) at All-pro; at Rookie it bends only
+  // half way from his arc (DISCIPLINE bend 0.5), wider of him.
   const rips = difficulty => {
     const out = [];
     for (let seed = 1; seed <= 12; seed++) {
@@ -374,7 +375,38 @@ test('a rusher who beats his man bends at the quarterback; a Rookie runs on up t
   };
   const rookie = rips('rookie'), allpro = rips('allpro');
   assert.ok(allpro < 22, `All-pro winners rip within ${allpro.toFixed(0)} degrees of him`);
-  assert.ok(rookie > allpro + 20, `Rookie ${rookie.toFixed(0)} vs All-pro ${allpro.toFixed(0)} degrees`);
+  assert.ok(rookie > allpro + 10, `Rookie ${rookie.toFixed(0)} vs All-pro ${allpro.toFixed(0)} degrees`);
+});
+
+test('a rusher nobody blocks takes the straight lane, skirting the blocks; a winner bursts flat out', () => {
+  // The six-man blitz: a man no blocker has aims at the launch point (or
+  // the quarterback once he has moved), or 1.2 yd beside the first block in
+  // the way, outside it for an edge rusher. A man who beats his blocker
+  // runs at the quarterback at his full speed.
+  let free = 0, skirted = 0, bursts = 0;
+  for (let seed = 1; seed <= 16; seed++) {
+    const s = new Simulation(seed, { offense: 'mesh', coverage: 'blitz', difficulty: 'pro', mode: 'reps' }), qb = s.byId.QB;
+    s.snap();
+    while (s.phase === 'live' && s.time < 3) {
+      s.step(STEP);
+      for (const d of s.rushers()) {
+        if (d.wonAt > 0 && s.time - d.wonAt > 0.3 && s.time - d.wonAt < 0.5 && !d.lock && !s.sawOut(d) && !s.sawThrow(d)) {
+          bursts++;
+          assert.ok(Math.hypot(d.want.x, d.want.z) > 0.99 * speedCap(d, 1), `${seed} ${d.id}: the winner runs flat out`);
+        }
+        if (!d.aim || s.time < 0.4 || !s.unblocked(d) || d.wonAt > 0 || gap(d, qb) < 3.2 || s.sawOut(d) || s.sawThrow(d) || s.readsRun(d) || s.twistAim(d, s.laneOf(d))) continue;
+        free++;
+        const ref = s.freeRef(d), lane = s.laneOf(d);
+        if (gap(d.aim, ref) < 1e-9) continue;
+        // (The bodies have moved one step since he took his aim.)
+        const bodies = s.players.filter(o => (o.role === 'ol' || (o.team === 'defense' && o.lock)) && Math.abs(gap(o, d.aim) - 1.2) < 0.1);
+        assert.ok(bodies.length, `${seed} ${d.id}: aims at the launch point or beside a block`);
+        if (lane.edge && Math.abs(ref.z - d.z) > 0.3 * gap(ref, d)) assert.ok(bodies.some(o => Math.sign(d.aim.x - o.x) === lane.side), `${seed} ${d.id}: an edge rusher passes outside`);
+        skirted++;
+      }
+    }
+  }
+  assert.ok(free > 200 && skirted > 20 && bursts > 20, `free steps ${free}, skirting ${skirted}, bursts ${bursts}`);
 });
 
 test('play action holds the defensive line for a beat', () => {
