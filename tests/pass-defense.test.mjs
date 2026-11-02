@@ -164,3 +164,17 @@ test('breaking on the ball: a man near the flight gets to it ahead of the catch,
   Object.assign(d, { x: -26, z: 90 });
   assert.equal(s.breakOnBall(d, s.readFlight(d)), null);
 });
+
+test('a defender misreads a flipped pass as the mirror image', () => {
+  const [plain, flipped] = [false, true].map(flip => {
+    const s = new Simulation(7, { offense: 'mesh', coverage: 'cover3', difficulty: 'rookie', flip });
+    s.phase = 'air'; s.carrier = null; s.threw = true; s.time = 1;
+    s.ball = { x: (flip ? -1 : 1) * 4, y: 2.2, z: 50, vx: (flip ? -1 : 1) * 3, vy: 4, vz: 18 };
+    s.pass = { receiver: 'X', target: { x: 0, y: 1.6, z: 70 }, duration: 1, elapsed: 0.2, style: 'touch', distance: 20 };
+    return s;
+  });
+  for (const id of ['CB1', 'CB2', 'FS', 'SS', 'LB2']) {
+    const a = plain.readFlight(plain.byId[id]), b = flipped.readFlight(flipped.byId[id]);
+    assert.ok(Math.abs(a.target.x + b.target.x) < 1e-9 && Math.abs(a.target.z - b.target.z) < 1e-9, `${id}: ${a.target.x.toFixed(2)} vs ${b.target.x.toFixed(2)}`);
+  }
+});

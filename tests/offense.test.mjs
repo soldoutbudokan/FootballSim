@@ -220,3 +220,110 @@ test('a ball carrier pushes a defender aside instead of running through him, and
   Object.assign(o, { x: c.x + 2, z: c.z });
   assert.equal(s.screened(q, c), false);
 });
+
+test('a throw that comes due past the line is pulled down, and a called run cannot be thrown away', () => {
+  // The quarterback steps up at a sprint and asks for the throw a yard
+  // short of the line; the stick stays forward through the wind-up.
+  let asked = 0, pulled = 0;
+  for (let seed = 1; seed <= 6; seed++) {
+    const s = rep('mesh', 'cover3', seed), qb = s.byId.QB;
+    let pending = false;
+    while (s.phase === 'live' && s.time < 4) {
+      if (!pending && !s.threw && qb.z > s.spot - 1 && qb.vz > 4) pending = s.requestThrow('A', 'bullet');
+      s.step(STEP, { z: 1, sprint: true });
+      if (s.phase === 'air') assert.ok(!s.crossedLine && qb.z <= s.spot + 0.3, `${seed}: released from past the line`);
+      if (pending && !s.throwIntent && !s.threw && s.phase === 'live') { pulled++; pending = false; assert.equal(qb.action, 'carry'); }
+    }
+    if (pending || pulled) asked++;
+  }
+  assert.ok(pulled >= 3, `pulled down ${pulled} of ${asked}`);
+  const s = rep('power', 'cover3', 1);
+  run(s, 0.32);
+  assert.equal(s.handoff, false);
+  assert.equal(s.throwAway(), false);
+  assert.equal(s.stats.attempts, 0);
+});
+
+test('a jam holds a receiver the ball is thrown to', () => {
+  // A hard jam on X at the snap holds him to about 1.1 s; a throw to him at
+  // 0.3 s must not let him run out of it toward the catch point.
+  const top = thrown => {
+    const s = new Simulation(3, { offense: 'slants', coverage: 'man', difficulty: 'pro', mode: 'reps' });
+    const jam = s.jam.bind(s), x = s.byId.X;
+    s.jam = () => false;
+    s.snap();
+    const random = s.random;
+    s.random = () => 0.99;
+    jam('X', 'CB1', 0.5);
+    s.random = random;
+    let most = 0;
+    while (s.phase !== 'dead' && s.time < x.jamUntil - 0.05) {
+      if (thrown && s.time >= 0.3 && !s.threw && !s.throwIntent) s.requestThrow('X', 'bullet');
+      s.step(STEP, {});
+      if (s.time > 0.6) most = Math.max(most, speedOf(x));
+    }
+    assert.ok(x.jamUntil > 1, 'held to ' + x.jamUntil.toFixed(2));
+    return { most, threw: s.threw };
+  };
+  const free = top(false), held = top(true);
+  assert.ok(held.threw);
+  assert.ok(held.most < free.most + 0.2, `thrown to, ${held.most.toFixed(1)} yd/s in the jam against ${free.most.toFixed(1)}`);
+});
+
+test('a quarterback stepping up slides off his own line and off a rusher in a block', () => {
+  const s = run(rep('mesh', 'cover3', 1), 0.6), qb = s.byId.QB, c = s.byId.C, d = s.byId.DT1;
+  assert.equal(s.carrier, 'QB');
+  for (const p of s.players) if (p !== qb) Object.assign(p, { x: p.x + 40 });
+  Object.assign(c, { x: 0, z: s.spot - 1 });
+  Object.assign(qb, { x: 0.1, z: s.spot - 1.5 });
+  s.separate();
+  assert.deepEqual([c.x, c.z], [0, s.spot - 1], 'the centre holds his ground');
+  assert.ok(gap(qb, c) > 0.51, 'the quarterback is moved off him');
+  Object.assign(d, { x: 3, z: s.spot - 2, lock: 'LG' });
+  Object.assign(qb, { x: 3.2, z: s.spot - 2.4 });
+  s.separate();
+  assert.deepEqual([d.x, d.z], [3, s.spot - 2], 'the locked rusher holds his ground');
+});
+
+test('a steered play-action quarterback is not faking', () => {
+  const ridden = rep('flood', 'cover3', 1);
+  run(ridden, 0.3);
+  assert.equal(ridden.fakeShown(), true);
+  assert.equal(ridden.requestThrow('X'), false, 'no throw while riding the fake');
+  const steered = rep('flood', 'cover3', 1);
+  run(steered, 0.3, () => {}, () => ({ z: -1 }));
+  assert.equal(steered.fakeShown(), false);
+  assert.equal(steered.requestThrow('X'), true, 'he made no fake, so he can throw');
+});
+
+test('exact ties break by the play side, so a flipped rep mirrors the same seed', () => {
+  const pair = (offense, coverage, seed) => [false, true].map(flip => rep(offense, coverage, seed, { flip }));
+  // Pursuit leverage and the pull-up fan, also for a man lined up over the ball.
+  const [a, b] = pair('power', 'cover3', 2);
+  for (const d of a.defense) {
+    const e = b.byId[d.id];
+    assert.equal(d.leverage, -e.leverage, d.id + ' leverage');
+    assert.equal(d.pullUp.fan, -e.pullUp.fan, d.id + ' fan');
+  }
+  // A play-action quarterback turning to a back straight behind him.
+  const [c, f] = pair('boot', 'cover3', 2);
+  c.step(STEP, {}); f.step(STEP, {});
+  assert.ok(Math.abs(c.byId.QB.facing + f.byId.QB.facing) < 1e-12 && c.byId.QB.facing !== 0, `QB turns ${c.byId.QB.facing.toFixed(3)} / ${f.byId.QB.facing.toFixed(3)}`);
+  // A receiver on a go with a defender head-up steps outside on both sides,
+  // and a back sitting over the ball slides to mirrored sides.
+  const sides = [false, true].map(flip => {
+    const s = rep('verts', 'cover3', 2, { flip }), m = flip ? -1 : 1, spot = s.spot, p = s.byId.B, r = s.byId.R;
+    run(s, 0.25);
+    for (const d of s.defense) Object.assign(d, { x: 0, z: spot + 40, vx: 0, vz: 0 });
+    Object.assign(p, { x: 21 * m, z: spot + 10, vx: 0, vz: 8, route: [{ x: 21 * m, z: spot + 30 }], routeIndex: 0, start: { x: 21 * m, z: spot }, avoidId: null, avoidSide: 0 });
+    Object.assign(s.byId.CB2, { x: 21 * m, z: spot + 11, action: 'run' });
+    const want = s.avoidWant(p, { x: 0, z: 8 }, s.time);
+    Object.assign(r, { sitting: true, sitX: 0, sitZ: spot + 3, slideAt: -9, route: [{ x: 0, z: spot + 3 }] });
+    s.seenDefense = [{ id: 'LB2', cover: true, x: 0.1 * m, z: spot + 4, vx: 0, vz: 0 }];
+    s.slide(r, s.time);
+    return { out: Math.sign(want.x) * m, sitX: r.sitX };
+  });
+  assert.deepEqual(sides.map(q => q.out), [1, 1], 'steps outside');
+  assert.equal(sides[0].sitX, -sides[1].sitX);
+  assert.notEqual(sides[0].sitX, 0);
+});

@@ -6,13 +6,16 @@ import { STEP, clamp, dist, scaled, seekWant, trackWant, speedCap, STUMBLE_SPEED
 const SHED_RANGE = 1.6, SHED_TIME = 0.3;  // a blocked man reads the ball carrier
 
 // The launch point: the spot the rush is aimed at and the line protects. Until
-// the quarterback sets it is `depth` yd behind the line (deeper if he drops
-// deeper). He has set once he slows below `still` yd/s after `settle` s, or at
-// `late` s whatever he is doing; the point is then frozen where he is (within
-// `wide` yd of the centre, `min` to `max` yd deep). The pocket is built around
+// the quarterback sets it is his drop's depth behind the line (`depth` yd
+// without a planned drop; deeper if he drops deeper). He has set once he
+// slows below `still` yd/s after `settle` s, or at `late` s whatever he is
+// doing (on play action, `late` s after the fake); the point is then frozen
+// where he is (within `wide` yd of the centre, `min` to `max` yd deep). A
+// quarterback running his drop by himself has not set while he rides a fake
+// or is more than `short` yd short of his depth. The pocket is built around
 // this spot: when the quarterback climbs or slides inside it, nobody on the
 // line moves with him.
-const LAUNCH = { depth: 7, settle: 0.45, still: 1, late: 1.2, wide: 2, min: 4.5, max: 10 };
+const LAUNCH = { depth: 7, settle: 0.45, still: 1, late: 1.2, wide: 2, min: 4.5, max: 10, short: 1 };
 
 // Pass protection (the pocket). Tackles kick-slide back and out, guards and
 // the centre set short (`kick` yd out, `depth` yd behind the line), and each
@@ -89,7 +92,10 @@ const TURN = 1.5;
 const MOVE_MIX = { edge: [0.5, 0.2], inside: [0.25, 0.45], blitzer: [0.5, 0.1] };
 // The quarterback leaves the pocket. A rusher sees it `recognise` s (by
 // difficulty, below) after his ordinary reaction latency, plus up to
-// `spread` s of his own; he reads the quarterback's run `anticipate` s ahead.
+// `spread` s of his own; once he sees him break for the edge (within `edge`
+// yd of the edge of the pocket box and still running out at `roll` yd/s or
+// more) he reads the run `anticipate` s ahead. A slide that stops short of
+// that is the quarterback moving inside the pocket: nobody reacts to it.
 // A locked rusher must then come off his block (the contain man as soon as
 // he sees the quarterback roll his way, below): an attempt lasting `min` to
 // `max` s (cut short if the quarterback runs within `close` yd of him) while
@@ -109,15 +115,15 @@ const MOVE_MIX = { edge: [0.5, 0.2], inside: [0.25, 0.45], blitzer: [0.5, 0.1] }
 // path (`lead` s ahead at least, `leadMax` at most), holding his depth
 // `front` to `hold` yd in front of it until he is outside him, then
 // squeezing to `front`; within `attack` yd, level with him or in front
-// (give or take `close` yd), he takes him on. A
-// free contain man does this as soon as he sees the quarterback run toward
-// his side at `roll` yd/s, before he is out. Inside rushers chase with
+// (give or take `close` yd), he takes him on. A contain man does this as
+// soon as he sees the quarterback break for the edge on his side (with his
+// ordinary reaction latency), before he is out. Inside rushers chase with
 // `inside` yd of inside-out leverage. Linemen keep riding the man they have;
 // one with nobody drifts toward the quarterback at `drift` of top speed, no
 // more than `roam` yd from his set, and only takes a rusher within `reach`
 // yd.
 const SCRAMBLE = {
-  spread: 0.1, anticipate: 0.35, min: 0.3, max: 0.6, fight: 1.4, widen: 0.8, square: 0.35, squareFrom: 0.64, retry: 0.2, burst: 4.5, recover: 0.25,
+  spread: 0.1, anticipate: 0.35, edge: 0.75, min: 0.3, max: 0.6, fight: 1.4, widen: 0.8, square: 0.35, squareFrom: 0.64, retry: 0.2, burst: 4.5, recover: 0.25,
   relock: 1, path: 0.5, width: 0.5, lead: 0.4, leadMax: 1, front: 1, hold: 3, close: 1.2, attack: 2.5, roll: 3, inside: 0.8, drift: 0.4, roam: 2.5, reach: 2.5,
 };
 // Discipline by difficulty (never speed): `recognise` (s, see SCRAMBLE),
@@ -141,8 +147,12 @@ const DISCIPLINE = {
 // Play action: until he reads pass a defensive lineman fits his gap `fit` yd
 // on his side of the line at `effort` of top speed, and once blocked holds
 // his ground (leaning in at `push` yd/s) instead of rushing; his pressure
-// clock starts when he reads pass. A called blitzer comes anyway.
-const PLAY_ACTION = { fit: 0.3, effort: 0.5, push: 0.3 };
+// clock starts when he reads pass. He reads pass the difficulty's `pa` s
+// after the snap at most, or his reaction latency after the quarterback
+// stops selling the fake: the fake is over, or the user has taken him off
+// it and he is no longer within `mesh` yd of the back. A called blitzer
+// comes anyway.
+const PLAY_ACTION = { fit: 0.3, effort: 0.5, push: 0.3, mesh: 1.8 };
 // Some reps the rush gets home sooner than others: every rusher's strength
 // is 2^(-`weak` to +`strong`) for the whole rep times 2^(±`lock`) for his
 // matchup (uniform in the exponent, from draws the rep makes anyway); see
@@ -174,9 +184,10 @@ const PEEL = { mark: 4, lead: 1.5 };
 // `slant` yd/s); the looper steps flat along the line (`behind` yd on his
 // side of it) until he is within `near` yd of his new gap, or `loop` s, then
 // rushes it. The line passes the stunt off (`pickup`: the share of reps it
-// sees it): when the penetrator crosses into the next man's zone, that man
-// takes him if he is free and within `reach` yd more than the lock range,
-// and the first blocker is free for the looper. A called pressure with more
+// sees it): when the penetrator crosses into the next man's zone (outside
+// in a T-E game, inside in an E-T game), that man takes him if he is free
+// or on the looper (the two trade men) and within `reach` yd more than the
+// lock range, and the first blocker is free for the looper. A called pressure with more
 // than `most` rushers brings its own picture: the line does not twist on it.
 const STUNT = { depth: 1.2, slant: 2.5, behind: 0.7, near: 0.8, loop: 1.1, pickup: 0.75, reach: 0.5, most: 5 };
 
@@ -241,8 +252,8 @@ export const protection = {
     let st = this.passRush;
     if (!st || st.players !== this.players) {
       st = this.passRush = {
-        players: this.players, launch: { x: this.pocketX(), z: this.spot - LAUNCH.depth }, set: false,
-        decided: false, stunt: null, strength: 1, containL: null, containR: null,
+        players: this.players, launch: { x: this.pocketX(), z: this.spot - (this.dropPlan?.depth ?? LAUNCH.depth) }, set: false,
+        decided: false, stunt: null, strength: 1, containL: null, containR: null, fakeEnd: null,
       };
     }
     return st;
@@ -263,14 +274,22 @@ export const protection = {
   // how fast he runs the arc.
   rushStrength(d) { return (this.rushState().strength || 1) * (d.rushEdge || 1); },
 
-  // On play action a defensive lineman plays the run until he reads pass,
-  // the difficulty's `pa` s after the snap (0 on any other play, or for a
-  // called blitzer).
-  readsPassAt(d) { return this.play.type === 'pa' && d.role === 'dl' && d.rush?.lane !== 'blitz' ? this.discipline().pa : 0; },
+  // On play action a defensive lineman plays the run until he reads pass
+  // (PLAY_ACTION; 0 on any other play, or for a called blitzer).
+  readsPassAt(d) { return this.play.type === 'pa' && d.role === 'dl' && d.rush?.lane !== 'blitz' ? this.fakeRead(d, this.discipline().pa) : 0; },
   readsRun(d) { return this.time < this.readsPassAt(d); },
 
+  // When this defender stops playing a play-action fake: his reaction
+  // latency after the quarterback stopped selling it, and `most` s after the
+  // snap at most.
+  fakeRead(d, most) {
+    const end = this.rushState().fakeEnd;
+    return end === null ? most : Math.min(most, end + (d.latency ?? 0));
+  },
+
   // The launch point follows the drop until the quarterback sets, then stays.
-  // The first live step also decides the twist.
+  // The first live step also decides the twist. On play action it also notes
+  // when the quarterback stops selling the fake (PLAY_ACTION).
   trackLaunch() {
     const st = this.rushState(), qb = this.byId.QB, L = st.launch;
     if (!st.decided && this.phase !== 'presnap') {
@@ -280,27 +299,37 @@ export const protection = {
       st.decided = true; st.stunt = this.planStunt(roll);
       st.strength = 2 ** (SPREAD.strong - (SPREAD.weak + SPREAD.strong) * (roll * 9973 % 1));
     }
-    if (st.set || this.phase === 'presnap') return;
-    L.z = Math.min(this.spot - LAUNCH.depth, qb.z);
-    const still = this.time > LAUNCH.settle && Math.hypot(qb.vx, qb.vz) < LAUNCH.still;
-    if (!still && this.time < LAUNCH.late && this.carrier === 'QB') return;
+    if (this.phase === 'presnap') return;
+    const pa = this.play.type === 'pa', plan = this.dropPlan, scripted = !!plan && !this.qbSteered;
+    const faking = pa && this.carrier === 'QB' && this.faking();
+    if (pa && st.fakeEnd === null && !(faking && (scripted || dist(qb, this.byId.R) < PLAY_ACTION.mesh))) st.fakeEnd = this.time;
+    if (st.set) return;
+    const depth = plan?.depth ?? LAUNCH.depth;
+    L.z = Math.min(this.spot - depth, qb.z);
+    const dropping = scripted && ((plan.mesh && faking) || qb.z > this.spot - depth + LAUNCH.short);
+    const still = !dropping && this.time > LAUNCH.settle && Math.hypot(qb.vx, qb.vz) < LAUNCH.still;
+    const late = LAUNCH.late + (pa ? st.fakeEnd ?? Infinity : 0);
+    if (!still && this.time < late && this.carrier === 'QB') return;
     const x0 = this.pocketX();
     st.set = true;
-    L.x = clamp(qb.x, x0 - LAUNCH.wide, x0 + LAUNCH.wide);
+    // (One already out of the pocket, rolling, leaves it where it was.)
+    if (Math.abs(qb.x - L.x) <= POCKET.box) L.x = clamp(qb.x, x0 - LAUNCH.wide, x0 + LAUNCH.wide);
     L.z = clamp(qb.z, this.spot - LAUNCH.max, this.spot - LAUNCH.min);
   },
 
   // A twist between an end and the tackle beside him, on a seeded share of
   // pass reps: `roll` is the rep's draw (one on every pass rep, so the
   // stream does not depend on the front), whose remainder also picks the
-  // side, the game and whether the line sees it; none on a pressure with
+  // side (in the play's own frame, so a flipped play twists on the mirrored
+  // side), the game and whether the line sees it; none on a pressure with
   // more than STUNT `most` rushers. `config.stunt` can force one ({ kind:
-  // 'TE' | 'ET', side: -1 | 1, picked }) or rule it out ('none').
+  // 'TE' | 'ET', side: -1 | 1 in the play's own frame, like d.rush.side,
+  // picked }) or rule it out ('none'). The plan's `side` is on the field.
   planStunt(roll) {
     const chance = this.discipline().stunt, forced = this.config.stunt;
     if (forced === 'none' || (!forced && (roll >= chance || this.rushers().length > STUNT.most))) return null;
     const u = forced ? roll : roll / chance, x0 = this.pocketX();  // uniform again, given a twist
-    const side = forced?.side || (u < 0.5 ? -1 : 1), kind = forced?.kind || (u * 2 % 1 < 0.5 ? 'TE' : 'ET');
+    const side = (this.config.flip ? -1 : 1) * (forced?.side || (u < 0.5 ? -1 : 1)), kind = forced?.kind || (u * 2 % 1 < 0.5 ? 'TE' : 'ET');
     const dl = this.defense.filter(d => d.rushing && d.role === 'dl' && !(d.rush?.at > 0) && Math.sign(d.start.x - x0) === side);
     if (dl.length < 2) return null;
     dl.sort((a, b) => side * (a.start.x - b.start.x));
@@ -357,10 +386,10 @@ export const protection = {
 
   // How long a rusher takes to see the quarterback go somewhere new: his
   // reaction latency, the difficulty's recognition time and a little of his
-  // own (fixed by his number, no draw). The trail holds 0.6 s.
+  // own (fixed by his number, no draw). The trail holds 1 s.
   recognition(d) {
     const own = (d.number * 0.618034) % 1;
-    return Math.min(0.55, (this.skill.latency ?? 0.28) + this.discipline().recognise + SCRAMBLE.spread * own);
+    return Math.min(0.95, (this.skill.latency ?? 0.28) + this.discipline().recognise + SCRAMBLE.spread * own);
   },
 
   // The quarterback as this rusher has recognised him, and as he sees him
@@ -378,11 +407,19 @@ export const protection = {
     return p;
   },
 
-  // This rusher has seen the quarterback leave the pocket.
+  // This rusher has seen the quarterback leave the pocket, or break for its
+  // edge on a run that takes him out (read `anticipate` s ahead).
   sawOut(d) {
     if (this.carrier !== 'QB') return false;
-    const seen = this.seenQB(d), x = seen.x + seen.vx * SCRAMBLE.anticipate;
-    return Math.abs(x - this.rushState().launch.x) > POCKET.box;
+    const seen = this.seenQB(d), off = seen.x - this.rushState().launch.x;
+    return Math.abs(off) > POCKET.box || (this.breaking(seen) !== 0 && Math.abs(off + seen.vx * SCRAMBLE.anticipate) > POCKET.box);
+  },
+
+  // The side the quarterback, as seen in `seen`, is breaking out of the
+  // pocket to (SCRAMBLE `edge`, `roll`), or 0.
+  breaking(seen) {
+    const off = seen.x - this.rushState().launch.x, side = Math.sign(off);
+    return Math.abs(off) > POCKET.box - SCRAMBLE.edge && side * seen.vx >= SCRAMBLE.roll ? side : 0;
   },
 
   // What a free rusher aims through his lane at: the launch point, or the
@@ -488,6 +525,7 @@ export const protection = {
     // nobody has.
     const taken = new Set();
     for (const o of blockers) {
+      o.lastMan = o.assignment;  // last step's man (assignProtection keeps him if it can)
       const d = o.assignment ? this.byId[o.assignment] : null;
       const owner = d && blockers.some(q => q !== o && q.lostTo === d.id), past = d && dist(d, qb) < dist(o, qb);
       if (!d || o.role !== 'ol' || scramble || owner || past || d.lock || taken.has(d.id) || !threats.includes(d) || !this.declared(d) || !this.inZone(o, d, PROTECT.keep)) o.assignment = null;
@@ -545,10 +583,11 @@ export const protection = {
   },
 
   // A rusher the line is sure of: a lineman, or a man it has seen come
-  // (`read` s after he goes). A counted man who has not shown either way is
-  // only a maybe (see assignProtection).
+  // (rushing, `read` s after he goes). A counted man who has not shown
+  // either way (a spy, a man sitting in the box) is only a maybe (see
+  // assignProtection).
   declared(d) {
-    return d.role === 'dl' || this.passRush?.call?.tipped.has(d.id) || this.time >= (d.rush?.at > 0 ? d.rush.at : this.getOff(d)) + PROTECT.read;
+    return d.role === 'dl' || this.passRush?.call?.tipped.has(d.id) || (d.rushing && this.time >= (d.rush?.at > 0 ? d.rush.at : this.getOff(d)) + PROTECT.read);
   },
 
   // The line has seen this man drop: `read` s ago he was more than `gone` yd
@@ -569,7 +608,7 @@ export const protection = {
     const x0 = this.pocketX(), slide = this.passRush.call.slide;
     const lt = this.setPoint(this.byId.LT).x, rt = this.setPoint(this.byId.RT).x, set = this.setPoint(o).x;
     const shift = (set - x0) * slide >= -0.5 ? PROTECT.slide * slide : 0;
-    return Math.abs(clamp(d.x, lt, rt) - set - shift) <= PROTECT.zone + extra;
+    return Math.abs(clamp(d.x, Math.min(lt, rt), Math.max(lt, rt)) - set - shift) <= PROTECT.zone + extra;
   },
 
   // A blocker lets go of a man who has stopped rushing (he drops into
@@ -581,17 +620,25 @@ export const protection = {
   },
 
   // A twist crossing the line: the blocker on the penetrator hands him to
-  // the next man once he has crossed into that man's zone, if the line saw
-  // it and the next man is free and close; he is then free for the looper.
+  // the next man the way he crosses (out in a T-E game, in in an E-T game)
+  // once he has crossed into that man's zone, if the line saw it and the
+  // next man is close and free or on the looper (whom he lets go: they
+  // exchange); the first blocker is then free for the looper.
   passOff(st) {
     const sk = st.stunt;
     if (!sk || !sk.picked || sk.passed) return;
     const d = this.byId[sk.pen], o = d.lock ? this.byId[d.lock] : null;
     if (!o || o.role !== 'ol') return;
-    const mine = this.setPoint(o).x, gone = Math.abs(mine - d.x);
-    const next = this.line.find(n => n !== o && !n.lock && this.time >= n.beatenUntil && sk.side * (this.setPoint(n).x - mine) > 0
-      && Math.abs(this.setPoint(n).x - d.x) < gone && dist(n, d) < POCKET.engage + STUNT.reach);
+    const mine = this.setPoint(o).x, gone = Math.abs(mine - d.x), way = sk.kind === 'TE' ? sk.side : -sk.side;
+    let next = null;
+    for (const n of this.line) {
+      const at = this.setPoint(n).x;
+      if (n === o || (n.lock && n.lock !== sk.loop) || this.time < n.beatenUntil || way * (at - mine) <= 0
+        || Math.abs(at - d.x) >= gone || dist(n, d) >= POCKET.engage + STUNT.reach) continue;
+      if (!next || Math.abs(at - mine) < Math.abs(this.setPoint(next).x - mine)) next = n;
+    }
     if (!next) return;
+    if (next.lock) this.unlock(next, this.byId[next.lock]);
     this.unlock(o, d);
     this.lock(next, d);
     sk.passed = true;
@@ -784,7 +831,7 @@ export const protection = {
     const plan = new Map();
     if (!n || !k) return plan;
     const cost = blockers.map(o => rushers.map(d => dist(d, qb) < dist(o, qb) || (scramble ? o.role === 'ol' && dist(o, d) > SCRAMBLE.reach : !this.inZone(o, d) || this.lostLooper(o, d) || (o.role === 'rb' && !(d.rushing && this.declared(d)))) ? Infinity
-      : dist(o, this.squarePoint(d)) - (o.assignment === d.id ? 1 : 0) - (o.lostTo === d.id ? POCKET.own : 0) + (o.role === 'rb' ? POCKET.backCost : 0)));
+      : dist(o, this.squarePoint(d)) - (o.lastMan === d.id ? 1 : 0) - (o.lostTo === d.id ? POCKET.own : 0) + (o.role === 'rb' ? POCKET.backCost : 0)));
     // Leaving a rusher free costs far more than any trip, and more the sooner
     // he would arrive (about 2 yd of trips per yard nearer the quarterback).
     const free = rushers.map(d => scramble || this.declared(d) ? 100 - 14 * dist(d, qb) / d.top : PROTECT.maybe);
@@ -900,11 +947,16 @@ export const protection = {
   sawThrow(d) { return this.phase === 'air' && this.pass.elapsed >= d.latency; },
 
   // A rusher's pursuit after the throw (PEEL): to where the ball comes down,
-  // carried on along the line of the receiver running under it.
+  // carried on along the line of the receiver he sees running under it (as
+  // he reads him, with his reaction latency).
   peelWant(d) {
     const flight = this.readFlight(d), end = flight.target, cap = speedCap(d, 1);
     let mark = null, near = PEEL.mark;
-    for (const id of RECEIVERS) { const r = this.byId[id], g = r ? dist(r, end) : Infinity; if (g < near) { near = g; mark = r; } }
+    for (const id of RECEIVERS) {
+      if (!this.byId[id]) continue;
+      const r = this.estimate(id, d.latency), g = dist(r, end);
+      if (g < near) { near = g; mark = r; }
+    }
     const lead = mark ? clamp(dist(d, end) / cap - flight.remaining, 0, PEEL.lead) : 0;
     d.aim = { x: end.x + (mark ? mark.vx * lead : 0), z: end.z + (mark ? mark.vz * lead : 0) };
     return scaled(d.aim.x - d.x, d.aim.z - d.z, cap);
@@ -924,9 +976,9 @@ export const protection = {
   },
 
   // The contain man's aim on a scramble to his side (null for anyone else,
-  // and, with `rolling`, unless he has seen the quarterback run his way at
-  // `roll` yd/s or more, which he reads with his ordinary reaction latency:
-  // it is his key): outside the point where he can meet the
+  // and, with `rolling`, unless he has seen the quarterback break for the
+  // edge his way, which he reads with his ordinary reaction latency: it is
+  // his key; see breaking): outside the point where he can meet the
   // quarterback's path, holding his depth `front` to `hold` yd in front of
   // it (he does not retreat after him) until he is outside him, then
   // squeezing to `front` yd; once he is within `attack` yd, level with him
@@ -935,8 +987,8 @@ export const protection = {
   // not run around him to win his edge back.
   containAim(d, rolling = false) {
     const st = this.rushState(), now = this.watchQB(d);
-    if (rolling && (this.carrier !== 'QB' || Math.abs(now.vx) < SCRAMBLE.roll)) return null;
-    const roll = rolling ? Math.sign(now.vx) : Math.sign(this.seenQB(d).x - st.launch.x) || 1;
+    const roll = rolling ? (this.carrier === 'QB' ? this.breaking(now) : 0) : Math.sign(this.seenQB(d).x - st.launch.x) || 1;
+    if (!roll) return null;
     if ((roll > 0 ? st.containR : st.containL) !== d.id) return null;
     if (d.z > now.z - SCRAMBLE.close && dist(d, now) < SCRAMBLE.attack) return 'attack';
     const lead = clamp(dist(d, now) / speedCap(d, 1), SCRAMBLE.lead, SCRAMBLE.leadMax);

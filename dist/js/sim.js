@@ -103,10 +103,12 @@ const MESH_REACH = 1.25;               // QB to back, body centres, at the excha
 
 // Each defender's pursuit leverage and pull-up spot, varied by his index
 // with low-discrepancy fractions (no random draws, so the seeded stream is
-// unchanged). The side is the one he lined up on; the middle men alternate.
-function assignPursuitAngles(d, k) {
-  const f = (k * 0.618034) % 1, g = (k * 0.381966 + 0.2) % 1;
-  const side = Math.abs(d.start.x) > 0.5 ? Math.sign(d.start.x) : (k % 2 ? 1 : -1);
+// unchanged). The side is the one he lined up on, from the ball at x0; the
+// middle men alternate in the play's frame (`playSide` +1, or -1 on a
+// flipped play), so a flipped rep mirrors.
+function assignPursuitAngles(d, k, x0 = 0, playSide = 1) {
+  const f = (k * 0.618034) % 1, g = (k * 0.381966 + 0.2) % 1, off = d.start.x - x0;
+  const side = Math.abs(off) > 0.5 ? Math.sign(off) : (k % 2 ? 1 : -1) * playSide;
   d.leverage = side * (LEVERAGE.min + LEVERAGE.spread * f);
   d.pullUp = {
     radius: PULL_UP.radius + PULL_UP.spread * g, fan: side * PULL_UP.fan * (0.4 + 0.6 * f),
@@ -542,7 +544,7 @@ export class Simulation {
     this.byId = Object.fromEntries(this.players.map(p => [p.id, p]));
     this.offense = this.players.filter(p => p.team === 'offense');
     this.defense = this.players.filter(p => p.team === 'defense');
-    this.defense.forEach(assignPursuitAngles);
+    this.defense.forEach((d, k) => assignPursuitAngles(d, k, this.pocketX(), this.playSide()));
     this.line = this.offense.filter(p => p.role === 'ol');
     this.trails = new Map(this.players.map(p => [p.id, new Trail()]));
     // The offense's reads (readCoverage), the scramble drill and the
@@ -554,6 +556,11 @@ export class Simulation {
     this.lastBall = { ...this.ball };
     this.saveFrame();
   }
+
+  // +1, or -1 on a flipped play. Exact ties (a man straight over the ball,
+  // an about-turn) break toward the same side of the play, not of the
+  // field, so a flipped rep is the mirror image of the same seed.
+  playSide() { return this.config.flip ? -1 : 1; }
 
   get effectivePlay() {
     const hot = Object.fromEntries(Object.entries(this.hotRoutes).map(([id, kind]) => [id, hotRouteFor(id, kind, this.play)]));
@@ -604,8 +611,15 @@ export class Simulation {
     return this.play.type === 'pa' && this.phase === 'live' && !this.fakeDone && this.time < FAKE.max;
   }
 
+  // The fake as the defense sees it: a play-action quarterback riding the
+  // fake at the mesh, not steered out of it. Run reads key on this, not on
+  // the call.
+  fakeShown() {
+    return this.faking() && !this.qbSteered && !!this.dropPlan?.mesh;
+  }
+
   throwAway() {
-    if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || this.threw || this.time < 0.3) return false;
+    if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || this.threw || this.play.type === 'run' || this.time < 0.3) return false;
     this.stats.attempts++; this.threw = true;
     this.finish('Thrown away', 0, 'incomplete');
     return true;
@@ -648,7 +662,9 @@ export class Simulation {
     const along = pace > 0.3 ? (vx * ux + vz * uz) / pace : 0;
     const per7 = along >= 0 ? THROW.across + (THROW.toward - THROW.across) * along : THROW.across + (THROW.away - THROW.across) * -along;
     const spread = THROW.set + length + pace / 7 * per7 + pressure * THROW.pressure;
-    const long = (this.random() - 0.5) * spread, wide = (this.random() - 0.5) * spread;
+    // `wide` is drawn in the play's frame, so a flipped rep misses to the
+    // mirrored side.
+    const long = (this.random() - 0.5) * spread, wide = (this.random() - 0.5) * spread * this.playSide();
     const error = { x: ux * long + uz * wide, z: uz * long - ux * wide };
     // Placement (PLACE): away from the defenders, the miss folded the same way.
     const place = this.placement(qb, p, target, duration, ux, uz), into = error.x * place.ux + error.z * place.uz;
@@ -658,7 +674,8 @@ export class Simulation {
     target.x = clamp(target.x, -29, 29); target.z = clamp(target.z, 0, 119);
     this.qbFacing = null;
     // The ball leaves the throwing (right) hand, a little ahead of the body,
-    // and comes in at the receiver's far shoulder.
+    // and comes in at the receiver's far shoulder. He throws (and carries)
+    // right-handed on a flipped play too: the one intended asymmetry.
     const fx = Math.sin(qb.facing), fz = Math.cos(qb.facing), hands = PLACE.hands * place.k;
     const from = { x: qb.x + fz * 0.25 + fx * 0.35, y: 1.85, z: qb.z - fx * 0.25 + fz * 0.35 };
     const to = { x: clamp(target.x + place.ux * hands, -29.5, 29.5), y: PLACE.catch[intent.style], z: clamp(target.z + place.uz * hands, 0, 119.5) };
@@ -755,7 +772,13 @@ export class Simulation {
     this.updateBodies(dt);
     if (this.carrier === 'QB' && this.byId.QB.z > this.spot + 0.3) this.crossedLine = true;
     this.recordTrails();
-    if (this.throwIntent && this.time >= this.throwIntent.at) this.release();
+    // A quarterback who steps over the line during the wind-up pulls the
+    // ball down (requestThrow refuses past the line too).
+    if (this.throwIntent && this.crossedLine) {
+      this.throwIntent = null;
+      const qb = this.byId.QB;
+      qb.action = this.restingAction(qb); qb.actionTime = 0;
+    } else if (this.throwIntent && this.time >= this.throwIntent.at) this.release();
     if (this.phase === 'air') this.flyBall(dt);
     this.checkCarrier();
     if (this.time > 22 && this.phase !== 'dead') this.endRep('Rep complete', 'timeout');
@@ -807,7 +830,7 @@ export class Simulation {
       p.sprinting = true;
       if (this.time < GET_OFF[p.role]) { p.want = ZERO; continue; }
       if (this.phase === 'air' && this.pass.receiver === id && this.pass.elapsed > 0.12) {
-        p.want = meetWant(p, this.pass.target, (this.pass.duration || 0) - this.pass.elapsed, speedCap(p));
+        p.want = this.jammed(p, meetWant(p, this.pass.target, (this.pass.duration || 0) - this.pass.elapsed, speedCap(p)));
         continue;
       }
       // A back who picked up a blitzer stays in to block (see protect).
@@ -897,7 +920,7 @@ export class Simulation {
     if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || !this.scrambling()) return;
     const boot = this.dropPlan?.boot;
     if (boot && Math.sign(off) === boot) return;
-    this.drillAt = this.time; this.drillSide = Math.sign(off) || 1;
+    this.drillAt = this.time; this.drillSide = Math.sign(off) || this.playSide();
     const runners = RECEIVERS.map(id => this.byId[id]).filter(p => !p.pickup && this.carrier !== p.id);
     for (const deep of [false, true]) {
       const group = runners.filter(p => (p.z - this.spot >= DRILL.split) === deep);
@@ -926,8 +949,13 @@ export class Simulation {
         want = this.avoidWant(p, want, clock);
       }
     }
-    if (clock < p.jamUntil) want = { x: want.x * JAM.damp + p.jamSide * JAM.push, z: want.z * JAM.damp };
-    return want;
+    return this.jammed(p, want, clock);
+  }
+
+  // A jam (JAM) damps a receiver's wanted velocity and pushes him across
+  // while it lasts, whether he runs his route or to a ball in the air.
+  jammed(p, want, clock = this.time) {
+    return clock < p.jamUntil ? { x: want.x * JAM.damp + p.jamSide * JAM.push, z: want.z * JAM.damp } : want;
   }
 
   // The decisions along a route (see SIT, BEND and LATE), each taken once.
@@ -983,7 +1011,7 @@ export class Simulation {
   slide(p, clock) {
     const end = p.route[p.route.length - 1], near = this.nearestSeen(p.sitX, p.sitZ);
     if (!near || clock - p.slideAt < SIT.every || Math.hypot(near.x - p.sitX, near.z - p.sitZ) >= SIT.crowd) return;
-    const side = Math.abs(near.x - p.sitX) > 0.2 ? Math.sign(p.sitX - near.x) : Math.sign(this.pocketX() - p.sitX) || 1;
+    const side = Math.abs(near.x - p.sitX) > 0.2 ? Math.sign(p.sitX - near.x) : Math.sign(this.pocketX() - p.sitX) || this.playSide();
     const x = clamp(p.sitX + side * SIT.slide, end.x - SIT.shift, end.x + SIT.shift);
     if (Math.abs(x - p.sitX) < 0.3) return;
     p.sitX = clamp(x, -LATE.edge, LATE.edge); p.slideAt = clock;
@@ -998,7 +1026,7 @@ export class Simulation {
     // Away from his leverage; with the man straight behind him, the way the
     // route breaks, or toward the middle of the field.
     const near = this.nearestSeen(p.x, p.z), x0 = this.pocketX(), from = p.route.length > 1 ? p.route[p.route.length - 2] : p.start;
-    let side = near && Math.abs(p.x - near.x) > SIT.leverage ? Math.sign(p.x - near.x) : Math.abs(end.x - from.x) > 0.5 ? Math.sign(end.x - from.x) : -Math.sign(p.x - x0) || 1;
+    let side = near && Math.abs(p.x - near.x) > SIT.leverage ? Math.sign(p.x - near.x) : Math.abs(end.x - from.x) > 0.5 ? Math.sign(end.x - from.x) : -Math.sign(p.x - x0) || this.playSide();
     if (Math.abs(p.x + side * SIT.away) > LATE.edge) side = -side;
     const to = { x: clamp(p.x + side * SIT.away, -LATE.edge, LATE.edge), z: Math.max(this.spot + 1, p.z - SIT.back) };
     p.route = [...p.route.slice(0, p.routeIndex), to];
@@ -1034,7 +1062,7 @@ export class Simulation {
       if (!s.cover || sz < p.z + SHELL.over || Math.hypot(sx - p.x, sz - p.z) < SHELL.own) continue;
       if (sx <= p.x) lo = Math.max(lo, sx); else hi = Math.min(hi, sx);
     }
-    const end = p.route[p.key], x0 = this.pocketX(), side = Math.sign(end.x - x0) || 1;
+    const end = p.route[p.key], x0 = this.pocketX(), side = Math.sign(end.x - x0) || this.playSide();
     let x = clamp((lo + hi) / 2, end.x - BEND.bend, end.x + BEND.bend);
     if ((x - x0) * side < BEND.hash) x = x0 + side * BEND.hash;
     p.route = p.route.map((q, i) => (i === p.key ? { x, z: q.z } : q));
@@ -1086,7 +1114,9 @@ export class Simulation {
     if (p.avoidId !== best.id || !p.avoidSide) {
       const next = p.route[Math.min(p.routeIndex + 1, p.route.length - 1)];
       const toward = (next.x - p.x) * nx + (next.z - p.z) * nz;
-      p.avoidSide = Math.abs(lat) > 0.1 ? -Math.sign(lat) : Math.sign(toward) || 1;
+      // Head-up on a straight leg he steps to the outside (the side of the
+      // ball he is on, in the frame of the normal).
+      p.avoidSide = Math.abs(lat) > 0.1 ? -Math.sign(lat) : Math.sign(toward) || Math.sign((p.x - this.pocketX()) * nx) || this.playSide();
       p.avoidId = best.id;
     }
     // He gives up at most AVOID.off yd of his line: a man who keeps walling
@@ -1112,7 +1142,7 @@ export class Simulation {
     const r = typeof receiver === 'string' ? this.byId[receiver] : receiver;
     const d = typeof defender === 'string' ? this.byId[defender] : defender;
     if (!r || !d || !RECEIVERS.includes(r.id) || r.team !== 'offense' || this.phase !== 'live' || this.carrier === r.id || this.time < r.jamUntil) return false;
-    const side = Math.abs(r.x - d.x) > 0.2 ? Math.sign(r.x - d.x) : Math.sign(r.x - this.pocketX()) || 1;
+    const side = Math.abs(r.x - d.x) > 0.2 ? Math.sign(r.x - d.x) : Math.sign(r.x - this.pocketX()) || this.playSide();
     const win = this.random(), how = this.random();
     r.jamSide = side;
     if (win < JAM.clean) { r.jamUntil = this.time + seconds * JAM.quick; return true; }
@@ -1134,10 +1164,10 @@ export class Simulation {
     const r = this.byId.R, first = r.route[0];
     if (this.play.type !== 'pa' || !first) return plan;
     const next = r.route[1] || first, near = project(r.start, first, qb);
-    const nx = near.uz, nz = -near.ux, side = -Math.sign((next.x - first.x) * nx + (next.z - first.z) * nz) || 1;
+    const nx = near.uz, nz = -near.ux, side = -Math.sign((next.x - first.x) * nx + (next.z - first.z) * nz) || this.playSide();
     plan.mesh = { x: near.x + nx * side * FAKE.side, z: near.z + nz * side * FAKE.side };
     plan.depth = DROP.action; plan.open = false;
-    if (/boot/i.test(this.play.id + ' ' + this.play.name)) plan.boot = -Math.sign(next.x - first.x) || (this.config.flip ? -1 : 1);
+    if (/boot/i.test(this.play.id + ' ' + this.play.name)) plan.boot = -Math.sign(next.x - first.x) || this.playSide();
     return plan;
   }
 
@@ -1145,7 +1175,8 @@ export class Simulation {
   // always wins; untouched he runs his drop.
   planPasser(p, amount) {
     this.qbFacing = null;
-    if (amount >= 0.05) { this.qbSteered = true; return; }
+    // Steered, he is not riding a fake any more (faking(), fakeShown()).
+    if (amount >= 0.05) { this.qbSteered = true; this.fakeDone = true; return; }
     if (this.throwIntent || p.action === 'throw') { p.want = ZERO; p.ease = DROP.plant; return; }
     if (this.qbSteered) { p.want = ZERO; p.ease = DROP.reset; return; }
     const plan = this.dropPlan, r = this.byId.R;
@@ -1280,8 +1311,11 @@ export class Simulation {
   // pushed: contact with defenders is resolved by tackling, so until a tackle
   // is tried a defender in his way is pushed aside (not run through), and
   // teammates step out of his way (except the quarterback at the mesh).
+  // A quarterback still behind the line is a body in the pocket, not a
+  // runner in the open field: he slides off his blockers and off a rusher
+  // in a block, who hold their ground, so stepping up never moves the line.
   separate() {
-    const players = this.players, carrier = this.carrier;
+    const players = this.players, carrier = this.carrier, pocket = carrier === 'QB' && this.phase === 'live' && !this.crossedLine;
     for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
       const a = players[i], b = players[j];
       const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz), r = (a.role === 'ol' || b.role === 'ol') ? 0.72 : 0.56;
@@ -1290,6 +1324,11 @@ export class Simulation {
         const other = a.id === carrier ? b : a, sign = a.id === carrier ? 1 : -1;
         if (other.id === 'QB' || (this.tackle && (other.id === this.tackle.tackler || this.tackle.helpers.has(other.id)))) continue;
         const push = (r - d) * 0.36;
+        if (pocket && (other.team === 'offense' ? other.role === 'ol' || other.pickup : other.engaged || other.lock)) {
+          const qb = a.id === carrier ? a : b;
+          qb.x -= sign * dx / d * push; qb.z -= sign * dz / d * push;
+          continue;
+        }
         other.x += sign * dx / d * push; other.z += sign * dz / d * push;
         continue;
       }
@@ -1312,7 +1351,12 @@ export class Simulation {
   turnBody(p, dt, speed = Math.hypot(p.vx, p.vz)) {
     const target = this.facingTarget(p, speed);
     const rate = (p.flip > 0 ? FLIP_RATE : FACING_RATE) * dt;
-    p.facing = wrapAngle(p.facing + clamp(wrapAngle(target - p.facing), -rate, rate));
+    // An exact about-turn (a quarterback turning to a back straight behind
+    // him, a lineman backing straight up) turns through the play side, the
+    // offense's right (its left on a flipped play), so a flipped rep mirrors.
+    let turn = wrapAngle(target - p.facing);
+    if (Math.abs(turn) > Math.PI - 1e-9) turn = Math.PI * this.playSide() * (Math.cos(p.facing) < 0 ? -1 : 1);
+    p.facing = wrapAngle(p.facing + clamp(turn, -rate, rate));
     p.backpedal = speed > 0.8 && (p.vx * Math.sin(p.facing) + p.vz * Math.cos(p.facing)) / speed < -0.5;
     p.lean += (clamp(p.latAccel / p.agility, -1, 1) - p.lean) * (1 - Math.exp(-dt / 0.08));
   }

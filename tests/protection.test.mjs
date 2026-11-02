@@ -43,10 +43,39 @@ test('the line does not slide with a quarterback moving inside the pocket', () =
   assert.ok(mean(shifts) < 0.25 && Math.max(...shifts) < 1, `pairs moved ${mean(shifts).toFixed(2)} yd on average, at most ${Math.max(...shifts).toFixed(2)}`);
 });
 
+test('a quick slide inside the pocket is not a scramble: nobody comes off his block or carries his man with him', () => {
+  // Full stick (keyboard input is digital, so every keyboard slide is one)
+  // 2.5 yd sideways after he sets, then he stops, inside the box; the same
+  // rep standing. Nobody reads a scramble or starts a shed (the contain end
+  // included), and the pairs that stay locked end up where they would have.
+  const shifts = [];
+  let slides = 0;
+  for (let seed = 1; seed <= 24; seed++) {
+    const a = fourMan(rep(seed)), b = fourMan(rep(seed)), qb = a.byId.QB;
+    a.snap(); b.snap();
+    run(a, 1.3); run(b, 1.3);
+    if (a.phase !== 'live') continue;
+    const x0 = qb.x, pairs = a.defense.filter(d => d.lock).map(d => [d.id, d.lock]);
+    while (a.phase === 'live' && b.phase === 'live' && a.time < 2.4) {
+      a.step(STEP, qb.x - x0 < 2.5 ? { x: 1 } : {}); b.step(STEP);
+      assert.ok(Math.abs(qb.x - a.passRush.launch.x) < 4.4 && !a.scrambling(), `${seed}: he stayed inside the pocket`);
+      for (const d of a.rushers()) assert.ok(!a.sawOut(d) && !d.disengage, `${seed}: ${d.id} read a scramble at ${a.time.toFixed(2)} s`);
+    }
+    if (a.phase !== 'live' || b.phase !== 'live') continue;
+    slides++;
+    for (const [id, by] of pairs) if (a.byId[id].lock === by && b.byId[id].lock === by) shifts.push(Math.abs(a.byId[id].x - b.byId[id].x), Math.abs(a.byId[by].x - b.byId[by].x));
+  }
+  assert.ok(slides >= 8 && shifts.length >= 16, `slides ${slides}, pairs ${shifts.length / 2}`);
+  assert.ok(mean(shifts) < 0.25 && Math.max(...shifts) < 1, `rushers and blockers moved ${mean(shifts).toFixed(2)} yd on average, at most ${Math.max(...shifts).toFixed(2)}`);
+});
+
 test('a scramble makes the roll-side end contain while the backside end chases', () => {
   // Roll right from 1.2 s. Once free, the end on that side aims outside the
   // quarterback's path (or takes him on from outside or in front, within
   // reach); the end on the far side, once free, runs at him from behind.
+  // A roll at this pace looks like a slide inside the pocket until he nears
+  // its edge, so the end reads it only then and often cannot get back in
+  // front of him: the rush closes on him in a good share of reps, not most.
   let containSteps = 0, outsideAims = 0, running = 0, chasing = 0, reps = 0, closed = 0;
   for (let seed = 1; seed <= 20; seed++) {
     const s = fourMan(rep(seed)), qb = s.byId.QB;
@@ -71,7 +100,7 @@ test('a scramble makes the roll-side end contain while the backside end chases',
   assert.ok(reps >= 16, 'scrambles ' + reps);
   assert.ok(containSteps > 100 && outsideAims / containSteps > 0.95, `the contain end aimed outside him in ${outsideAims}/${containSteps} steps`);
   assert.ok(running > 60 && chasing / running > 0.85, `the backside end ran at him in ${chasing}/${running} steps`);
-  assert.ok(closed >= reps * 0.5, `the rush closed within 2 s of the scramble in ${closed}/${reps}`);
+  assert.ok(closed >= reps * 0.25, `the rush closed within 2 s of the scramble in ${closed}/${reps}`);
 });
 
 test('a locked rusher needs a shed to leave his blocker when the quarterback scrambles', () => {
@@ -422,4 +451,90 @@ test('play action holds the defensive line for a beat', () => {
       assert.ok(s.rushers().every(d => gap(d, qb) > 3), `${seed}: a rusher near the quarterback at ${s.time.toFixed(2)} s`);
     }
   }
+});
+
+test('a flipped play gets the mirrored protection and the mirrored twist', () => {
+  // The same rep plain and flipped: every blocker has the same man (the
+  // defense mirrors too), and one man each on a four-man rush.
+  for (let seed = 1; seed <= 6; seed++) {
+    const [plain, flip] = [false, true].map(f => { const s = fourMan(rep(seed, { flip: f })); s.snap(); run(s, 0.1); return s; });
+    for (const o of plain.line) assert.equal(flip.byId[o.id].assignment, o.assignment, `${seed}: ${o.id}`);
+    assert.equal(new Set(flip.line.map(o => o.assignment).filter(Boolean)).size, 5, `${seed}: one man each`);
+  }
+  // A twist, forced or drawn, goes to the play's own side: the same two men
+  // on the mirrored side of the field.
+  let twists = 0;
+  for (let seed = 1; seed <= 30; seed++) {
+    for (const stunt of [{ kind: 'TE', side: 1, picked: true }, undefined]) {
+      const [plain, flip] = [false, true].map(f => { const s = fourMan(rep(seed, { flip: f, stunt, difficulty: 'allpro' })); s.snap(); s.step(STEP); return s.passRush.stunt; });
+      if (!plain && !flip) continue;
+      twists++;
+      assert.ok(plain && flip, `${seed}: a twist on both or neither`);
+      assert.deepEqual([flip.kind, flip.pen, flip.loop, flip.side], [plain.kind, plain.pen, plain.loop, -plain.side], `${seed}: the mirrored twist`);
+    }
+  }
+  assert.ok(twists >= 32, 'twists ' + twists);
+});
+
+test('an end-tackle twist is never handed outward', () => {
+  // In an E-T game the end crashes inside: the blocker on him may hand him
+  // in to the next man, never out to the man outside him.
+  const order = ['LT', 'LG', 'C', 'RG', 'RT'], centre = 2;
+  for (const side of [1, -1]) for (let seed = 1; seed <= 12; seed++) {
+    const s = fourMan(rep(seed, { stunt: { kind: 'ET', side, picked: true } }));
+    s.snap(); s.step(STEP);
+    const st = s.passRush.stunt;
+    if (!st) continue;
+    let by = null;
+    while (s.phase === 'live' && s.time < 2.2) {
+      s.step(STEP);
+      const now = s.byId[st.pen].lock, handed = s.drainEvents().includes('pass-off');
+      if (handed) assert.ok(Math.abs(order.indexOf(now) - centre) < Math.abs(order.indexOf(by) - centre), `${seed}: ${by} handed the end out to ${now}`);
+      if (now) by = now;
+    }
+  }
+});
+
+test('play action: the launch point waits for the drop, and the line reads only the fake it sees', () => {
+  // He sets at his play-action depth after the fake, not at the mesh, and
+  // the point is where he then stands.
+  for (let seed = 1; seed <= 4; seed++) {
+    const s = fourMan(rep(seed, { offense: 'flood' })), qb = s.byId.QB;
+    s.snap();
+    while (s.phase === 'live' && !s.passRush?.set) {
+      s.step(STEP);
+      if (!s.passRush?.set) continue;
+      assert.ok(!s.faking(), `${seed}: set during the fake at ${s.time.toFixed(2)} s`);
+      assert.ok(s.spot - s.passRush.launch.z > 6.5, `${seed}: set ${(s.spot - s.passRush.launch.z).toFixed(1)} yd deep`);
+    }
+    run(s, 2.4);
+    if (s.phase === 'live') assert.ok(Math.abs(s.passRush.launch.z - qb.z) < 0.5, `${seed}: he stands ${(s.passRush.launch.z - qb.z).toFixed(1)} yd from the launch point`);
+  }
+  // A quarterback who backs straight out of the fake from the snap gives the
+  // linemen nothing to read: they read pass after their reaction latency.
+  // One who runs the fake holds them for the difficulty's `pa`.
+  const linemen = steer => {
+    const s = fourMan(rep(1, { offense: 'flood' }));
+    s.snap();
+    run(s, 0.45, x => (steer && x.byId.QB.z > x.spot - 7.5 ? { z: -1 } : {}));
+    return s.rushers().filter(d => s.readsRun(d)).length;
+  };
+  assert.equal(linemen(true), 0, 'no run read without a fake');
+  assert.equal(linemen(false), 4, 'the fake holds all four');
+});
+
+test('a counted man who neither rushes nor drops stays a maybe', () => {
+  // A linebacker in the box who sits (a spy): the line counts him but is
+  // never sure he comes, however long he sits there.
+  const s = fourMan(rep(1)), x0 = s.pocketX();
+  s.snap();
+  run(s, 0.1);
+  const lb = s.defense.find(d => d.role === 'lb' && s.passRush.call.count.has(d.id));
+  assert.ok(lb, 'a counted linebacker');
+  while (s.phase === 'live' && s.time < 1.2) {
+    Object.assign(lb, { x: lb.start.x, z: lb.start.z, vx: 0, vz: 0 });
+    s.step(STEP);
+    assert.equal(s.declared(lb), false, `${lb.id} declared at ${s.time.toFixed(2)} s`);
+  }
+  assert.ok(Math.abs(lb.start.x - x0) < 6);
 });

@@ -10,11 +10,12 @@ import { SHELLS } from '../dist/js/sim/defense.js';
 const gap = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const passPlays = PLAYS.filter(p => p.type !== 'run');
 // `honest`: show the family's natural shell and rotate at the snap, for the
-// tests about how a coverage is played rather than how it is disguised.
-function rep(offense, coverage, difficulty, seed = 1, honest = false) {
+// tests about how a coverage is played rather than how it is disguised;
+// `call` overrides more of the call (press).
+function rep(offense, coverage, difficulty, seed = 1, honest = false, call = {}) {
   const s = new Simulation(seed, { offense, coverage, difficulty, mode: 'reps' });
   if (honest) {
-    Object.assign(s.call, { shell: SHELLS[s.call.variant === 'cloud' ? 'cloud' : s.coverage][0], disguised: false, timing: 'snap' });
+    Object.assign(s.call, { shell: SHELLS[s.call.variant === 'cloud' ? 'cloud' : s.coverage][0], disguised: false, timing: 'snap' }, call);
     s.reset();
   }
   s.snap();
@@ -85,7 +86,8 @@ test('a defender with nobody to match leans toward the most open receiver', () =
   let closer = 0, cases = 0, total = 0;
   for (const coverage of ['cover3', 'cover2']) for (const play of passPlays) {
     const go = help => {
-      const s = rep(play.id, coverage, 'allpro', 1, true);
+      // Corners off: All-pro presses more often now, and a pressed corner is already on his man.
+      const s = rep(play.id, coverage, 'allpro', 1, true, { press: false });
       if (help !== undefined) s.skill = { ...s.skill, help };
       const leans = new Map();
       run(s, 1.8, () => {
@@ -211,4 +213,134 @@ test('in Cover 0 the man whose back stays in to block robs the shallow middle', 
     assert.ok(d.z - s.spot > 2 && d.z - s.spot < 13 && Math.abs(d.x) < 15, `${seed}: ${d.id} robbing at ${d.x.toFixed(1)}, ${(d.z - s.spot).toFixed(1)}`);
   }
   assert.ok(robbed >= 3, 'the back stayed in ' + robbed + '/4');
+});
+
+test('a robber never picks up a receiver past his hand-off depth, so he does not ping-pong between two', () => {
+  let rats = 0;
+  for (const difficulty of ['rookie', 'pro']) for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    const s = rep('slants', 'cover1', difficulty, seed), d = s.defense.find(q => q.assign?.kind === 'rat');
+    if (!d) continue;
+    rats++;
+    const h = [];
+    let flips = 0;
+    run(s, 4, () => {
+      h.push(d.job?.id || '-');
+      const L = h.length;
+      if (L >= 3 && h[L - 1] !== '-' && h[L - 2] !== '-' && h[L - 1] === h[L - 3] && h[L - 1] !== h[L - 2]) flips++;
+    });
+    assert.ok(flips <= 2, `${difficulty}/${seed}: ${d.id} flips between two men ${flips} times`);
+  }
+  assert.ok(rats >= 2, 'robber calls ' + rats);
+});
+
+test('a two-deep half or an empty deep middle leaning toward a vertical keeps his depth', () => {
+  // The underneath man's "sink under the vertical" is not a deep man's: the
+  // middle of the field keeps its landmark depth (an outside man stays on
+  // top of the receiver).
+  let leans = 0;
+  for (const coverage of ['cover2', 'cover3']) for (const play of ['verts', 'mesh', 'flood', 'curlflat']) for (const seed of [1, 2]) {
+    run(rep(play, coverage, 'allpro', seed, true), 2.2, s => {
+      for (const d of s.defense) {
+        const j = d.job;
+        if (d.assign?.kind !== 'deep' || j?.kind !== 'lean') continue;
+        assert.ok(j.floor, `${coverage}/${play}/${seed}: ${d.id}'s lean has a floor`);
+        const r = s.coverSeen[j.id];
+        if (!j.keep || !(r.z > s.spot + 7 && r.vz > 2)) continue;
+        leans++;
+        assert.ok(d.want.z > -2.5, `${coverage}/${play}/${seed} ${s.time.toFixed(2)}: ${d.id} comes downhill (${d.want.z.toFixed(1)} yd/s) under ${j.id}`);
+      }
+    });
+  }
+  assert.ok(leans > 50, 'deep leans on a vertical ' + leans);
+});
+
+test('the Tampa 2 pole runner runs the middle instead of leaning on a checkdown', () => {
+  let poles = 0;
+  for (const play of passPlays) for (const seed of [1, 2]) {
+    const s = rep(play.id, 'tampa2', 'allpro', seed, true), d = s.defense.find(q => q.assign?.role === 'pole');
+    if (!d) continue;
+    poles++;
+    run(s, 2.5, () => {
+      const j = d.job, r = j?.id && s.coverSeen[j.id];
+      if (j?.kind === 'lean') assert.ok(r.z > s.spot + 7, `${play.id}/${seed} ${s.time.toFixed(2)}: ${d.id} leans on ${j.id} at ${(r.z - s.spot).toFixed(1)} yd`);
+    });
+    assert.ok(d.z - s.spot > 9, `${play.id}/${seed}: the pole runner ends at ${(d.z - s.spot).toFixed(1)} yd`);
+  }
+  assert.ok(poles >= 10, 'pole runners ' + poles);
+});
+
+test('once the quarterback has scrambled the plaster rule holds even when he steps back inside the pocket box', () => {
+  let back = 0;
+  for (const seed of [1, 2, 3]) {
+    const s = new Simulation(seed, { offense: 'verts', coverage: 'cover3', difficulty: 'allpro', mode: 'reps' });
+    for (const d of s.defense.filter(q => q.rushing || q.role === 'dl')) Object.assign(d, { rushing: false, rush: undefined, assign: null, x: Math.sign(d.x) * 27, z: s.spot + 40 });
+    s.snap();
+    let dir = 1;
+    while (s.time < 3.4 && s.phase === 'live') {
+      const qb = s.byId.QB, off = qb.x - s.rushState().launch.x;
+      if (off > 4.8) dir = -1;
+      if (off < 3) dir = 1;
+      s.step(STEP, s.time > 0.3 ? { x: dir, z: 0 } : {});
+      if (s.phase !== 'live' || s.crossedLine || !s.call.rep.scrambled) continue;
+      if (!s.scrambling()) back++;
+      assert.ok(s.plastering(), `${seed} ${s.time.toFixed(2)}: plastering after the scramble`);
+    }
+  }
+  assert.ok(back > 20, 'steps back inside the box ' + back);
+});
+
+test('a quarters safety with no #1 on his side does not crash', () => {
+  const s = rep('mesh', 'cover4', 'allpro', 1);
+  s.call.layout.nums[1] = [];
+  assert.doesNotThrow(() => run(s, 1.5));
+});
+
+test('a delayed rusher shows a drop before his count instead of standing still', () => {
+  let shown = 0;
+  for (let seed = 1; seed <= 30; seed++) {
+    const s = rep('mesh', 'creeper', 'allpro', seed), d = s.defense.find(p => p.rush && p.rush.at >= 0.5);
+    if (!d) continue;
+    shown++;
+    const start = { x: d.x, z: d.z };
+    run(s, d.rush.at - 0.02);
+    assert.equal(d.rushing, false);
+    const moved = Math.hypot(d.x - start.x, d.z - start.z);
+    assert.ok(moved > 0.15 && moved < 1.5 && d.z > start.z, `${seed}: ${d.id} moved ${moved.toFixed(2)} yd`);
+  }
+  assert.ok(shown >= 3, 'delayed rushers ' + shown);
+});
+
+test('a deep man reads the throwing motion only after his reaction time', () => {
+  let reads = 0;
+  for (const coverage of ['cover3', 'cover1']) for (const seed of [1, 2, 3]) {
+    const s = run(rep('verts', coverage, 'allpro', seed), 1.8), z = s.defense.find(d => d.job?.kind === 'split');
+    if (!z || !s.requestThrow(z.job.a)) continue;
+    const t0 = s.time;
+    let at = null;
+    run(s, t0 + 0.3, () => { if (at === null && z.eyesOn) at = s.time - t0; });
+    if (at === null) continue;
+    reads++;
+    assert.ok(at >= z.latency - 1e-6, `${coverage}/${seed}: eyes on ${at.toFixed(3)} s after the wind-up, latency ${z.latency}`);
+  }
+  assert.ok(reads >= 2, 'eyes reads ' + reads);
+});
+
+test('a deep or quarters job does not flip and back on consecutive steps on a noisy read', () => {
+  // The half widening with #1, a half keeping a vertical, a quarters safety
+  // reading #2: once in, each holds while the receiver keeps coming.
+  let flips = 0, reps = 0;
+  for (const coverage of ['cover2', 'cover4', 'cover6']) for (const play of passPlays) for (const seed of [2]) {
+    const s = rep(play.id, coverage, 'allpro', seed), hist = new Map();
+    reps++;
+    run(s, 3, () => {
+      for (const d of s.defense) {
+        if (!d.job || !['deep', 'quarter'].includes(d.assign?.kind)) continue;
+        const h = hist.get(d.id) || [], key = d.job.kind + '>' + (d.job.id || '');
+        h.push(key); hist.set(d.id, h);
+        const L = h.length;
+        if (L >= 3 && h[L - 1] === h[L - 3] && h[L - 1] !== h[L - 2]) flips++;
+      }
+    });
+  }
+  assert.ok(flips <= reps * 0.15, `${flips} one-step flips in ${reps} reps`);
 });
