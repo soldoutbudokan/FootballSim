@@ -142,6 +142,36 @@ test('a throw on the run across the body is less accurate than one from a set ba
   assert.ok(across > 2 * set, 'across the body is much worse');
 });
 
+test('a throw on the run toward the receiver is caught most of the time, the run held as a lead too', () => {
+  // He rolls out from 0.8 s, sprinting to one side and a little upfield, and
+  // throws at 1.7 s to the nearest receiver on that side 8-20 yd away; the
+  // same reps from a set base. Holding the run's arrow as he throws (a lead
+  // toward that sideline) must not throw the ball away from him.
+  const rate = (mode, lead) => {
+    let n = 0, caught = 0;
+    for (let seed = 1; seed <= 6; seed++) for (const offense of ['slants', 'mesh', 'curlflat', 'stick']) for (const side of [1, -1]) {
+      const s = rep(offense, 'cover3', seed), qb = s.byId.QB;
+      const input = () => (mode === 'set' || s.time < 0.8 ? {} : { x: side, z: 0.3, sprint: true });
+      run(s, 1.7, () => {}, input);
+      if (s.phase !== 'live') continue;
+      let id = null, best = Infinity;
+      for (const r of RECEIVERS) {
+        const p = s.byId[r], d = gap(p, qb);
+        if ((p.x - qb.x) * side > 1 && p.z > s.spot + 4 && d > 8 && d < 20 && d < best) { best = d; id = r; }
+      }
+      if (!id || !s.requestThrow(id, 'touch', { x: lead ? side : 0, z: 0 })) continue;
+      for (let i = 0; i < 2400 && s.phase !== 'dead' && !s.completed; i++) s.step(STEP, input());
+      if (!s.pass) continue;
+      n++; caught += s.completed;
+    }
+    assert.ok(n >= 20, `${mode} throws ${n}`);
+    return caught / n;
+  };
+  const set = rate('set', false), moving = rate('run', false), held = rate('run', true);
+  assert.ok(moving >= 0.55 && moving <= set, `on the run ${(100 * moving).toFixed(0)} %, set ${(100 * set).toFixed(0)} %`);
+  assert.ok(held >= 0.55, `on the run with the arrow held ${(100 * held).toFixed(0)} %`);
+});
+
 test('the quarterback drops to a depth that fits the formation and the call', () => {
   const depth = s => s.spot - s.byId.QB.z;
   // Shotgun: three steps back to 7 yd; quick game: one step, to 6.
