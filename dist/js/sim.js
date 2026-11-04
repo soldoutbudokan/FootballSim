@@ -517,7 +517,8 @@ export class Simulation {
   constructor(seed = Date.now(), options = {}) {
     this.random = seededRandom(seed);
     this.config = { spot: 35, offense: 'random', coverage: 'random', difficulty: 'allpro', mode: 'drive', flip: false, ...options };
-    this.stats = { reps: 0, attempts: 0, completions: 0, yards: 0, passing: 0, rushing: 0, td: 0, ints: 0, sacks: 0 };
+    // td counts every touchdown; passTd only those on a completed pass (for the passer rating).
+    this.stats = { reps: 0, attempts: 0, completions: 0, yards: 0, passing: 0, rushing: 0, td: 0, passTd: 0, ints: 0, sacks: 0 };
     this.spot = clamp(Number(this.config.spot) || 35, 11, 105);
     this.down = 1; this.toGo = Math.min(10, GOAL - this.spot);
     this.play = PLAYS[0]; this.events = [];
@@ -1808,6 +1809,7 @@ export class Simulation {
     this.result = { label, yards: gain, kind, time: this.time, completed: this.completed, firstDown: gain >= this.toGo };
     this.stats.yards += gain;
     if (this.completed) this.stats.passing += gain;
+    if (this.completed && kind === 'touchdown') this.stats.passTd++;
     else if (!this.threw && kind !== 'sack') this.stats.rushing += gain;
     this.events.push(kind === 'touchdown' ? 'touchdown' : 'whistle');
     this.noteResult(this.result);
