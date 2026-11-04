@@ -242,7 +242,7 @@ try {
   assert.equal(await page.locator('#down-distance').innerText(), '2ND & 10');
 
   await page.locator('#playbook-open').click();
-  await page.getByRole('button', { name: 'Random every rep', exact: true }).click();
+  await page.getByRole('button', { name: 'Coordinator’s call', exact: true }).click();
   assert.equal(await page.locator('#offense').inputValue(), 'random');
   assert.equal(await page.locator('#down-distance').innerText(), '2ND & 10');
 

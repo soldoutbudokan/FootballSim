@@ -3,6 +3,7 @@ import { STEP, DEG, clamp, dist, wrapAngle, smoothstep, ZERO, STUMBLE_SPEED, GET
 import { DIFFICULTY, defense } from './sim/defense.js';
 import { coverage } from './sim/coverage.js';
 import { protection } from './sim/protection.js';
+import { callPlay } from './sim/offense.js';
 
 // Units are yards and seconds. +z points downfield (own end line z = 0, goal
 // lines at z = 10 and z = 110) and +x is the offense's right. A heading is
@@ -548,8 +549,9 @@ export class Simulation {
     this.completed = false; this.threw = false; this.events = [];
     this.catchAt = 0; this.possessionAt = 0; this.coverPlanAt = -1; this.coverSeen = {};
     if (newCalls) {
+      // Coordinator's call (offense.js): one draw, weighted for the situation.
       this.play = this.config.offense === 'random'
-        ? PLAYS[Math.floor(this.random() * PLAYS.length)]
+        ? callPlay({ down: this.down, toGo: this.toGo, spot: this.spot, mode: this.config.mode }, this.random())
         : PLAYS.find(p => p.id === this.config.offense) || this.play;
       this.callDefense();
       this.hotRoutes = {}; this.audibled = false;
