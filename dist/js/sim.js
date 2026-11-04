@@ -4,6 +4,7 @@ import { DIFFICULTY, defense } from './sim/defense.js';
 import { coverage } from './sim/coverage.js';
 import { protection } from './sim/protection.js';
 import { callPlay } from './sim/offense.js';
+import { running } from './sim/run.js';
 
 // Units are yards and seconds. +z points downfield (own end line z = 0, goal
 // lines at z = 10 and z = 110) and +x is the offense's right. A heading is
@@ -563,7 +564,10 @@ export class Simulation {
     this.players = formation.map(p => createPlayer(p, 'offense', this.spot, flip));
     this.players.push(...this.alignDefense(formation).map(p => createPlayer(p, 'defense', this.spot, flip)));
     this.players.forEach(p => {
-      p.shed = 2.5 + this.random() * 2.8;
+      // One draw a player: how long a block holds after a catch or a
+      // scramble (`shed`) and, from the same draw, his form on a run play
+      // (sim/run.js).
+      p.form = this.random(); p.shed = 2.5 + p.form * 2.8;
       p.route = routeFor(this.effectivePlay, p.id, this.spot, flip);
       if (p.team === 'defense') this.initDefender(p);
       else Object.assign(p, routeKind(p.route, p.start, this.spot));
@@ -943,7 +947,12 @@ export class Simulation {
     for (const d of this.defense) if (d.z > p.z - 1 && d.action !== 'tackle' && d.id !== p.blockDone && dist(d, p) < best) { best = dist(d, p); defender = d; }
     const c = this.guardPoint();
     if (!defender || best >= DOWNFIELD.range || dist(defender, c) > DOWNFIELD.near) return false;
-    if (best < DOWNFIELD.engage && !defender.engaged && this.time < defender.shed + 0.9) {
+    // On a run play the stalk block lives like any run block (sim/run.js).
+    if (this.play.type === 'run') {
+      const b = best < DOWNFIELD.engage ? this.runState().blocks.get(defender.id) : null;
+      if (best < DOWNFIELD.engage && !b && !this.stalkBlock(p, defender)) { p.blockDone = defender.id; p.want = ZERO; p.sprinting = false; return true; }
+      if (best < DOWNFIELD.engage && (!b || b.blockers.includes(p.id))) this.engage(p, defender);
+    } else if (best < DOWNFIELD.engage && !defender.engaged && this.time < defender.shed + 0.9) {
       if (p.blockOn !== defender.id) { p.blockOn = defender.id; p.blockAt = this.time; }
       // The block is over: he lets his man go and eases off.
       if (this.time - p.blockAt > DOWNFIELD.hold) { p.blockDone = defender.id; p.want = ZERO; p.sprinting = false; return true; }
@@ -1854,4 +1863,4 @@ export class Simulation {
 
   drainEvents() { return this.events.splice(0); }
 }
-Object.assign(Simulation.prototype, defense, coverage, protection);
+Object.assign(Simulation.prototype, defense, coverage, protection, running);

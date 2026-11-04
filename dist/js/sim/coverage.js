@@ -187,11 +187,13 @@ export const coverage = {
       if (this.phase === 'tackle' && dist(d, this.byId[this.carrier]) >= PULL_UP.pileOn) { d.want = this.pullUpWant(d); return; }
       // A delayed rusher goes on his count while the pass rush is on.
       if (!d.rushing && d.rush && d.rush.at > 0 && pocket && this.time >= d.rush.at) d.rushing = true;
-      // Run fits: each man reads the handoff at his own time (DIFFICULTY.runRead).
-      // Before the handoff he reads the back, not the quarterback at the mesh.
-      if (pursuit || (this.play.type === 'run' && this.time > d.readRun)) {
-        const target = this.play.type === 'run' && !this.handoff && !this.crossedLine ? 'R' : this.carrier || 'R';
-        this.turnHips(d); d.want = this.pursue(d, target, speedCap(d), 0, d.leverage); return;
+      // Run fits: on a run play each man reads the run at his own time
+      // (DIFFICULTY.runRead), then plays his gap (runFit, sim/run.js); until
+      // then he plays the pass he was called for. Otherwise he pursues once
+      // the ball is run.
+      if (this.play.type === 'run' ? this.time > d.readRun : pursuit) {
+        if (this.play.type === 'run') { this.turnHips(d); d.want = this.runFit(d); return; }
+        this.turnHips(d); d.want = this.pursue(d, this.carrier || 'R', speedCap(d), 0, d.leverage); return;
       }
       if (d.rushing) { d.want = this.rushWant(d); return; }
       // A spy attacks a quarterback who leaves the pocket.

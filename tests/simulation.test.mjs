@@ -31,12 +31,12 @@ test('new sessions default to All-pro drives with random calls and honor explici
   const s=new Simulation(2026);
   assert.equal(s.config.mode,'drive');assert.equal(s.config.difficulty,'allpro');
   assert.equal(s.config.offense,'random');assert.equal(s.config.coverage,'random');
-  assert.equal(s.byId.FS.latency,.18);
+  assert.equal(s.byId.FS.latency,s.play.type==='run'?.26:.2);
   s.snap();s.finish('Tackled',4,'tackle');s.next();
   assert.equal(s.spot,39);assert.equal(s.down,2);assert.equal(s.toGo,6);
   const custom=new Simulation(2026,{offense:'zone',coverage:'man',difficulty:'rookie',mode:'reps'});
   assert.equal(custom.play.id,'zone');assert.equal(custom.coverage,'man');
-  assert.equal(custom.config.difficulty,'rookie');assert.equal(custom.byId.FS.latency,.4);
+  assert.equal(custom.config.difficulty,'rookie');assert.equal(custom.byId.FS.latency,.32);
   custom.snap();custom.finish('Tackled',4,'tackle');custom.next();
   assert.equal(custom.spot,35);assert.equal(custom.down,1);assert.equal(custom.toGo,10);
 });
@@ -179,7 +179,12 @@ test('a pro defender reacts to where the carrier was 0.28 s ago and leads him to
   const lag=s.time-d.seen.t;assert.ok(Math.abs(lag-.28)<STEP*1.5,'lag '+lag);
   const then=history.find(h=>Math.abs(h.t-d.seen.t)<1e-6);assert.ok(then&&Math.abs(then.z-d.seen.z)<1e-6);
   assert.ok(r.z-d.seen.z>1.5,'the carrier has moved on since');assert.ok(d.aim.z>d.seen.z,'aims ahead of what he saw');
-  for(const [level,latency] of [['rookie',.4],['allpro',.18]])assert.equal(new Simulation(1,{difficulty:level}).byId.FS.latency,latency);
+  // A ball carrier on a designed run is read about as late at every level
+  // (`carrier`); the quarterback a little sooner by an All-pro (`latency`).
+  for(const [level,run,pass] of [['rookie',.32,.3],['allpro',.26,.2]]){
+    assert.equal(new Simulation(1,{difficulty:level,offense:'zone'}).byId.FS.latency,run);
+    assert.equal(new Simulation(1,{difficulty:level,offense:'mesh'}).byId.FS.latency,pass);
+  }
 });
 
 test('a well-timed cutback makes a closing defender overrun; a straight runner is tackled',()=>{
@@ -372,10 +377,12 @@ test('a pursuer who cannot close the last yard dives at the carrier',()=>{
 });
 
 test('a blocked defender comes off his block when the ball carrier runs at him',()=>{
+  // The man the runner comes at sheds first (sim/run.js): a back running
+  // hard at a blocked lineman pulls him off his block within 0.6 s.
   const s=practice(5);s.selectPlay('zone');s.snap();advance(s,1);
   const d=s.defense.find(q=>q.engaged&&q.role==='dl'),r=s.byId.R;assert.ok(d,'a lineman is blocked');
-  r.x=d.x;r.z=d.z-1.4;r.vx=0;r.vz=1;
-  for(let i=0;i<48;i++)s.step(STEP);
+  r.x=d.x;r.z=d.z-1.4;r.vx=0;r.vz=5;
+  for(let i=0;i<72&&d.engaged;i++)s.step(STEP,{x:d.x-r.x,z:d.z-r.z,sprint:true});
   assert.equal(d.engaged,null,'shed the block');
 });
 

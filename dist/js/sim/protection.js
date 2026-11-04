@@ -63,7 +63,7 @@ const POCKET = {
   moved: 1, chase: 3, effort: 0.92, pickup: 1.2, backCost: 2, own: 1.5,
 };
 // Pass-rush matchups: `push` is how fast the pair gives ground (yd/s), `win`
-// the hazard at Pro (per second at `ramp`; DISCIPLINE `plan` scales it) and
+// the hazard (per second at `ramp`; the rush plan, SET, scales it) and
 // `shed` the base chance to come off the block when the quarterback leaves
 // the pocket.
 const MATCHUP = {
@@ -101,10 +101,9 @@ const MOVE_MIX = { edge: [0.5, 0.2], inside: [0.25, 0.45], blitzer: [0.5, 0.1] }
 // `max` s (cut short if the quarterback runs within `close` yd of him) while
 // he fights across toward the quarterback at `fight` yd/s (the contain man
 // runs outside toward his contain spot at `widen` of his top speed). It
-// works at the matchup's shed chance, times the difficulty's `shed`, falling
-// to `square` of it when his blocker is square between him and the
-// quarterback. A failed attempt can be tried again after `retry` s; a good
-// one sends him off at `burst` yd/s and leaves the blocker `recover` s to
+// works at the matchup's shed chance, falling to `square` of it when his
+// blocker is square between him and the quarterback. A failed attempt can be
+// tried again after `retry` s; a good one sends him off at `burst` yd/s and leaves the blocker `recover` s to
 // turn; the man he got off cannot take him again for `relock` s, and on a
 // scramble nobody locks up with a rusher unless he is in that rusher's path
 // to the quarterback (within about `path` of straight ahead, as a cosine).
@@ -126,24 +125,38 @@ const SCRAMBLE = {
   spread: 0.1, anticipate: 0.35, edge: 0.75, min: 0.3, max: 0.6, fight: 1.4, widen: 0.8, square: 0.35, squareFrom: 0.64, retry: 0.2, burst: 4.5, recover: 0.25,
   relock: 1, path: 0.5, width: 0.5, lead: 0.4, leadMax: 1, front: 1, hold: 3, close: 1.2, attack: 2.5, roll: 3, inside: 0.8, drift: 0.4, roam: 2.5, reach: 2.5,
 };
-// Discipline by difficulty (never speed): `recognise` (s, see SCRAMBLE),
-// `shed` (scales the chance to get off a block), `stunt` (chance of an
-// end-tackle twist on a rep), `pa` (s a lineman plays the run on a
-// play-action fake), `plan` (scales the chance to win a rep: an All-pro
-// rusher reads his blocker's set, picks the move it gives him and has a
-// counter ready; a Rookie picks a move and runs it into the man), `bend`
-// (how far a winner turns at the quarterback rather than running on up his
-// lane: 0 runs the arc past him, 1 flattens straight at him), `jump` (s
+// Discipline by difficulty (never speed or strength): `recognise` (s, see
+// SCRAMBLE), `stunt` (chance of an end-tackle twist on a rep), `pa` (s a
+// lineman plays the run on a play-action fake), the rush plan (SET: `read`
+// the share of rushers who read the blocker's set and run the move it gives,
+// `tell` the share of the rest who give their move away so the blocker sets
+// for it, `counter` the share with a counter move ready; a Pro rusher does
+// none of these), `bend` (how far a winner turns at the quarterback rather
+// than running on up his lane: 0 runs the arc past him, 1 flattens straight
+// at him), `jump` (s
 // after the snap a called blitzer from the second level goes: he times the
 // count instead of reacting to the ball, GET_OFF; a Rookie does not) and
 // `tip` (the share of called blitzers who give it away before the snap,
 // creeping or staring at their gap, so the line counts them and knows they
 // come; fixed by the man's number, no draw).
 const DISCIPLINE = {
-  rookie: { recognise: 0.2, shed: 0.75, stunt: 0.08, pa: 0.9, plan: 0.25, bend: 0.5, jump: 0.28, tip: 0.8 },
-  pro: { recognise: 0.12, shed: 1, stunt: 0.15, pa: 0.75, plan: 1, bend: 0.7, jump: 0.2, tip: 0 },
-  allpro: { recognise: 0.06, shed: 1.15, stunt: 0.22, pa: 0.6, plan: 4, bend: 1, jump: 0.12, tip: 0 },
+  rookie: { recognise: 0.2, stunt: 0.08, pa: 0.9, read: 0, tell: 0.75, counter: 0, bend: 0.5, jump: 0.28, tip: 0.8 },
+  pro: { recognise: 0.12, stunt: 0.15, pa: 0.75, read: 0, tell: 0, counter: 0, bend: 0.7, jump: 0.2, tip: 0 },
+  allpro: { recognise: 0.06, stunt: 0.28, pa: 0.6, read: 0.8, tell: 0, counter: 0.8, bend: 1, jump: 0.12, tip: 0 },
 };
+// The rush plan. Each rep the blocker sets for one move (`moves`, even odds)
+// and so gives up another (`gives`: oversetting for the speed rush gives up
+// the counter inside, a short set for the counter gives up the bull,
+// anchoring for the bull gives up speed). A move against a set nobody has
+// read is an even contest: the matchup's win rate. A rusher who reads the set
+// (DISCIPLINE `read`) runs the move it gives and wins at `give` times that
+// rate (his move is drawn from the lane's mix as always and the set is the
+// one it `beats`, so reading changes the odds, not the moves); one with a
+// counter ready (`counter`) switches to the move the set gives once his own
+// has stalled `switch` s; one who gives his move away (`tell`: the same move
+// from the same stance every rep) finds the blocker set for it and wins at
+// `stone`. The bodies and the matchups are the same at every level.
+const SET = { give: 4, stone: 0.25, moves: ['speed', 'bull', 'counter'], gives: { speed: 'counter', counter: 'bull', bull: 'speed' }, beats: { counter: 'speed', bull: 'counter', speed: 'bull' }, switch: 0.5 };
 // Play action: until he reads pass a defensive lineman fits his gap `fit` yd
 // on his side of the line at `effort` of top speed, and once blocked holds
 // his ground (leaning in at `push` yd/s) instead of rushing; his pressure
@@ -193,16 +206,18 @@ const STUNT = { depth: 1.2, slant: 2.5, behind: 0.7, near: 0.8, loop: 1.1, picku
 
 export const protection = {
   // While the quarterback holds a called pass, the line protects the pocket
-  // (see protect). Otherwise (run plays, and after a catch or a scramble over
-  // the line) each lineman takes a defender (see assignBlocks) and the pair
-  // locks up until the defender's shed time; locked defenders drive toward
-  // the ball slowly.
+  // (see protect). On a designed run every block is a matchup with its own
+  // life (sim/run.js). Otherwise (after a catch or a scramble over the line)
+  // each lineman takes a defender (see assignBlocks) and the pair locks up
+  // until the defender's shed time; locked defenders drive toward the ball
+  // slowly.
   planBlocking(dt = STEP) {
     const run = this.play.type === 'run', guard = this.guardPoint();
     this.byId.R.pickup = null;
     if (!run) this.trackLaunch();
     if (this.time < GET_OFF.ol) return;
     if (this.inPocket()) { this.protect(dt); return; }
+    if (run) { this.runBlocking(dt); return; }
     for (const p of this.players) p.lock = null;
     this.readTheBall();
     const assigned = this.assignBlocks();
@@ -730,12 +745,20 @@ export const protection = {
     o.lock = d.id; d.lock = o.id; o.assignment = d.id;
     if (o.role === 'rb') o.blocked = true;
     const lane = this.laneOf(d), mix = lane.edge ? MOVE_MIX.edge : d.role !== 'dl' ? MOVE_MIX.blitzer : MOVE_MIX.inside;
-    d.need = -Math.log(1 - this.random()); d.have = 0;
+    const n = this.random();
+    d.need = -Math.log(1 - n); d.have = 0; d.lockAt = this.time;
     const r = this.random();
     d.rushMove = r < mix[0] ? 'speed' : r < mix[0] + mix[1] ? 'bull' : 'counter';
     // Where the draw fell inside the move's share: how good the move is.
     const u = d.rushMove === 'speed' ? r / mix[0] : d.rushMove === 'bull' ? (r - mix[0]) / mix[1] : (r - mix[0] - mix[1]) / (1 - mix[0] - mix[1]);
     d.rushEdge = 2 ** (SPREAD.lock * (2 * u - 1));
+    // The blocker's set and the rusher's plan against it (SET), from
+    // unrelated digits of the threshold's draw: no extra draws.
+    const dis = this.discipline(), plan = n * 7919 % 1;
+    d.setStops = SET.moves[Math.floor(n * 9973 % 1 * 3)]; d.rushPlan = null;
+    if (plan < dis.read) { d.setStops = SET.beats[d.rushMove]; d.rushPlan = 'read'; }
+    else if ((plan - dis.read) / (1 - dis.read) < dis.tell) { d.setStops = d.rushMove; d.rushPlan = 'told'; }
+    d.counterReady = n * 6007 % 1 < dis.counter;
     d.winSide = lane.side * MOVES[d.rushMove].side;
     d.disengage = null;
     d.vx *= 0.8; d.vz *= 0.8;
@@ -762,7 +785,12 @@ export const protection = {
       rate += POCKET.loose * closing * (1 - (1 - POCKET.onMove) * moving);
     }
     if (d.z < qb.z + POCKET.washDepth && Math.abs(d.x - qb.x) > 1.2) rate *= POCKET.wash;
-    d.have += rate * this.rushStrength(d) * this.discipline().plan * dt;
+    // A rusher with a counter ready goes to the move the set gives once his
+    // own has stalled (SET).
+    if (d.counterReady && d.rushPlan !== 'read' && this.time - d.lockAt > SET.switch) {
+      d.rushMove = SET.gives[d.setStops]; d.rushPlan = 'read'; d.winSide = this.laneOf(d).side * MOVES[d.rushMove].side;
+    }
+    d.have += rate * this.rushStrength(d) * this.moveFit(d) * dt;
     if (d.have < d.need) return;
     this.unlock(o, d);
     o.beatenUntil = this.time + POCKET.beaten; o.action = 'stumble'; o.actionTime = POCKET.beaten; o.lostTo = d.id;
@@ -780,6 +808,9 @@ export const protection = {
     d.wonAt = this.time;
     this.events.push('block-win');
   },
+
+  // How well the rusher's move suits his blocker's set (SET).
+  moveFit(d) { return d.rushPlan === 'read' ? SET.give : d.rushPlan === 'told' ? SET.stone : 1; },
 
   // Coming off a block when the quarterback leaves the pocket: a rusher who
   // has seen it starts an attempt (SCRAMBLE: duration and success drawn now),
@@ -807,13 +838,14 @@ export const protection = {
     return true;
   },
 
-  // The chance a shed works: the matchup's, scaled by discipline, and lower
-  // the squarer the blocker is between the rusher and the quarterback (one
-  // already turned, or run past, loses him).
+  // The chance a shed works: the matchup's, lower the squarer the blocker is
+  // between the rusher and the quarterback (one already turned, or run past,
+  // loses him). The same at every level: what difficulty changes is how soon
+  // he sees the quarterback go (DISCIPLINE `recognise`).
   shedChance(o, d) {
     const qb = this.byId.QB, toQB = scaled(qb.x - d.x, qb.z - d.z, 1), toO = scaled(o.x - d.x, o.z - d.z, 1);
     const square = clamp((toQB.x * toO.x + toQB.z * toO.z - SCRAMBLE.squareFrom) / (1 - SCRAMBLE.squareFrom), 0, 1);
-    return clamp(this.matchup(o, d).shed * this.discipline().shed * (1 - (1 - SCRAMBLE.square) * square), 0.05, 0.97);
+    return clamp(this.matchup(o, d).shed * (1 - (1 - SCRAMBLE.square) * square), 0.05, 0.97);
   },
 
   // Protection: block the most dangerous threats, those who would reach the
@@ -862,9 +894,11 @@ export const protection = {
   // his blocker is on his inside and cannot stop that, and if he cannot
   // keep up the pair parts); while shedding a rusher fights across toward
   // the quarterback; on play action, while he reads run, he holds his
-  // ground. Elsewhere he leans toward the ball at a walking pace.
+  // ground. In a run block the matchup moves him (runDrive, sim/run.js).
+  // Elsewhere he leans toward the ball at a walking pace.
   drivePast(d) {
     d.sprinting = false;
+    if (this.play.type === 'run' && !d.lock) { d.want = this.runDrive(d); return; }
     if (d.lock) {
       const o = this.byId[d.lock];
       const contain = this.containAim(d, true) || (this.sawOut(d) && this.containAim(d));
