@@ -153,6 +153,8 @@ kbd {
   border: 5px solid transparent; border-top-color: var(--target-color); border-bottom: 0;
 }
 .receiver-marker.active { background: var(--target-color); color: var(--navy-deep); }
+/* A long pass key (Space) widens its badge instead of shrinking below a readable size. */
+.receiver-marker.wide { width: auto; padding: 0 5px; font-size: 15px; }
 
 .pass-meter { position: absolute; left: 0; top: 0; z-index: 4; display: flex; align-items: flex-end; gap: 8px; pointer-events: none; will-change: transform; }
 .meter-track { position: relative; width: 12px; height: 92px; background: rgba(9, 26, 45, .86); border: 1px solid var(--line-strong); overflow: hidden; }
@@ -205,6 +207,7 @@ kbd {
 }
 .target-button strong { font: inherit; }
 .target-button.active { background: var(--target-color); color: var(--navy-deep); }
+.target-button.wide { width: auto; min-width: 52px; padding: 0 10px; font-size: 20px; }
 
 .snap-area { position: absolute; z-index: 4; right: var(--gutter); bottom: calc(26px + var(--safe-bottom)); display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .snap-button {
@@ -334,6 +337,7 @@ dialog { color: var(--paper); }
 /* Hot routes and audibles */
 .receiver-picker { display: flex; gap: 8px; margin-bottom: 22px; }
 .receiver-choice { width: 54px; height: 46px; font: 800 24px/1 var(--display); color: var(--paper); background: var(--panel-solid); border: 1px solid var(--line); border-top: 3px solid var(--target-color); }
+.receiver-choice.wide { width: auto; padding: 0 12px; font-size: 20px; }
 .receiver-choice[aria-pressed="true"] { color: var(--navy-deep); background: var(--target-color); border-color: var(--target-color); }
 .option-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .option-card {
@@ -464,9 +468,10 @@ dialog { color: var(--paper); }
   .snap-area { gap: 8px; }
   .snap-button { width: 136px; height: 56px; justify-content: center; font-size: 26px; }
   .snap-button kbd { display: none; }
-  /* Pass buttons: a column on the right edge, 1 at the top, within reach of
-     the right thumb: above Snap before the snap, above Juke/Sprint during
-     the play, with Throw away beside the bottom of the column. */
+  /* Pass buttons: a column on the right edge, the left outside receiver at
+     the top, within reach of the right thumb: above Snap before the snap,
+     above Juke/Sprint during the play, with Throw away beside the bottom of
+     the column. */
   .targets { left: auto; right: var(--gutter); transform: none; flex-direction: column; gap: 6px; bottom: calc(94px + var(--safe-bottom)); }
   .target-button { width: 56px; height: 46px; }
   .field-strip { width: 136px; height: 30px; }

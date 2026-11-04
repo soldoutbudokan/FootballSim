@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FORMATIONS, PLAYS, RECEIVERS, formationFor, routeFor, hotRouteFor, readParts, readText } from '../dist/js/plays.js';
+import { FORMATIONS, PLAYS, RECEIVERS, PASS_KEYS, formationFor, routeFor, hotRouteFor, passKey, passSlot, readParts, readText } from '../dist/js/plays.js';
 import { Simulation, STEP, WIDTH } from '../dist/js/sim.js';
 
 test('every call has a complete, distinct route combination and a legal eleven-player alignment', () => {
@@ -32,9 +32,27 @@ test('every call has a complete, distinct route combination and a legal eleven-p
   }
 });
 
+test('pass keys follow the screen: A and D swap receivers when the play flips', () => {
+  assert.deepEqual(RECEIVERS.map((id, i) => passKey(i).label), ['A', 'W', 'S', 'D', 'Space']);
+  assert.deepEqual(RECEIVERS.map((id, i) => passKey(i, true).label), ['D', 'W', 'S', 'A', 'Space']);
+  // Slot to receiver and receiver to slot are the same swap, and every key throws to one receiver.
+  for (const flip of [false, true]) {
+    assert.deepEqual(PASS_KEYS.map((k, slot) => passSlot(passSlot(slot, flip), flip)), [0, 1, 2, 3, 4]);
+    assert.equal(new Set(RECEIVERS.map((id, i) => passKey(i, flip).code)).size, RECEIVERS.length);
+  }
+  // In every formation A throws to the outside receiver on the left of the screen.
+  for (const formation of Object.values(FORMATIONS)) for (const flip of [false, true]) {
+    const x = id => formation.players.find(p => p.id === id).x * (flip ? -1 : 1);
+    const left = RECEIVERS.findIndex((id, i) => passKey(i, flip).code === 'KeyA');
+    const right = RECEIVERS.findIndex((id, i) => passKey(i, flip).code === 'KeyD');
+    assert.ok(x(RECEIVERS[left]) < 0 && x(RECEIVERS[left]) < x(RECEIVERS[right]), formation.id + (flip ? ' flipped' : ''));
+  }
+});
+
 test('coaching cues name receivers by their pass keys, never by letter', () => {
   const stick = PLAYS.find(p => p.id === 'stick');
-  assert.equal(readText(stick), 'Read the flat defender on the trips side: 3 settles inside him while 2 widens to the flat. 4 clears the sideline.');
+  assert.equal(readText(stick), 'Read the flat defender on the trips side: S settles inside him while W widens to the flat. D clears the sideline.');
+  assert.equal(readText(stick, true), 'Read the flat defender on the trips side: S settles inside him while W widens to the flat. A clears the sideline.');
   for (const call of PLAYS) {
     const parts = readParts(call);
     assert.ok(parts.length, call.id + ': has a read');
@@ -45,11 +63,12 @@ test('coaching cues name receivers by their pass keys, never by letter', () => {
       else assert.ok(Number.isInteger(part.receiver) && part.receiver >= 0 && part.receiver < RECEIVERS.length, call.id);
     }
     // The renderer's segments read back as the plain text.
-    assert.equal(parts.map(p => p.text ?? String(p.receiver + 1)).join(''), readText(call), call.id);
+    assert.equal(parts.map(p => p.text ?? passKey(p.receiver).label).join(''), readText(call), call.id);
     if (call.type === 'run') continue;
-    const text = readText(call);
     assert.ok(parts.some(p => p.receiver !== undefined), call.id + ': a pass read names its receivers');
-    assert.doesNotMatch(text, /\b[XYABR]\b/, call.id + ': bare receiver letter in ' + JSON.stringify(text));
+    // Pass key A is also a receiver ID, so look for bare letters in the prose only.
+    const prose = parts.map(p => p.text ?? ' ').join('');
+    assert.doesNotMatch(prose, /\b[XYABR]\b/, call.id + ': bare receiver letter in ' + JSON.stringify(prose));
   }
   assert.deepEqual(readParts({ read: 'Hit {Q} or {R}.' }), [{ text: 'Hit ' }, { text: '{Q}' }, { text: ' or ' }, { receiver: 4 }, { text: '.' }]);
 });

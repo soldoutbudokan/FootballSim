@@ -1,5 +1,5 @@
 import { Simulation, STEP, GOAL } from './sim.js';
-import { PLAYS, formationFor, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES, readParts, readText } from './plays.js';
+import { PLAYS, formationFor, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES, PASS_KEYS, passSlot, passKey, readParts, readText } from './plays.js';
 import { FieldScene } from './scene.js';
 import { AdaptiveGraphics, PROFILES } from './graphics.js';
 import { FieldAudio } from './audio.js';
@@ -25,8 +25,10 @@ const PASS_STYLES = ['timing', 'bullet', 'touch', 'lob'];
 // Keep tap/hold selection, meter fill and its tick marks on the same scale.
 const PASS_CHARGE = { touch: 0.12, bullet: 0.24, full: 0.30 };
 const DOWN_NAMES = ['', '1ST', '2ND', '3RD', '4TH'];
-// Gamepad buttons that pass to receivers 1-5 after the snap: A, X, Y, B, RB.
+// Gamepad buttons that pass after the snap, in the same slots as the keys
+// A W S D Space (plays.js PASS_KEYS): pad A, X, Y, B, RB.
 const PASS_BUTTONS = [0, 2, 3, 1, 5];
+const ARROWS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 const BAD_RESULTS = ['interception', 'sack', 'safety'];
 
 // ---------- Preferences ----------
@@ -127,12 +129,13 @@ function clearInput() {
 }
 
 function movement() {
-  // Arrow keys lead the throw while a pass is charging, so they do not move the quarterback then.
-  const arrows = !charge;
-  const key = code => (keys.has(code) ? 1 : 0);
-  const arrow = code => (arrows && keys.has(code) ? 1 : 0);
-  let x = key('KeyD') - key('KeyA') + arrow('ArrowRight') - arrow('ArrowLeft') + touch.x + padMove.x;
-  let z = key('KeyW') - key('KeyS') + arrow('ArrowUp') - arrow('ArrowDown') + touch.z + padMove.z;
+  // The arrow keys move the player; W A S D and Space are pass keys. An arrow
+  // held when a charge begins keeps moving the quarterback, so a rollout
+  // keeps its line through the throw; an arrow pressed during the charge
+  // leads the pass instead (leadArrow).
+  const arrow = code => (keys.has(code) && (!charge || charge.held.has(code)) ? 1 : 0);
+  let x = arrow('ArrowRight') - arrow('ArrowLeft') + touch.x + padMove.x;
+  let z = arrow('ArrowUp') - arrow('ArrowDown') + touch.z + padMove.z;
   const length = Math.hypot(x, z);
   if (length > 1) { x /= length; z /= length; }
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.sprint || padMove.sprint;
@@ -255,6 +258,7 @@ function syncPlay() {
   if (Object.keys(sim.hotRoutes).length) flags.push('HOT ROUTE');
   $('formation').textContent = flags.join(' · ');
   $('read-tip').replaceChildren(...readNodes(sim.play));
+  labelReceivers();
   renderPlaybook();
   clearInput();
   renderHUD();
@@ -285,8 +289,49 @@ function setCharge(next) {
 function beginCharge(index) {
   if (inMenu || paused || replay || sim.phase !== 'live' || sim.carrier !== 'QB' || sim.crossedLine || sim.play.type === 'run') return;
   if (sim.faking()) { toast('Let the play-action fake develop'); return; }
-  setCharge({ id: RECEIVERS[index], index, started: performance.now() });
-  $('charge-target').textContent = String(index + 1);
+  // `held`: arrows already down at the start, which stay movement.
+  setCharge({ id: RECEIVERS[index], index, started: performance.now(), held: new Set(ARROWS.filter(code => keys.has(code))) });
+  $('charge-target').textContent = receiverLabel(index);
+}
+
+// What a receiver is called on screen: his pass key on a keyboard, his
+// jersey number on a touch screen, where the buttons carry no key.
+function receiverLabel(index) {
+  return isTouch ? String(sim.byId[RECEIVERS[index]].number) : passKey(index, sim.config.flip).label;
+}
+
+// Receiver index for a pass key or gamepad slot (0-4) on this rep.
+const slotReceiver = slot => passSlot(slot, sim.config.flip);
+
+// Badges, target buttons and the pass meter show the label that works on
+// this rep. The buttons sit in slot order (A W S D Space), so a flipped play
+// keeps the left outside receiver's button on the left.
+function labelReceivers() {
+  RECEIVERS.forEach((id, i) => {
+    const label = receiverLabel(i), wide = label.length > 2;
+    const b = targetButtons[i];
+    b.querySelector('strong').textContent = label;
+    b.classList.toggle('wide', wide);
+    b.style.order = String(passSlot(i, sim.config.flip));
+    b.setAttribute('aria-label', 'Pass to ' + (isTouch ? 'number ' : 'receiver ') + label);
+    if (isTouch) b.removeAttribute('aria-keyshortcuts');
+    else b.setAttribute('aria-keyshortcuts', label);
+    markers[id].textContent = label;
+    markers[id].classList.toggle('wide', wide);
+  });
+}
+
+// Why the simulation refused a throw, checked in the order a player would
+// notice. The whistle already explains a dead ball; past the other checks
+// only the play-action fake or the snap itself can be too recent.
+function throwRefusal() {
+  if (sim.phase === 'dead' || sim.phase === 'presnap') return null;
+  if (sim.threw || sim.throwIntent || sim.phase === 'air') return 'The ball is already out';
+  if (sim.crossedLine) return 'Past the line of scrimmage: run it';
+  if (sim.carrier !== 'QB') return 'Only the quarterback can throw';
+  if (sim.play.type === 'run') return 'Run play: hand it off';
+  if (sim.play.type === 'pa' && sim.faking()) return 'Let the play-action fake develop';
+  return 'Too soon after the snap';
 }
 
 function passStyleFor(seconds) {
@@ -297,11 +342,16 @@ function passStyleFor(seconds) {
 function releaseCharge(index) {
   if (!charge || charge.index !== index) return;
   const style = passStyleFor((performance.now() - charge.started) / 1000);
+  // Only arrows pressed after the charge began lead the pass.
+  const leadArrow = code => (keys.has(code) && !charge.held.has(code) ? 1 : 0);
   const lead = {
-    x: (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0),
-    z: (keys.has('ArrowUp') ? 1 : 0) - (keys.has('ArrowDown') ? 1 : 0),
+    x: leadArrow('ArrowRight') - leadArrow('ArrowLeft'),
+    z: leadArrow('ArrowUp') - leadArrow('ArrowDown'),
   };
-  if (!sim.requestThrow(charge.id, style, lead)) toast(sim.crossedLine ? 'Past the line of scrimmage: run it' : 'Set your feet before the throw');
+  if (!sim.requestThrow(charge.id, style, lead)) {
+    const reason = throwRefusal();
+    if (reason) toast(reason);
+  }
   setCharge(null);
 }
 
@@ -383,22 +433,25 @@ function chooseAudible(id) {
   }
 }
 
+// Pick the receiver with his pass key (or tap his badge), then the route with 1-8.
 function renderHotRoutes() {
   const current = sim.hotRoutes[RECEIVERS[hotReceiver]];
   const route = HOT_ROUTES.find(r => r.id === current);
-  $('hot-route-current').textContent = 'Receiver ' + (hotReceiver + 1) + ' · ' + (route?.label || 'Original route');
+  $('hot-route-current').textContent = 'Receiver ' + receiverLabel(hotReceiver) + ' · ' + (route?.label || 'Original route');
 
   const receivers = RECEIVERS.map((id, i) => {
-    const b = button('receiver-choice', String(i + 1), () => { hotReceiver = i; renderHotRoutes(); });
+    const label = receiverLabel(i);
+    const b = button('receiver-choice' + (label.length > 2 ? ' wide' : ''), label, () => { hotReceiver = i; renderHotRoutes(); });
     b.style.setProperty('--target-color', ROUTE_COLORS[i]);
-    b.setAttribute('aria-label', 'Receiver ' + (i + 1));
+    b.style.order = String(passSlot(i, sim.config.flip));
+    b.setAttribute('aria-label', 'Receiver ' + label);
     b.setAttribute('aria-pressed', String(i === hotReceiver));
     return b;
   });
   $('hot-route-receivers').replaceChildren(...receivers);
 
-  const routes = HOT_ROUTES.map(r => {
-    const b = button('option-card', `<span>${r.label}</span><kbd>${r.key}</kbd>`, () => applyHotRoute(r.id));
+  const routes = HOT_ROUTES.map((r, i) => {
+    const b = button('option-card', `<span>${r.label}</span><kbd>${i + 1}</kbd>`, () => applyHotRoute(r.id));
     b.setAttribute('aria-label', r.label + ' route');
     b.setAttribute('aria-pressed', String(current === r.id));
     return b;
@@ -425,11 +478,26 @@ function changeAudiblePage(step) {
 }
 
 // ---------- Pause ----------
+// NFL passer rating: four parts per attempt, each held to 0-2.375, averaged
+// and scaled so 100 is very good and 158.3 is perfect. Throw-aways count as
+// attempts. Null before the first attempt.
+function passerRating(s) {
+  if (!s.attempts) return null;
+  const part = v => clamp(v, 0, 2.375);
+  const a = part((s.completions / s.attempts - 0.3) * 5);
+  const b = part((s.passing / s.attempts - 3) * 0.25);
+  const c = part(s.passTd / s.attempts * 20);
+  const d = part(2.375 - s.ints / s.attempts * 25);
+  return (a + b + c + d) / 6 * 100;
+}
+
+// Three rows: the passing line, the passing results, then the whole session.
 function renderPause() {
-  const s = sim.stats;
+  const s = sim.stats, rating = passerRating(s);
   const items = [
-    [`${s.completions}/${s.attempts}`, 'Comp / Att'], [s.yards, 'Yards'], [s.td, 'Touchdowns'],
-    [s.reps, 'Reps'], [s.ints, 'Interceptions'], [s.sacks, 'Sacks'],
+    [`${s.completions}/${s.attempts}`, 'Comp / Att'], [s.passing, 'Pass yards'], [rating === null ? '–' : rating.toFixed(1), 'Passer rating'],
+    [s.passTd, 'Pass TD'], [s.ints, 'Interceptions'], [s.sacks, 'Sacks'],
+    [s.rushing, 'Rush yards'], [s.td, 'Touchdowns'], [s.reps, 'Reps'],
   ];
   $('session-stats').replaceChildren(...items.map(([value, label]) => {
     const cell = document.createElement('div');
@@ -519,14 +587,15 @@ function routeEnd(points, color, blocker) {
 }
 
 // The coaching cue with each receiver as a small badge in his route colour,
-// showing his pass key. The badge text is the key, so the element's
-// textContent equals readText(play).
+// showing his pass key for this rep's flip. The badge text is the key, so on a
+// keyboard the element's textContent equals readText(play, flip). Touch
+// screens show jersey numbers, like the buttons.
 function readNodes(play) {
   return readParts(play).map(part => {
     if (part.text !== undefined) return document.createTextNode(part.text);
     const badge = document.createElement('span');
     badge.className = 'read-badge';
-    badge.textContent = String(part.receiver + 1);
+    badge.textContent = receiverLabel(part.receiver);
     badge.style.setProperty('--target-color', ROUTE_COLORS[part.receiver]);
     return badge;
   });
@@ -536,7 +605,7 @@ function matchesFilter(play) {
   const typeMatches = playFilter === 'all' || (playFilter === 'run' ? play.type === 'run' : play.type !== 'run');
   const formationMatches = !$('play-formation-filter').value || play.formation === $('play-formation-filter').value;
   const query = $('play-search').value.trim().toLowerCase();
-  const searchMatches = !query || `${play.name} ${play.tag} ${play.formation} ${play.family || ''} ${readText(play)}`.toLowerCase().includes(query);
+  const searchMatches = !query || `${play.name} ${play.tag} ${play.formation} ${play.family || ''} ${readText(play, sim.config.flip)}`.toLowerCase().includes(query);
   return typeMatches && formationMatches && searchMatches;
 }
 
@@ -726,12 +795,10 @@ function buildTargets() {
   const meterTicks = $('charge').querySelectorAll('.meter-tick');
   meterTicks[0].style.bottom = PASS_CHARGE.touch / PASS_CHARGE.full * 100 + '%';
   meterTicks[1].style.bottom = PASS_CHARGE.bullet / PASS_CHARGE.full * 100 + '%';
+  // Labels and order come from labelReceivers() on every syncPlay.
   RECEIVERS.forEach((id, i) => {
-    const key = String(i + 1);
-    const b = button('target-button', `<strong>${key}</strong>`);
+    const b = button('target-button', '<strong></strong>');
     b.style.setProperty('--target-color', ROUTE_COLORS[i]);
-    b.setAttribute('aria-label', 'Pass to receiver ' + key);
-    b.setAttribute('aria-keyshortcuts', key);
     b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); beginCharge(i); });
     b.addEventListener('pointerup', () => releaseCharge(i));
     b.addEventListener('pointercancel', clearInput);
@@ -741,7 +808,6 @@ function buildTargets() {
     const marker = document.createElement('div');
     marker.className = 'receiver-marker';
     marker.id = 'marker-' + id;
-    marker.textContent = key;
     marker.hidden = true;
     marker.style.setProperty('--target-color', ROUTE_COLORS[i]);
     markers[id] = marker;
@@ -843,17 +909,24 @@ $('apply-settings').onclick = () => {
 
 // ---------- Keyboard ----------
 const GAME_KEYS = ['Space', 'Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyB', 'KeyC', 'KeyH', 'KeyZ', 'KeyP', 'Escape', 'KeyX', 'KeyR', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'ShiftLeft', 'ShiftRight'];
+// The receiver a key throws to on this rep: A W S D Space by slot, or the
+// unlisted 1-5 by receiver order. -1 for any other key.
+function passReceiver(code) {
+  const slot = PASS_KEYS.findIndex(k => k.code === code);
+  if (slot >= 0) return slotReceiver(slot);
+  return /^Digit[1-5]$/.test(code) ? Number(code.slice(-1)) - 1 : -1;
+}
 
 function dialogKey(e) {
   if (e.code === 'Escape') { e.preventDefault(); closeDialog(); return; }
   if (e.repeat) return;
   if (activeDialog.id === 'hot-routes') {
-    if (/^Digit[1-5]$/.test(e.code)) { e.preventDefault(); hotReceiver = Number(e.code.slice(-1)) - 1; renderHotRoutes(); }
-    else if (e.code === 'Digit0') { e.preventDefault(); applyHotRoute('default'); }
-    else {
-      const route = HOT_ROUTES.find(r => e.code === 'Key' + r.key);
-      if (route) { e.preventDefault(); applyHotRoute(route.id); }
-    }
+    // The receiver by his pass key, the route by 1-8, 0 for the original.
+    const slot = PASS_KEYS.findIndex(k => k.code === e.code);
+    const digit = /^Digit[0-8]$/.test(e.code) ? Number(e.code.slice(-1)) : -1;
+    if (slot >= 0) { e.preventDefault(); hotReceiver = slotReceiver(slot); renderHotRoutes(); }
+    else if (digit === 0) { e.preventDefault(); applyHotRoute('default'); }
+    else if (digit > 0) { e.preventDefault(); applyHotRoute(HOT_ROUTES[digit - 1].id); }
   } else if (activeDialog.id === 'audibles') {
     if (/^Digit[1-8]$/.test(e.code)) {
       const play = PLAYS[audiblePage * AUDIBLES_PER_PAGE + Number(e.code.slice(-1)) - 1];
@@ -875,6 +948,15 @@ function gameKey(e) {
   if (GAME_KEYS.includes(e.code)) e.preventDefault();
   if (e.repeat) return;
   keys.add(e.code);
+  // An arrow pressed again during a charge is a lead, not movement.
+  if (charge && ARROWS.includes(e.code)) charge.held.delete(e.code);
+  // Space snaps and moves to the next rep, but once a pass play is live it is
+  // the checkdown's pass key. Its first 0.28 s belong to the snap: a second
+  // tap that quick is a double press, not a throw.
+  if (e.code === 'Space' && sim.phase === 'live') {
+    if (sim.time >= 0.28) beginCharge(passReceiver(e.code));
+    return;
+  }
   switch (e.code) {
     case 'Space': case 'Enter': snap(); break;
     case 'Escape': case 'KeyP': togglePause(); break;
@@ -887,7 +969,7 @@ function gameKey(e) {
     case 'KeyX': sim.throwAway(); break;
     case 'KeyQ': sim.juke(-1); break;
     case 'KeyE': sim.juke(1); break;
-    default: if (/^Digit[1-5]$/.test(e.code)) beginCharge(Number(e.code.slice(-1)) - 1);
+    default: if (passReceiver(e.code) >= 0) beginCharge(passReceiver(e.code));
   }
 }
 
@@ -899,7 +981,9 @@ window.addEventListener('keydown', e => {
   else gameKey(e);
 });
 window.addEventListener('keyup', e => {
-  if (/^Digit[1-5]$/.test(e.code)) releaseCharge(Number(e.code.slice(-1)) - 1);
+  // Releasing a pass key throws; releaseCharge ignores a key that started no charge.
+  const receiver = passReceiver(e.code);
+  if (receiver >= 0) releaseCharge(receiver);
   keys.delete(e.code);
 });
 window.addEventListener('blur', () => {
@@ -952,7 +1036,7 @@ function onPadPress(i) {
     return;
   }
   if (i === 0 && (sim.phase === 'presnap' || sim.phase === 'dead')) snap();
-  else if (PASS_BUTTONS.includes(i)) beginCharge(PASS_BUTTONS.indexOf(i));
+  else if (PASS_BUTTONS.includes(i)) beginCharge(slotReceiver(PASS_BUTTONS.indexOf(i)));
   else if (i === 8) cycleCamera();
   else if (i === 14) sim.juke(-1);
   else if (i === 15) sim.juke(1);
@@ -975,7 +1059,7 @@ function pollGamepad() {
   pad.buttons.forEach((b, i) => {
     const was = padButtons[i] || false;
     if (b.pressed && !was) onPadPress(i);
-    if (!b.pressed && was && PASS_BUTTONS.includes(i)) releaseCharge(PASS_BUTTONS.indexOf(i));
+    if (!b.pressed && was && PASS_BUTTONS.includes(i)) releaseCharge(slotReceiver(PASS_BUTTONS.indexOf(i)));
   });
   padButtons = pad.buttons.map(b => b.pressed);
 }

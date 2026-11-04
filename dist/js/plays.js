@@ -55,8 +55,9 @@ export function formationFor(play) {
 // https://www.xandolabs.com/the-lab/offense/pass-game/quick-game-pass-concepts/spread-passing-study-snag-concept/
 // https://www.samfleener.com/football/offense-fundamentals/plays-concepts/pass-concepts
 // Each `read` is the coaching cue. {X} names a receiver by ID; the cue shows
-// him by his pass key (X 1, Y 2, A 3, B 4, R 5), so it stays right when the
-// play flips. Pass cues name the key defender and the progression.
+// him by his pass key (passKey below: X A, Y W, A S, B D, R Space; X and B
+// swap keys when the play flips). Pass cues name the key defender and the
+// progression.
 const CALLS = [
   { id:'mesh', name:'Mesh concept', formation:'GUN · DOUBLES', type:'pass', tag:'SHORT', read:'Read the linebackers as {X} and {A} mesh. Against man, hit the crosser running away; against zone, find {Y} sitting behind them.', routes:{ X:[[-21,5],[-6,5],[19,5]], Y:[[-10,10],[-4,10]], A:[[6.4,4],[-7,4],[-22,4]], B:[[21,12],[10,24]], R:[[-9,-2],[-16,2],[-21,9]] } },
   { id:'flood', name:'PA flood', formation:'GUN · DOUBLES', type:'pa', tag:'PLAY ACTION', read:'Let the fake develop, then flood the sideline: {B} clears deep, {Y} sails under him and {A} runs the flat. Throw off the flat defender.', routes:{ X:[[-21,12],[-3,24],[12,30]], Y:[[-10,7],[2,13],[18,15]], A:[[12,0],[22,2]], B:[[21,18],[21,42]], R:[[0,-4],[-4,-1],[-9,3]] } },
@@ -123,6 +124,21 @@ export const PLAYS = CALLS.map(play => {
   const family = play.family || (play.type === 'run' ? 'run' : play.type === 'pa' ? 'playaction' : 'dropback');
   return { ...play, formationId, formation:FORMATIONS[formationId].label, personnel:FORMATIONS[formationId].personnel, family };
 });
+// Keyboard pass keys in slot order. The game camera sits behind the offense,
+// so A and D throw to the outside receivers on the left and right of the
+// screen, W to the slot, S to the tight end and Space to the back (the
+// checkdown). `code` is the KeyboardEvent code; `label` is what badges show.
+export const PASS_KEYS = [
+  { code:'KeyA', label:'A' }, { code:'KeyW', label:'W' }, { code:'KeyS', label:'S' },
+  { code:'KeyD', label:'D' }, { code:'Space', label:'Space' },
+];
+// Receiver index (RECEIVERS order) to key slot and back: the same swap both
+// ways. A flipped play mirrors X to the right and B to the left, so they swap
+// keys and A stays the left outside receiver.
+export function passSlot(index, flip=false) {
+  return flip && (index === 0 || index === 3) ? 3 - index : index;
+}
+export function passKey(index, flip=false) { return PASS_KEYS[passSlot(index, flip)]; }
 // The cue as segments for the renderer: { text } or { receiver } (0-4, the
 // index into RECEIVERS and ROUTE_COLORS). An unknown token stays as text.
 export function readParts(play) {
@@ -134,9 +150,9 @@ export function readParts(play) {
   });
   return parts;
 }
-// The cue as plain text with pass keys: "3 settles inside him while 2 widens".
-export function readText(play) {
-  return readParts(play).map(part => part.text ?? String(part.receiver + 1)).join('');
+// The cue as plain text with pass keys: "S settles inside him while W widens".
+export function readText(play, flip=false) {
+  return readParts(play).map(part => part.text ?? passKey(part.receiver, flip).label).join('');
 }
 // Coverage families the defense can call (dist/js/sim/defense.js). `rushers`
 // is the family's usual count; the call itself decides who comes.
@@ -157,11 +173,12 @@ export function routeFor(play, id, spot, flip=false) {
   return (play.routes[id] || []).map(([x,z]) => ({ x:flip?-x:x, z:Math.min(118, spot+z) }));
 }
 
+// The hot-route dialog picks a route with keys 1-8 in this order.
 export const HOT_ROUTES = [
-  {id:'streak',label:'Streak',key:'V'}, {id:'slant',label:'Slant',key:'S'},
-  {id:'drag',label:'Drag',key:'D'}, {id:'in',label:'In',key:'I'},
-  {id:'out',label:'Out',key:'O'}, {id:'curl',label:'Curl',key:'C'},
-  {id:'flat',label:'Flat',key:'L'}, {id:'corner',label:'Corner',key:'R'},
+  {id:'streak',label:'Streak'}, {id:'slant',label:'Slant'},
+  {id:'drag',label:'Drag'}, {id:'in',label:'In'},
+  {id:'out',label:'Out'}, {id:'curl',label:'Curl'},
+  {id:'flat',label:'Flat'}, {id:'corner',label:'Corner'},
 ];
 export function hotRouteFor(id,kind,play) {
   const p=formationFor(play).find(p=>p.id===id);if(!p||!RECEIVERS.includes(id))return null;
