@@ -1,5 +1,6 @@
 import { Simulation, STEP, GOAL } from './sim.js';
 import { PLAYS, formationFor, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES, readParts, readText } from './plays.js';
+import { playWeights, profilePlay } from './sim/offense.js';
 import { FieldScene } from './scene.js';
 import { AdaptiveGraphics, PROFILES } from './graphics.js';
 import { FieldAudio } from './audio.js';
@@ -250,7 +251,7 @@ function syncPlay() {
   $('random-play').setAttribute('aria-pressed', String(sim.config.offense === 'random'));
   $('play-name').textContent = sim.play.name;
   const flags = [sim.play.formation];
-  if (sim.config.offense === 'random') flags.push('RANDOM');
+  if (sim.config.offense === 'random') flags.push('COORDINATOR');
   if (sim.audibled) flags.push('AUDIBLE');
   if (Object.keys(sim.hotRoutes).length) flags.push('HOT ROUTE');
   $('formation').textContent = flags.join(' · ');
@@ -548,10 +549,28 @@ function choosePlay(id) {
   if (inMenu) start();
 }
 
+// The plays the coordinator favours for this down, distance and spot: about
+// SUGGESTED of them, shared out over his play classes by how much of the
+// call each class gets, his likeliest in each (the book's order on a tie).
+const SUGGESTED = 6;
+function suggestedPlays() {
+  const w = playWeights({ down: sim.down, toGo: sim.toGo, spot: sim.spot, mode: sim.config.mode });
+  const byClass = {};
+  PLAYS.forEach((p, i) => (byClass[profilePlay(p).cls] ||= []).push(i));
+  const out = new Set();
+  for (const list of Object.values(byClass)) {
+    const share = list.reduce((a, i) => a + w[i], 0);
+    list.sort((a, b) => w[b] - w[a] || a - b).slice(0, Math.round(share * SUGGESTED)).forEach(i => out.add(PLAYS[i].id));
+  }
+  return out;
+}
+
 function renderPlaybook() {
+  const suggested = suggestedPlays();
   const cards = PLAYS.filter(matchesFilter).map(play => {
     const current = play.id === sim.play.id;
-    const head = `<div class="play-card-head"><span class="play-tag">${play.tag}</span>${current ? '<span class="play-current">Current</span>' : ''}</div>`;
+    const badges = (suggested.has(play.id) ? '<span class="play-suggested">Suggested</span>' : '') + (current ? '<span class="play-current">Current</span>' : '');
+    const head = `<div class="play-card-head"><span class="play-tag">${play.tag}</span>${badges ? `<span class="play-badges">${badges}</span>` : ''}</div>`;
     const b = button('play-card' + (current ? ' selected' : ''), `${head}<h3>${play.name}</h3>${diagram(play)}<span class="play-formation">${play.formation}</span>`, () => choosePlay(play.id));
     const read = document.createElement('span');
     read.className = 'play-read';

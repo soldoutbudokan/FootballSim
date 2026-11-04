@@ -44,6 +44,15 @@ export const FORMATIONS = {
   singleback: { id:'singleback', label:'SINGLEBACK · TE', personnel:'11', players:alignment({
     QB:{x:0,z:-1.4}, A:{x:5,z:0}, B:{x:21,z:-1.2}, R:{x:0,z:-6.6},
   }) },
+  // Two by two with the tight end flexed out to the right slot.
+  spread: { id:'spread', label:'GUN · SPREAD', personnel:'11', players:alignment({
+    A:{x:11,z:-1.2},
+  }) },
+  // Three by one with the tight end as #3 off the right tackle and the back
+  // offset to the trips side.
+  trey: { id:'trey', label:'GUN · TREY', personnel:'11', players:alignment({
+    Y:{x:13,z:-1.2}, A:{x:4.8,z:-1.1}, R:{x:2.4,z:-5.6},
+  }) },
 };
 export function formationFor(play) {
   return (FORMATIONS[play?.formationId] || FORMATIONS.doubles).players;
@@ -115,9 +124,69 @@ const CALLS = [
   { id:'widezone', name:'Singleback wide zone', formationId:'singleback', type:'run', tag:'OUTSIDE RUN', blocking:'stretch', lane:-10,
     read:'Press the left edge from under center. Keep moving wide if the defense is sealed; plant upfield when a crease opens.',
     routes:{ X:[[-21,7]], Y:[[-12,4]], A:[[2,4]], B:[[21,7]], R:[[0,-2.6],[-6,-2],[-11,0],[-14,9],[-14,40]] } },
+
+  // Quick game.
+  { id:'dslant', name:'Trips double slant', formationId:'trips', type:'pass', family:'quick', tag:'QUICK GAME',
+    read:'Read the hook defender over the trips. If he widens with {A}’s arrow, throw {Y}’s slant inside him; if he sits, hit {B}’s slant behind him. {X}’s hitch beats press backside.',
+    routes:{ X:[[-21,6],[-20,4]], Y:[[12,3],[5,7],[-6,10]], A:[[10,1],[18,2],[24,3]], B:[[21,3],[13,10],[3,17]], R:[[-5,-1],[-6,4]] } },
+  { id:'spot', name:'Trips spot', formationId:'trips', type:'pass', family:'quick', tag:'TRIANGLE READ',
+    read:'Read the flat defender: {A} runs the flat, {B} sits at 5 inside the cornerback and {Y} runs the corner over them. Throw where he leaves; {X}’s slant is the backside answer.',
+    routes:{ X:[[-21,3],[-12,11],[-2,19]], Y:[[12,10],[22,22]], A:[[11,0],[22,2]], B:[[21,5],[16,6],[16,5]], R:[[-5,-1],[-6,4]] } },
+  { id:'ystick', name:'Spread stick', formationId:'spread', type:'pass', family:'quick', tag:'QUICK GAME',
+    read:'Read the flat defender on {A}’s side: {A} settles inside him at 6 while {R} runs under him to the flat and {B} clears. Backside, {Y}’s stick and {X}’s slant beat man.',
+    routes:{ X:[[-21,3],[-12,10],[-3,17]], Y:[[-10,6],[-8,5]], A:[[11,6],[9,5]], B:[[21,16],[22,42]], R:[[2,-3],[9,-1],[18,2]] } },
+
+  // Intermediate.
+  { id:'sail', name:'Trips sail', formationId:'trips', type:'pass', tag:'FLOOD',
+    read:'Flood the trips sideline: {B} clears the cornerback, {Y} breaks out under him at 14 and {A} runs the flat. Throw off the flat defender; {X}’s dig is the backside answer.',
+    routes:{ X:[[-21,12],[-9,12],[2,12]], Y:[[12,11],[17,14],[24,16]], A:[[9,1],[17,2],[24,4]], B:[[21,16],[22,42]], R:[[-6,-2],[-8,4]] } },
+  { id:'drivedig', name:'Doubles drive', type:'pass', tag:'INTERMEDIATE',
+    read:'Read the middle linebacker: {Y}’s shallow runs under him and {X}’s dig breaks behind him. Throw the one he leaves; {A}’s seam holds the safety and {B} curls backside.',
+    routes:{ X:[[-21,12],[-8,12],[6,12]], Y:[[-10,2],[-2,3],[14,4]], A:[[6.4,14],[8,40]], B:[[21,12],[20,9]], R:[[-6,-2],[-14,1],[-21,3]] } },
+  { id:'digwheel', name:'Dig-wheel', type:'pass', tag:'HIGH-LOW',
+    read:'Read the cornerback over {B}. If he drives on the dig, {A}’s wheel runs past him up the sideline; if he carries the wheel, throw the dig. {Y}’s seam holds the safety; {X} curls backside.',
+    routes:{ X:[[-21,12],[-20,9]], Y:[[-10,14],[-10,40]], A:[[12,2],[19,5],[22,12],[22,40]], B:[[21,12],[9,12],[-3,12]], R:[[-6,-1],[-8,5]] } },
+  { id:'hank', name:'Spread hank', formationId:'spread', type:'pass', tag:'ZONE BEATER',
+    read:'Read the hook defenders: {Y} and {A} sit inside them at 6 while {X} and {B} curl at 8. Throw the hook he widens off, or the curl behind him if he sinks; {R} runs the flat.',
+    routes:{ X:[[-21,11],[-20,8]], Y:[[-10,7],[-6,6]], A:[[11,7],[7,6]], B:[[21,11],[20,8]], R:[[-6,-2],[-14,1],[-22,3]] } },
+  { id:'switch', name:'Switch verticals', formationId:'spread', type:'pass', tag:'DEEP',
+    read:'Read the deep middle: throw the seam away from him, {X} or {A}. {X} and {Y} switch releases so the cornerback and the nickel must pass them off; {B} curls under the backside cornerback, and {R} is the checkdown.',
+    routes:{ X:[[-21,5],[-13,12],[-9,42]], Y:[[-10,3],[-15,9],[-16,42]], A:[[11,12],[10,40]], B:[[21,13],[20,10]], R:[[-6,-1],[-8,5]] } },
+
+  // Shots.
+  { id:'sluggo', name:'Sluggo', type:'pass', tag:'DOUBLE MOVE',
+    read:'Sell the slant, then read the cornerbacks over {X} and {B}: if one jumps the slant, throw the go over him. If both stay deep, take {Y}’s out or {A} sitting over the ball.',
+    routes:{ X:[[-21,2],[-18,5],[-18,12],[-19,42]], Y:[[-10,5],[-18,5]], A:[[6.4,6],[5,5]], B:[[21,2],[18,5],[18,12],[19,42]], R:[[2,-2],[6,3]] } },
+  { id:'postcorner', name:'Post-corner', formationId:'spread', type:'pass', tag:'DEEP SHOT',
+    read:'Read the safety over {Y}: {Y} stems to the post to turn him inside, then breaks to the corner. If the cornerback sinks under it, throw {X}’s dig; {A} sits over the ball against pressure.',
+    routes:{ X:[[-21,12],[-9,12],[0,12]], Y:[[-10,10],[-7,14],[-21,27]], A:[[11,8],[9,7]], B:[[21,16],[21,42]], R:[[-6,-1],[-8,5]] } },
+  { id:'deepover', name:'Trey deep over', formationId:'trey', type:'pass', tag:'DEEP SHOT',
+    read:'Read the deep safety: {Y}’s post and {B}’s go clear the trips side for {X}’s deep over from the backside. Throw it into the window they leave; {A}’s drag is the outlet.',
+    routes:{ X:[[-21,10],[-12,16],[6,21],[22,23]], Y:[[13,13],[5,30]], A:[[4.8,3],[-6,4],[-20,5]], B:[[21,16],[21,42]], R:[[6,-3],[13,0],[19,3]] } },
+
+  // Red zone.
+  { id:'fadesmash', name:'Fade-smash', type:'pass', tag:'RED ZONE',
+    read:'Left, high-low the cornerback: {X}’s hitch if he sinks, {Y}’s corner over him if he sits. Right, throw {B}’s fade against press, or {A} in the flat if the cornerback bails.',
+    routes:{ X:[[-21,5],[-21,4]], Y:[[-10,8],[-20,16]], A:[[11,0],[20,2]], B:[[21,3],[23,16],[24,30]], R:[[2,-2],[5,3]] } },
+  { id:'shallowmesh', name:'Shallow mesh', formationId:'spread', type:'pass', tag:'RED ZONE',
+    read:'Against man, {Y} and {A} cross a yard apart to rub their men; throw the one running free. Against zone, {R} sits over the ball behind the linebackers while {X} and {B} hold the cornerbacks.',
+    routes:{ X:[[-21,5],[-23,18]], Y:[[-10,2],[0,2],[18,3]], A:[[11,3],[0,3],[-18,4]], B:[[21,6],[21,4]], R:[[-1,-2],[0,6]] } },
+  { id:'bootcorner', name:'PA boot corner', formationId:'tight', type:'pa', tag:'PLAY ACTION',
+    read:'After the fake, roll toward {A} and {B}. Read the flat defender: {A} runs the flat, {B} the corner over him and {Y} crosses behind. Throw where he leaves, or run if the edge is clear.',
+    routes:{ X:[[-8,12],[0,26]], Y:[[-5.5,6],[4,10],[16,12]], A:[[10,1],[20,3]], B:[[9,9],[21,19]], R:[[0,-4],[-5,-1.5],[-9,2]] } },
+
+  // Short-yardage runs.
+  { id:'duo', name:'Singleback duo', formationId:'singleback', type:'run', tag:'INSIDE RUN', blocking:'power', lane:-2,
+    read:'Downhill from under center. Hit the left A gap behind the double teams, read the middle linebacker and cut off his flow.',
+    routes:{ X:[[-21,7]], Y:[[-8,3]], A:[[4,3]], B:[[21,7]], R:[[0,-4],[-1.8,-1],[-2.2,8],[-2.2,40]] } },
+  { id:'sweep', name:'Trey weak sweep', formationId:'trey', type:'run', tag:'OUTSIDE RUN', blocking:'stretch', pullingGuard:'LG', lane:-11,
+    read:'Take the handoff across the quarterback, away from the trips. The left guard pulls to lead the edge; turn upfield behind him once the corner is sealed.',
+    routes:{ X:[[-21,6]], Y:[[11,4]], A:[[3,3]], B:[[21,7]], R:[[-5.6,-3.4],[-10,-1],[-13,6],[-13,40]] } },
 ];
 
-// Preserve the original eight IDs and their order for saved choices/shortcuts.
+// Preserve the original eight IDs and their order for saved choices/shortcuts;
+// new calls go at the end. sim/offense.js profiles every call from its
+// routes and cue to call it for the situation.
 export const PLAYS = CALLS.map(play => {
   const formationId = play.formationId || 'doubles';
   const family = play.family || (play.type === 'run' ? 'run' : play.type === 'pa' ? 'playaction' : 'dropback');
