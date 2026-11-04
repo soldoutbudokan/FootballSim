@@ -29,7 +29,8 @@ export const DIFFICULTY = {
   // break), on top of `routeLead` s of his seen velocity.
   // The coordinator: `menu` is the list of families he calls; `situ` how
   // strongly the situation (down, distance, field, formation) steers the
-  // call (an exponent on its multipliers); `disguise` the
+  // call (an exponent on its multipliers) and how often he matches his
+  // personnel to the offense (situ squared); `disguise` the
   // share of calls shown from another shell; `late` the share of disguises
   // whose rotation is held past the snap, `hold` the shortest hold (s; a
   // better coordinator holds the look just long enough to fool the

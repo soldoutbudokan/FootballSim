@@ -149,7 +149,8 @@ test('run fits: All-pro owns every gap and rarely busts; a Rookie defense busts 
 
 test('difficulty never changes a body, and nothing slows the ball carrier by level', () => {
   const body = p => [p.id, p.top, p.a0, p.agility, p.brake, p.mass].join();
-  const sims = ['rookie', 'pro', 'allpro'].map(difficulty => rep(3, 'zone', { difficulty }));
+  // Pinned to the base package: the coordinator matches personnel more often at higher levels.
+  const sims = ['rookie', 'pro', 'allpro'].map(difficulty => rep(3, 'zone', { difficulty, personnel: 'base' }));
   for (const s of sims.slice(1)) assert.deepEqual(s.players.map(body), sims[0].players.map(body));
   // The same back, alone in the open field, runs the same 4 s at every level.
   const runs = sims.map(s => {
