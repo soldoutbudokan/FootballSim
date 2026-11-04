@@ -1,6 +1,8 @@
 // The skinned athletes layer. Same interface as the procedural Athletes
 // (plan 3.5): setQuality(profile) and update(state, dt, {menu}) -> the
 // controlled player's snapshot, leaving world matrices ready for render.
+// It builds a character for everybody in the squad it is given and shows
+// only the players in this frame's state (the defense changes personnel).
 import * as THREE from '../../vendor/three.module.js';
 import { Character, bodyScale } from './character.js';
 import { UniformMaterials } from './materials.js';
@@ -89,6 +91,8 @@ export class SkinnedAthletes {
     // The camera (when the integrator hands it over) picks mesh detail;
     // without one, distance from the focus stands in (the camera follows it).
     const eye = this.camera?.position || this.options.camera?.position || null;
+    const here = new Set(players.map(p => p.id));
+    for (const [id, c] of this.rigs) c.root.visible = here.has(id);
     players.forEach((p, i) => {
       const c = this.rigs.get(p.id);
       if (!c) return;

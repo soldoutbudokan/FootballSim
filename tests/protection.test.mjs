@@ -376,7 +376,9 @@ test('against four rushers the pocket holds about 3.2 s at Rookie, 2.6 at Pro an
   assert.ok(allpro.med > 2.25 && allpro.med < 2.65, 'All-pro ' + f(allpro));
   assert.ok(rookie.med > pro.med + 0.35 && pro.med > allpro.med + 0.1, `ordered: ${f(rookie)}, ${f(pro)}, ${f(allpro)}`);
   for (const r of [rookie, pro, allpro]) assert.ok(r.lo > 1.8 && r.hi - r.lo > 0.6, 'spread ' + f(r));
-  const tops = level => rep(1, { difficulty: level }).defense.map(d => d.top).join();
+  // The same personnel at every level (a Rookie coordinator matches the
+  // offense's personnel less often).
+  const tops = level => rep(1, { difficulty: level, personnel: 'base' }).defense.map(d => d.top).join();
   assert.equal(tops('rookie'), tops('allpro'), 'the same bodies at every level');
 });
 

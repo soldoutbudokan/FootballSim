@@ -1,16 +1,19 @@
 import * as THREE from '../vendor/three.module.js';
 import { GRAVITY } from './sim.js';
-import { Squad, Rig, createGeometries } from './athletes/rig.js';
+import { Squad, Rig, createGeometries, HIDDEN } from './athletes/rig.js';
 import { Animator } from './athletes/motion.js';
 import { createMaterials } from './athletes/uniform.js';
 import { Football } from './athletes/ball.js';
 import { Markers } from './athletes/markers.js';
 
-// Everything that moves: the 22 athletes, the ball, the control indicator and
+// Everything that moves: the athletes, the ball, the control indicator and
 // the contact shadows. Scene units are yards; simulation +z maps to scene -z.
+// The layer builds the whole squad once (the offense and every defender who
+// can come on: defense.js fullSquad) and draws only the players in this
+// frame's state, so a change of defensive personnel needs no new rigs.
 //
 // Interface (plan section 3.5):
-//   new Athletes(scene, players, {camera})  players = sim.players (id, team, role, number, speed)
+//   new Athletes(scene, players, {camera})  players = the squad (id, team, role, number, speed)
 //   setQuality(profile)
 //   update(state, dt, {menu}) -> the controlled player's snapshot
 // update() poses every rig, the ball, the indicator and the shadows, and leaves
@@ -67,10 +70,15 @@ export class Athletes {
     this.lodBand = LOD_HYSTERESIS[profile.id] ?? 2;
   }
 
-  // Full or reduced meshes per athlete, by distance from the camera.
+  // Full or reduced meshes per athlete, by distance from the camera; an
+  // athlete who is not in the state is hidden.
   chooseLevels(state, controlled) {
     const eye = this.camera?.position;
     const far = this.lodDistance;
+    const levels = this.levels, here = this.here ||= new Uint8Array(levels.length);
+    here.fill(0);
+    for (const p of state.players) { const i = this.index.get(p.id); if (i !== undefined) here[i] = 1; }
+    for (let i = 0; i < levels.length; i++) if (!here[i]) levels[i] = HIDDEN; else if (levels[i] === HIDDEN) levels[i] = 0;
     for (const p of state.players) {
       const i = this.index.get(p.id);
       if (i === undefined) continue;

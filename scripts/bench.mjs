@@ -36,7 +36,8 @@ Options:
                       chains from --spot until a score, a turnover or downs).
   --spot Y            line of scrimmage, z in yards (35 = own 25). Default 35.
   --by K              rows: coverage (default), family (the coverage actually
-                      called, useful with random), shell, front, play, formation.
+                      called, useful with random), personnel (the defensive
+                      package), shell, front, play, formation.
   --flip              flip every play (default: alternate flipped and normal).
   --jobs N            worker threads. Default: one per CPU but one, at most 8.
   --sim DIR           drive the game in DIR (a copy of dist/js) instead of
@@ -170,6 +171,7 @@ async function runAll(tasks, jobs, progress) {
 function groupKey(by, rep, formationOf) {
   if (by === 'coverage') return rep.request;
   if (by === 'family') return rep.family ?? '?';
+  if (by === 'personnel') return rep.personnel ?? '(none)';
   if (by === 'shell') return rep.shell ?? '(none)';
   if (by === 'front') return rep.front ?? '(none)';
   if (by === 'play') return rep.play;
@@ -185,7 +187,7 @@ async function bench(o) {
   if (!Number.isInteger(reps) || reps < 1) fail('--reps takes a whole number above zero');
   if (!Number.isFinite(seed)) fail('--seed takes a number');
   if (!['reps', 'drive'].includes(o.mode)) fail('--mode is reps or drive');
-  if (!['coverage', 'family', 'shell', 'front', 'play', 'formation'].includes(o.by)) fail('--by is coverage, family, shell, front, play or formation');
+  if (!['coverage', 'family', 'personnel', 'shell', 'front', 'play', 'formation'].includes(o.by)) fail('--by is coverage, family, personnel, shell, front, play or formation');
   if (!Number.isFinite(spot) || spot < 11 || spot > 105) fail('--spot takes a z between 11 and 105');
   const plays = choosePlays(o, PLAYS), coverages = chooseCoverages(o, COVERAGES), difficulties = chooseLevels(o, levels), profiles = aggressions(o.aggression);
   const tasks = [];

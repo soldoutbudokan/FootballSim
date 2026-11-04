@@ -206,3 +206,62 @@ cameraTest('a thrown ball lands where its velocity says it will', () => {
   const p = landingPoint({ x: 0, y: 1.3, z: 30, vx: 2, vy: 5.365, vz: 10 });
   assert.ok(Math.abs(p.z - 40) < 0.05 && Math.abs(p.x - 2) < 0.05);
 });
+
+cameraTest('the athletes are built once for the whole squad and draw only the players on the field this rep', async () => {
+  // The jersey and marker textures draw on a canvas: a do-nothing 2D context.
+  const noop = new Proxy(function () {}, { get: (t, k) => (k === 'width' ? 10 : k === 'data' ? new Uint8ClampedArray(4) : noop), apply: () => noop, set: () => true });
+  const context = new Proxy({}, { get: (t, k) => (k in t ? t[k] : noop), set: (t, k, v) => { t[k] = v; return true; } });
+  globalThis.document ??= { createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => context }) };
+  const { Athletes } = await import('../dist/js/athletes.js');
+  const { PlaceholderAthletes } = await import('../dist/js/characters/placeholders.js');
+  const { fullSquad, ROSTER } = await import('../dist/js/sim/defense.js');
+  const base = new Simulation(7, { offense: 'mesh', coverage: 'cover3', personnel: 'base' });
+  const squad = fullSquad(base.players);
+  assert.equal(squad.length, base.offense.length + ROSTER.length, 'the offense and every defender who can play');
+  assert.equal(new Set(squad.map(p => p.id)).size, squad.length);
+  assert.ok(squad.every(p => p.team && p.role && p.number), 'every member has a team, a role and a number');
+  const camera = new THREE.PerspectiveCamera(46, 1.6, 0.1, 500);
+  camera.position.set(0, 12, -base.spot + 14);
+  const athletes = new Athletes(new THREE.Scene(), squad, { camera });
+  athletes.setQuality({ id: 'balanced' });
+  // Who the body meshes draw: an athlete whose draw range starts inside one
+  // of a mesh's geometry groups.
+  const drawn = () => {
+    const out = new Set();
+    for (const key of ['body', 'bodyLow']) {
+      const g = athletes.squad.meshes[key].geometry;
+      squad.forEach((p, i) => {
+        const r = g.userData.ranges[i];
+        if (r && g.groups.some(q => r.base[0] >= q.start && r.base[0] < q.start + q.count)) {
+          assert.ok(!out.has(p.id), `${p.id} drawn once`);
+          out.add(p.id);
+        }
+      });
+    }
+    return out;
+  };
+  const sameAs = (sim, label) => {
+    athletes.update(sim.snapshot(), 1 / 60);
+    assert.deepEqual([...drawn()].sort(), sim.players.map(p => p.id).sort(), label);
+  };
+  sameAs(base, 'base: the 4-3 and the offense');
+  for (const personnel of ['nickel', 'dime', 'goal', 'heavy']) {
+    const sim = new Simulation(7, { offense: 'mesh', coverage: 'cover1', personnel, spot: personnel === 'goal' ? 105 : 35 });
+    sameAs(sim, personnel);
+    // The men who came on stand where the simulation put them.
+    for (const p of sim.defense) {
+      const rig = athletes.rigs.get(p.id);
+      assert.ok(Math.hypot(rig.world.pelvis.x - p.x, -rig.world.pelvis.z - p.z) < 1.5, `${personnel}: ${p.id} at his spot`);
+    }
+  }
+  sameAs(base, 'back to base');
+  // The placeholder capsules fold away whoever is off the field.
+  const capsules = new PlaceholderAthletes(new THREE.Scene(), squad), m = new THREE.Matrix4(), scale = new THREE.Vector3();
+  const nickel = new Simulation(7, { offense: 'mesh', coverage: 'cover1', personnel: 'nickel' });
+  capsules.update(nickel.snapshot(), 1 / 60);
+  squad.forEach((p, i) => {
+    capsules.bodies.getMatrixAt(i, m);
+    m.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+    assert.equal(scale.x > 0.5, !!nickel.byId[p.id], `${p.id} ${scale.x > 0.5 ? 'shown' : 'hidden'}`);
+  });
+});
