@@ -11,18 +11,22 @@ import { RECEIVERS, COVERAGES } from '../plays.js';
 import { GET_OFF } from './common.js';
 
 export const DIFFICULTY = {
-  // Difficulty changes reads, anticipation and the coordinator's craft, never
-  // bodies or catching odds. `latency`: how late (s) a defender reads a ball
-  // carrier he chases or a quarterback he rushes; `chase`: how late he reads
-  // a receiver he chases after the catch (he has watched the ball into his
-  // hands); `read`: how late a coverage man reads a receiver. `contain`:
-  // yards outside a scrambling quarterback the edge rusher on his side keeps
-  // (rush lane discipline). `carry`: yards past the line where an
-  // underneath defender gives up a vertical he is carrying when no deep man
-  // has taken it. `help`: how far a defender with an empty zone leans toward
-  // the most open receiver near him (share of the way from his landmark). `anticipate`: how much of a receiver's change of
-  // speed a coverage man reads into where he is going (a receiver sinking
-  // into a break), on top of `routeLead` s of his seen velocity.
+  // Difficulty is how smart the defense is: reads, anticipation, run fits,
+  // the rush plan and the coordinator's craft, never bodies, block strength,
+  // catching or tackling odds. `latency`: how late (s) a defender reads a
+  // quarterback he rushes or watches (his eyes, a scramble); `carrier`: how
+  // late he reads the ball carrier on a designed run (close at every level);
+  // `chase`: how late he reads a receiver he chases after the catch (he has
+  // watched the ball into his hands); `read`: how late a coverage man reads a
+  // receiver. `contain`: yards outside a scrambling quarterback the edge
+  // rusher on his side keeps (rush lane discipline). `carry`: yards past the
+  // line where an underneath defender gives up a vertical he is carrying when
+  // no deep man has taken it (his pattern-match rule: All-pro carries it until
+  // a deep man takes it). `help`: how far a defender with an empty zone leans
+  // toward the most open receiver near him (share of the way from his
+  // landmark). `anticipate`: how much of a receiver's change of speed a
+  // coverage man reads into where he is going (a receiver sinking into a
+  // break), on top of `routeLead` s of his seen velocity.
   // The coordinator: `menu` is the list of families he calls; `situ` how
   // strongly the situation (down, distance, field, formation) steers the
   // call (an exponent on its multipliers); `disguise` the
@@ -30,22 +34,28 @@ export const DIFFICULTY = {
   // whose rotation is held past the snap, `hold` the shortest hold (s; a
   // better coordinator holds the look just long enough to fool the
   // quarterback's first look, no longer); `scout` how much the scouting
-  // report steers the call (0 not at all, 1 in full). Run fits: `runRead` s
-  // after the snap when a linebacker reads a handoff and fills (safeties and
-  // corners later), `bite` s a linebacker steps up on a play fake before he
-  // drops, both scaled by how much the offense has been running. `eyes`: the
+  // report steers the call (0 not at all, 1 in full). Run fits (sim/run.js
+  // FIT): `runRead` s after the snap when a linebacker reads the run and
+  // fits (safeties and corners later), scaled by how much the offense has
+  // been running; `bust` the share of men who misfit (jump a gap, over-run
+  // the play or read it late); `home` the share of back-side men who stay
+  // home for the cutback; `fill` the share of reps a deep safety fills a gap
+  // the box leaves open; `blockRead` how well a lineman reads a down block, a
+  // reach or a puller (added to his side of the block's margin, RUN_BLOCK;
+  // a Rookie is fooled by it). `bite`: s a linebacker steps up on a play fake
+  // before he drops, scaled the same way. `eyes`: the
   // share of the quarterback's throwing motion a robber drives on (and a
   // deep middle splitting two verticals leans to). `squeeze`: how far a man
   // defender off or on top trusts his read of a stem (coverage.js MAN).
   // `press`: how much more (or less) often the coordinator presses his zone
   // corners: a pressed corner bails from the line on top of #1, an off one
   // gives the quick throw.
-  rookie: { latency: 0.40, chase: 0.25, read: 0.30, ballReaction: 0.36, judgment: 1.8, routeLead: 0.06, anticipate: 0, contain: 0.3, carry: 16, help: 0.2,
-    menu: 'rookie', situ: 0.5, disguise: 0.1, late: 0, hold: 0.45, scout: 0, runRead: 0.75, bite: 0.55, eyes: 0, squeeze: 0, press: -0.3 },
-  pro: { latency: 0.28, chase: 0.21, read: 0.24, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, anticipate: 0.5, contain: 1.0, carry: 21, help: 0.45,
-    menu: 'pro', situ: 0.8, disguise: 0.35, late: 0.25, hold: 0.3, scout: 0.5, runRead: 0.6, bite: 0.42, eyes: 0.5, squeeze: 0.5, press: 0 },
-  allpro: { latency: 0.18, chase: 0.17, read: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, anticipate: 1, contain: 1.5, carry: Infinity, help: 0.7,
-    menu: 'allpro', situ: 1, disguise: 0.5, late: 0.4, hold: 0.15, scout: 1, runRead: 0.45, bite: 0.3, eyes: 1, squeeze: 0.7, press: 0.3 },
+  rookie: { latency: 0.30, carrier: 0.32, chase: 0.25, read: 0.30, ballReaction: 0.36, judgment: 1.8, routeLead: 0.06, anticipate: 0, contain: 0.3, carry: 16, help: 0.2,
+    menu: 'rookie', situ: 0.5, disguise: 0.1, late: 0, hold: 0.45, scout: 0, runRead: 0.6, bust: 0.25, home: 0.35, fill: 0.2, blockRead: -0.45, bite: 0.55, eyes: 0, squeeze: 0, press: -0.3 },
+  pro: { latency: 0.28, carrier: 0.28, chase: 0.21, read: 0.24, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, anticipate: 0.5, contain: 1.0, carry: 21, help: 0.45,
+    menu: 'pro', situ: 0.8, disguise: 0.35, late: 0.25, hold: 0.3, scout: 0.5, runRead: 0.55, bust: 0.08, home: 0.8, fill: 0.6, blockRead: 0, bite: 0.42, eyes: 0.5, squeeze: 0.5, press: 0 },
+  allpro: { latency: 0.2, carrier: 0.26, chase: 0.17, read: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, anticipate: 1, contain: 1.5, carry: Infinity, help: 0.7,
+    menu: 'allpro', situ: 1, disguise: 0.5, late: 0.4, hold: 0.15, scout: 1, runRead: 0.5, bust: 0.03, home: 0.95, fill: 0.9, blockRead: 0.3, bite: 0.3, eyes: 1, squeeze: 0.7, press: 0.3 },
 };
 
 export const DEFENSE = [
@@ -829,15 +839,18 @@ export const defense = {
     return specs;
   },
 
-  // Per-rep defensive state once the players exist: reaction latency, when
-  // he reads a run (linebackers first, then safeties, then corners; sooner
-  // against an offense that runs a lot) and how long a play fake holds him.
+  // Per-rep defensive state once the players exist: reaction latency (on a
+  // designed run, how late he reads the carrier), when he reads a run
+  // (linemen at once, then linebackers, safeties and corners; sooner against
+  // an offense that runs a lot), his run-fit discipline (sim/run.js) and how
+  // long a play fake holds him.
   initDefender(d) {
     const skill = this.skill, tend = this.scout ? tendencies(this.scout, this.play.formationId, skill.scout) : { runBias: 0 };
-    d.latency = skill.latency;
+    d.latency = this.play.type === 'run' ? skill.carrier ?? skill.latency : skill.latency;
     d.rotate ||= { at: 0 };
-    const lag = { dl: 0.8, lb: skill.runRead, s: skill.runRead + 0.15, cb: skill.runRead + 0.3 }[d.role];
+    const lag = { dl: d.latency + 0.1, lb: skill.runRead, s: skill.runRead + 0.15, cb: skill.runRead + 0.3 }[d.role];
     d.readRun = d.role === 'dl' ? lag : lag - 0.12 * tend.runBias;
+    this.runDiscipline(d);
     const fake = skill.bite * (1 + 0.6 * tend.runBias);
     d.bite = d.rushing || !d.assign || d.assign.kind === 'man' && d.role !== 'lb' ? 0
       : d.role === 'lb' ? GET_OFF.lb + fake : d.role === 's' && d.start.z - this.spot < 11 ? GET_OFF.s + 0.5 * fake : 0;
