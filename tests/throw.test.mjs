@@ -74,3 +74,59 @@ test('a deep ball goes away from the man on the receiver, the miss folded the sa
   }
   assert.ok(placed >= 12 && full >= 6, `placed ${placed}, fully ${full}`);
 });
+
+// Throw to `id` at `at` s with `lead`; the pass, the receiver's run at the
+// release and whether he caught it, and where.
+function led(seed, offense, id, at, lead) {
+  const s = rep(seed, offense);
+  s.snap();
+  run(s, at);
+  const p = s.byId[id];
+  if (s.phase !== 'live' || !s.requestThrow(id, 'touch', lead)) return null;
+  for (let i = 0; i < 28 && s.phase === 'live'; i++) s.step(STEP);
+  if (s.phase !== 'air') return null;
+  const speed = Math.hypot(p.vx, p.vz), run0 = { x: p.vx / speed, z: p.vz / speed, speed }, pass = s.pass;
+  while (s.phase === 'air') s.step(STEP);
+  return { run: run0, pass, caught: s.completed && s.carrier === id, at: { x: p.x, z: p.z } };
+}
+
+test('a led ball goes in front of the receiver along his run, or behind him, and he still gets to it', () => {
+  // The same throw three ways: no lead, up (in front of him along his run)
+  // and down (behind him, the back shoulder). The lead is as long as he can
+  // reach: more on a long throw than on a quick slant.
+  const along = (r, u) => r.pass.lead.x * u.x + r.pass.lead.z * u.z;
+  const size = { verts: [], slants: [] }, gain = [];
+  let n = 0, plainCaught = 0, upCaught = 0;
+  for (let seed = 1; seed <= 5; seed++) for (const [offense, id, at] of [['verts', 'X', 1.2], ['verts', 'B', 1.2], ['slants', 'X', 0.9], ['slants', 'B', 0.9], ['drive', 'Y', 1.3]]) {
+    const plain = led(seed, offense, id, at, { x: 0, z: 0 }), up = led(seed, offense, id, at, { x: 0, z: 1 }), down = led(seed, offense, id, at, { x: 0, z: -1 });
+    if (!plain || !up || !down || plain.run.speed < 6) continue;
+    n++;
+    const u = plain.run;
+    assert.equal(Math.hypot(plain.pass.lead.x, plain.pass.lead.z), 0);
+    assert.ok(along(up, u) > 0.2, `${seed} ${offense} ${id}: up leads him ${along(up, u).toFixed(2)} yd along his run`);
+    assert.ok(along(down, u) < -0.5, `${seed} ${offense} ${id}: down puts it ${along(down, u).toFixed(2)} yd behind him`);
+    if (size[offense]) size[offense].push(along(up, u));
+    plainCaught += plain.caught; upCaught += up.caught;
+    if (plain.caught && up.caught) gain.push((up.at.x - plain.at.x) * u.x + (up.at.z - plain.at.z) * u.z);
+  }
+  assert.ok(n >= 20, 'throws ' + n);
+  // He runs onto it: caught as often, farther along his run.
+  assert.ok(upCaught >= plainCaught - 1 && upCaught >= 0.6 * n, `caught ${upCaught} led, ${plainCaught} not, of ${n}`);
+  assert.ok(gain.length >= 10 && mean(gain) > 0.15, `caught ${mean(gain).toFixed(2)} yd farther along his run`);
+  assert.ok(mean(size.verts) > mean(size.slants) + 0.15, `a longer lead on a go (${mean(size.verts).toFixed(2)} yd) than on a quick slant (${mean(size.slants).toFixed(2)} yd)`);
+});
+
+test('left and right lead toward that sideline, never out of bounds', () => {
+  // Verts: X runs up the left side, B up the right.
+  let n = 0, inside = 0;
+  for (let seed = 1; seed <= 4; seed++) for (const id of ['X', 'B']) for (const x of [-1, 1]) {
+    const r = led(seed, 'verts', id, 1.2, { x, z: 0 });
+    if (!r) continue;
+    n++;
+    const { lead, place } = r.pass, spot = r.pass.target.x - r.pass.error.x - place.ux * place.k;
+    assert.ok(lead.x * x > 0 && Math.abs(lead.z) < Math.abs(lead.x), `${seed} ${id} ${x}: lead ${lead.x.toFixed(2)}, ${lead.z.toFixed(2)}`);
+    assert.ok(Math.abs(spot) < 26.67 - 0.9, `${seed} ${id} ${x}: in bounds at ${spot.toFixed(2)}`);
+    if (Math.sign(spot) !== x) inside += Math.abs(lead.x) > 0.5;
+  }
+  assert.ok(n >= 12 && inside >= n / 2 - 2, `throws ${n}, led inside ${inside}`);
+});

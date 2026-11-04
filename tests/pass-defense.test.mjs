@@ -178,3 +178,43 @@ test('a defender misreads a flipped pass as the mirror image', () => {
     assert.ok(Math.abs(a.target.x + b.target.x) < 1e-9 && Math.abs(a.target.z - b.target.z) < 1e-9, `${id}: ${a.target.x.toFixed(2)} vs ${b.target.x.toFixed(2)}`);
   }
 });
+
+// A ball arriving at X, with CB1 placed by `setup` around him.
+function window(setup, random) {
+  const { s, d } = opportunity();
+  d.x = 20;
+  const x = s.byId.X, cb = s.byId.CB1;
+  Object.assign(x, { x: 0, z: 50, facing: Math.PI, vx: 0, vz: 0 });
+  Object.assign(cb, { facing: Math.PI, ballAware: true });
+  setup(cb);
+  s.random = random;
+  s.ball.z = 48.5;
+  for (let i = 0; i < 20 && s.phase === 'air'; i++) s.flyBall(STEP);
+  return s;
+}
+
+test('a ball thrown into a defender\'s path or into a tight window is picked some of the time, never every time', () => {
+  const random = seededRandom(91);
+  const tally = (setup, n = 400) => {
+    const counts = { pick: 0, breakup: 0, catch: 0 };
+    for (let i = 0; i < n; i++) {
+      const s = window(setup, random);
+      counts[s.stats.ints ? 'pick' : s.completed ? 'catch' : 'breakup']++;
+    }
+    return counts;
+  };
+  // In the path: a corner a yard in front of the receiver, on the ball's line.
+  const path = tally(cb => Object.assign(cb, { x: 0.2, z: 49.4 }));
+  assert.ok(path.pick > 400 * 0.1 && path.pick < 400 * 0.5, `in the path: ${JSON.stringify(path)}`);
+  // A tight window: a corner beside the receiver, out of the ball's line but
+  // close enough to get a hand in at the catch. In front (between him and
+  // the ball) he picks it more often than trailing.
+  const front = tally(cb => Object.assign(cb, { x: 0.9, z: 49.6 }));
+  const trail = tally(cb => Object.assign(cb, { x: 0.9, z: 50.4 }));
+  assert.ok(front.pick > 0 && front.pick < front.breakup && front.catch > front.pick, `in front: ${JSON.stringify(front)}`);
+  assert.ok(trail.pick > 0 && trail.pick < front.pick, `trailing: ${JSON.stringify(trail)}`);
+  // He cannot catch a ball he has not seen, though he can knock it loose.
+  const blind = tally(cb => Object.assign(cb, { x: 0.9, z: 49.6, ballAware: false }));
+  const away = tally(cb => Object.assign(cb, { x: 0.9, z: 49.6, facing: 0 }));
+  for (const [name, c] of [['unaware', blind], ['facing away', away]]) assert.ok(c.pick === 0 && c.breakup > 0, `${name}: ${JSON.stringify(c)}`);
+});

@@ -308,7 +308,7 @@ export class Quarterback {
     if (wait > this.clock || (style === 'lob' && length < OPEN.lobFrom) || ((style === 'lob' || length >= OPEN.lobFrom) && sep < OPEN.lob)) open = -Infinity;
     else if (style === 'lob' && close && close.z > at.z && sep < 6) open -= OPEN.overTop;
     const depth = at.z - this.spot;
-    return { style, at: { x: at.x, z: at.z }, flight, arriveSep: sep, lane, spread, open, depth, value: depth + SCORE.yac * Math.min(room, SCORE.yacCap), lead: this.lead(at, close && this.toward(close, at, sep), sep) };
+    return { style, at: { x: at.x, z: at.z }, flight, arriveSep: sep, lane, spread, open, depth, value: depth + SCORE.yac * Math.min(room, SCORE.yacCap), lead: this.lead(qb, p, at, close && this.toward(close, at, sep), sep) };
   }
 
   // How much a defender is playing this receiver (0 to 1, READ).
@@ -394,15 +394,23 @@ export class Quarterback {
     return THROW.set + Math.max(0, length - THROW.crisp) * THROW.far[style] + Math.hypot(qb.vx, qb.vz) / 7 * THROW.moving + pressure * THROW.pressure;
   }
 
-  // Lead (the arrow keys, -1/0/1 a side): away from a defender who will be
-  // on him, never out of bounds, and back toward the quarterback (never
-  // deeper: the simulation already leads him along his route).
-  lead(at, close, sep) {
+  // Lead (the arrow keys, -1/0/1 a side; sim.js LEAD): away from a
+  // defender who will be on him. Up and down are along the receiver's run
+  // to the catch (away from the quarterback if he is settled): up, in front
+  // of him, away from a man trailing him; down, behind him (the back
+  // shoulder) from a man in front of him. Left and right are toward that
+  // sideline, when that is across his run and not out of bounds. The
+  // simulation sizes it to what the receiver can reach.
+  lead(qb, p, at, close, sep) {
     const lead = { x: 0, z: 0 };
     if (!close || sep > 2.5) return lead;
     const ax = at.x - close.x, az = at.z - close.z, g = Math.hypot(ax, az) || 1;
-    if (Math.abs(ax / g) > 0.45 && Math.abs(at.x + Math.sign(ax) * 2.5) < HALF - 1.5) lead.x = Math.sign(ax);
-    if (az / g < -0.45) lead.z = -1;
+    let rx = at.x - p.x, rz = at.z - p.z;
+    if (Math.hypot(rx, rz) < 1) { rx = at.x - qb.x; rz = at.z - qb.z; }
+    const r = Math.hypot(rx, rz) || 1, along = (ax * rx + az * rz) / (g * r);
+    if (along > 0.45) lead.z = 1;
+    else if (along < -0.45) lead.z = -1;
+    if (Math.abs(ax / g) > 0.45 && Math.abs(rx / r) < 0.7 && Math.abs(at.x + Math.sign(ax) * 2.5) < HALF - 1.5) lead.x = Math.sign(ax);
     return lead;
   }
 

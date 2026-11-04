@@ -479,13 +479,37 @@ const THROW = {
 // yd high by style: a lob drops in over the receiver's shoulder, above a man
 // trailing him.
 const PLACE = { carry: 1, adjust: 0.35, react: 0.5, near: 2, tight: 0.6, shift: 1, hands: 0.45, from: 15, full: 25, catch: { bullet: 1.6, touch: 1.65, lob: 1.8 } };
+// Leading the receiver (the arrows held at the release: requestThrow's
+// `lead`, each -1 to 1). Up and down go along his run as he gets to the
+// ball: up puts it in front of him, so he runs onto it away from a man
+// trailing him; down puts it behind him, back toward the quarterback (the
+// back shoulder: he stops short and comes back for it). Left and right go
+// toward that sideline as the user sees the field from behind the offense.
+// A receiver slower than `moving` yd/s has no run to lead: up is then away
+// from the quarterback. The ball goes that way as far as he still gets to
+// it: he runs his route for `react` s (he reads the ball out of the hand),
+// then runs to the spot to get there with the ball, and must end up with the
+// ball no more than `slack` yd from his body: he reaches out for it (no
+// less than `close` yd from the spot, or as close as he gets to the spot
+// the placement picked). It goes `share` of that room, never more than `max`
+// yd (`back` yd behind him) and never within `edge` yd of the sideline or
+// the end line. The defenders still push the ball away from them (PLACE),
+// but never back against the lead.
+const LEAD = { moving: 2, react: 0.12, slack: 0.6, close: 0.25, share: 0.8, max: 3, back: 2, edge: 1 };
 
 // Contested catches (catchBall): a defender within `near` yd (close enough
 // to get a hand in or hit the receiver as the ball arrives) adds to the drop
 // chance, up to `front` when he is between the receiver and the ball and
 // `trail` when he trails behind (the receiver shields him), in full within
-// `tight` yd. A bullet from inside `close` yd adds `bullet`.
-const CATCH = { base: 0.03, near: 1.8, tight: 0.6, front: 0.5, trail: 0.3, bullet: 0.08, close: 8 };
+// `tight` yd. A bullet from inside `close` yd adds `bullet`. When he knocks
+// it loose and has seen the ball (he is aware of it and faces it), he comes
+// away with it `pick` of his HANDS odds when he is between the receiver
+// and the ball, down to `behind` of that when he trails (he plays it
+// through the receiver's hands): the ball forced into a tight window.
+const CATCH = { base: 0.03, near: 1.8, tight: 0.6, front: 0.5, trail: 0.3, bullet: 0.08, close: 8, pick: 0.5, behind: 0.25 };
+// A defender's hands: his odds to come away with a clean ball in reach (by
+// position, the same at every difficulty).
+const HANDS = { cb: 0.52, s: 0.56, lb: 0.40, dl: 0.18 };
 
 // ---------------------------------------------------------------------------
 export class Simulation {
@@ -638,17 +662,83 @@ export class Simulation {
       const want = clock < GET_OFF[ghost.role] ? ZERO : plain ? routeWant(ghost, speedCap(ghost)) : this.runRoute(ghost, speedCap(ghost), clock);
       moveBody(ghost, want.x, want.z, dt);
     }
-    return { x: ghost.x, z: ghost.z };
+    return { x: ghost.x, z: ghost.z, vx: ghost.vx, vz: ghost.vz };
+  }
+
+  // How far short of `to` a receiver ends up `t` s from now if he runs his
+  // route for LEAD.react s and then runs to it to arrive with the ball (as
+  // planReceivers runs him once the ball is out). Like predict, a ghost:
+  // nothing outside it changes and it draws no random numbers.
+  reachMiss(p, to, t) {
+    const ghost = { ...p, juke: null, want: ZERO, ghost: true };
+    const n = Math.max(1, Math.round(t / STEP)), dt = t / n;
+    let clock = this.time;
+    for (let i = 0; i < n; i++) {
+      clock += dt;
+      const left = this.time + t - clock;
+      const want = clock < GET_OFF[ghost.role] ? ZERO : clock - this.time <= LEAD.react ? this.runRoute(ghost, speedCap(ghost), clock) : this.jammed(ghost, meetWant(ghost, to, left, speedCap(ghost)), clock);
+      moveBody(ghost, want.x, want.z, dt);
+    }
+    return dist(ghost, to);
+  }
+
+  // Which way the lead (LEAD) goes for a ball meeting `p` at `ghost`
+  // (predict): a unit vector in the field, or ZERO; `back` is its share
+  // along his run (-1: straight behind him).
+  leadWay(qb, ghost, lead) {
+    if (Math.hypot(lead.x, lead.z) < 0.05) return ZERO;
+    let run = scaled(ghost.vx, ghost.vz, 1);
+    if (Math.hypot(ghost.vx, ghost.vz) < LEAD.moving) run = scaled(ghost.x - qb.x, ghost.z - qb.z, 1);
+    if (run === ZERO) run = { x: 0, z: 1 };
+    const way = scaled(lead.z * run.x + lead.x, lead.z * run.z, 1);
+    return way === ZERO ? ZERO : { x: way.x, z: way.z, back: way.x * run.x + way.z * run.z };
+  }
+
+  // How far (yd) to lead him `way` from `base` (the catch point the
+  // placement picked): as far as he still gets to by the time the ball
+  // does, a ball `speed` yd/s from the quarterback that comes in `hands` yd
+  // off the spot; `amount` (0 to 1) of `share` of that.
+  leadSize(qb, p, base, way, speed, amount, hands) {
+    const flight = s => clamp(Math.hypot(base.x + way.x * s - qb.x, base.z + way.z * s - qb.z) / speed, 0.42, 2.8);
+    const miss = s => this.reachMiss(p, { x: base.x + way.x * s, z: base.z + way.z * s }, flight(s));
+    let hi = way.back < -0.5 ? LEAD.back : LEAD.max;
+    // Never out of bounds or out the back of the end zone.
+    if (Math.abs(way.x) > 1e-6) hi = Math.min(hi, Math.max(0, (WIDTH / 2 - LEAD.edge - Math.sign(way.x) * base.x) / Math.abs(way.x)));
+    if (way.z > 1e-6) hi = Math.min(hi, Math.max(0, (120 - LEAD.edge - base.z) / way.z));
+    if (hi < 0.05) return 0;
+    const limit = Math.max(LEAD.slack - hands, LEAD.close, miss(0));
+    let lo = 0;
+    if (miss(hi) <= limit) lo = hi;
+    else for (let i = 0; i < 7; i++) { const mid = (lo + hi) / 2; if (miss(mid) <= limit) lo = mid; else hi = mid; }
+    return lo * LEAD.share * Math.min(1, amount);
   }
 
   release() {
     const intent = this.throwIntent, p = this.byId[intent.id], qb = this.byId.QB;
     const speed = { bullet: 28, touch: 22, lob: 16 }[intent.style];
-    let duration = clamp(dist(qb, p) / speed, 0.42, 2.8), target;
+    let duration = clamp(dist(qb, p) / speed, 0.42, 2.8), ghost;
     for (let i = 0; i < 3; i++) {
-      target = this.predict(p, duration);
-      duration = clamp(dist(qb, target) / speed, 0.42, 2.8);
+      ghost = this.predict(p, duration);
+      duration = clamp(dist(qb, ghost) / speed, 0.42, 2.8);
     }
+    // Placement (PLACE): away from the defenders. A lead (LEAD) decides the
+    // side: they push the ball no way back against it. Then the lead, as far
+    // as he can get to.
+    let aim = scaled(ghost.x - qb.x, ghost.z - qb.z, 1);
+    const way = this.leadWay(qb, ghost, intent.lead), place = this.placement(qb, p, ghost, duration, aim === ZERO ? 0 : aim.x, aim === ZERO ? 1 : aim.z);
+    const against = way === ZERO ? 0 : place.ux * way.x + place.uz * way.z;
+    if (against < 0 && place.k > 0) {
+      const sx = place.ux - against * way.x, sz = place.uz - against * way.z, s = Math.hypot(sx, sz);
+      Object.assign(place, s > 1e-6 ? { ux: sx / s, uz: sz / s, k: place.k * s } : { ux: 0, uz: 0, k: 0 });
+    }
+    const lead = { x: 0, z: 0 };
+    if (way !== ZERO) {
+      const base = { x: ghost.x + place.ux * PLACE.shift * place.k, z: ghost.z + place.uz * PLACE.shift * place.k };
+      const size = this.leadSize(qb, p, base, way, speed, Math.hypot(intent.lead.x, intent.lead.z), PLACE.hands * place.k);
+      lead.x = way.x * size; lead.z = way.z * size;
+      duration = clamp(Math.hypot(base.x + lead.x - qb.x, base.z + lead.z - qb.z) / speed, 0.42, 2.8);
+    }
+    const target = { x: ghost.x + lead.x, z: ghost.z + lead.z };
     // Accuracy (THROW): the length of the throw and its style, set feet, on
     // the move toward, across or away from the throw, and pressure. The error
     // lands long or short and to either side.
@@ -658,7 +748,8 @@ export class Simulation {
     const then = this.perceive('QB', THROW.settle);
     let vx = qb.vx, vz = qb.vz, pace = Math.hypot(vx, vz);
     if (Math.hypot(then.vx, then.vz) * THROW.reset > pace) { vx = then.vx * THROW.reset; vz = then.vz * THROW.reset; pace = Math.hypot(vx, vz); }
-    const aim = scaled(target.x - qb.x, target.z - qb.z, 1), ux = aim === ZERO ? 0 : aim.x, uz = aim === ZERO ? 1 : aim.z;
+    aim = scaled(target.x - qb.x, target.z - qb.z, 1);
+    const ux = aim === ZERO ? 0 : aim.x, uz = aim === ZERO ? 1 : aim.z;
     const along = pace > 0.3 ? (vx * ux + vz * uz) / pace : 0;
     const per7 = along >= 0 ? THROW.across + (THROW.toward - THROW.across) * along : THROW.across + (THROW.away - THROW.across) * -along;
     const spread = THROW.set + length + pace / 7 * per7 + pressure * THROW.pressure;
@@ -666,11 +757,11 @@ export class Simulation {
     // mirrored side.
     const long = (this.random() - 0.5) * spread, wide = (this.random() - 0.5) * spread * this.playSide();
     const error = { x: ux * long + uz * wide, z: uz * long - ux * wide };
-    // Placement (PLACE): away from the defenders, the miss folded the same way.
-    const place = this.placement(qb, p, target, duration, ux, uz), into = error.x * place.ux + error.z * place.uz;
+    // The miss toward the defenders folds back the other way.
+    const into = error.x * place.ux + error.z * place.uz;
     if (into < 0) { error.x -= 2 * into * place.k * place.ux; error.z -= 2 * into * place.k * place.uz; }
-    target.x += intent.lead.x * 2.5 + error.x + place.ux * PLACE.shift * place.k;
-    target.z += intent.lead.z * 2.5 + error.z + place.uz * PLACE.shift * place.k;
+    target.x += error.x + place.ux * PLACE.shift * place.k;
+    target.z += error.z + place.uz * PLACE.shift * place.k;
     target.x = clamp(target.x, -29, 29); target.z = clamp(target.z, 0, 119);
     this.qbFacing = null;
     // The ball leaves the throwing (right) hand, a little ahead of the body,
@@ -681,7 +772,7 @@ export class Simulation {
     const to = { x: clamp(target.x + place.ux * hands, -29.5, 29.5), y: PLACE.catch[intent.style], z: clamp(target.z + place.uz * hands, 0, 119.5) };
     const v = flightVelocity(from, to, duration);
     this.ball = { ...from, vx: v.x, vy: v.y, vz: v.z };
-    this.pass = { target: { ...target, y: to.y }, receiver: p.id, duration, elapsed: 0, style: intent.style, pressure, spread, error, place, distance: Math.hypot(to.x - from.x, to.z - from.z), attempted: new Set() };
+    this.pass = { target: { ...target, y: to.y }, receiver: p.id, duration, elapsed: 0, style: intent.style, pressure, spread, error, place, lead: { x: lead.x, z: lead.z }, distance: Math.hypot(to.x - from.x, to.z - from.z), attempted: new Set() };
     this.threw = true; this.stats.attempts++; this.phase = 'air'; this.carrier = null; this.throwIntent = null;
     this.events.push('throw');
   }
@@ -829,7 +920,7 @@ export class Simulation {
       if (this.carrier === id) continue;
       p.sprinting = true;
       if (this.time < GET_OFF[p.role]) { p.want = ZERO; continue; }
-      if (this.phase === 'air' && this.pass.receiver === id && this.pass.elapsed > 0.12) {
+      if (this.phase === 'air' && this.pass.receiver === id && this.pass.elapsed > LEAD.react) {
         p.want = this.jammed(p, meetWant(p, this.pass.target, (this.pass.duration || 0) - this.pass.elapsed, speedCap(p)));
         continue;
       }
@@ -1414,13 +1505,9 @@ export class Simulation {
     if (this.pass.elapsed > 0.12) for (const p of this.players) {
       if (p.role === 'ol' || p.id === 'QB' || this.pass.attempted.has(p.id) || p.engaged || ['stumble', 'tackle', 'down'].includes(p.action)) continue;
       if (p.team === 'defense') {
-        if (!p.ballAware) continue;
         // Acquiring the flight once does not grant eyes in the back of the
-        // helmet. Use the incoming side when the ball is right on his body.
-        let dx = this.lastBall.x - p.x, dz = this.lastBall.z - p.z;
-        if (Math.hypot(dx, dz) < 0.15) { dx = -b.vx; dz = -b.vz; }
-        const incoming = Math.hypot(dx, dz);
-        if (incoming > 0.01 && (dx * Math.sin(p.facing) + dz * Math.cos(p.facing)) / incoming < -0.42) continue;
+        // helmet (seesBall).
+        if (!this.seesBall(p)) continue;
       }
       const near = nearestOnSegment(this.lastBall, b, p), gap = Math.hypot(near.x - p.x, near.z - p.z);
       // A high/low ball needs more extension and less horizontal reach.
@@ -1452,7 +1539,7 @@ export class Simulation {
     const relative = Math.hypot(b.vx - p.vx, b.vy, b.vz - p.vz);
     const speedQuality = clamp(1 - Math.max(0, relative - 16) * 0.015, 0.55, 1);
     const receiver = this.offense.find(o => RECEIVERS.includes(o.id) && dist(o, p) < 1.0);
-    const hands = { cb: 0.52, s: 0.56, lb: 0.40, dl: 0.18 }[p.role] || 0.4;
+    const hands = HANDS[p.role] || 0.4;
     const possession = hands * reachQuality * heightQuality * speedQuality * (receiver ? 0.68 : 1);
     const breakup = clamp(0.60 + 0.25 * reachQuality, 0, 0.86);
     const roll = this.random();
@@ -1478,10 +1565,16 @@ export class Simulation {
     // Drops (plan 4.2): a base rate, and a little more for a bullet from
     // close range. A defender on him (CATCH) can knock it loose as it
     // arrives, most when he is between him and the ball: a breakup at the
-    // catch. One draw decides both.
+    // catch, or, if he has seen the ball, come away with it. One draw
+    // decides all three.
     const drop = CATCH.base + (this.pass.style === 'bullet' && this.pass.distance < CATCH.close ? CATCH.bullet : 0);
-    const roll = this.random();
-    if (roll < drop + this.catchContest(p)) {
+    const roll = this.random(), contest = this.catchContest(p);
+    if (roll < drop + contest.odds) {
+      const by = contest.by;
+      if (roll >= drop && by && this.seesBall(by)) {
+        const pick = (HANDS[by.role] || 0.4) * CATCH.pick * (CATCH.behind + (1 - CATCH.behind) * (contest.front + 1) / 2);
+        if ((roll - drop) / contest.odds < pick) { this.pass.attempted.add(by.id); this.catchBall(by); return; }
+      }
       const b = this.ball, side = (this.random() - 0.5) * 2;
       this.ball = { x: b.x, y: Math.max(0.6, b.y), z: b.z, vx: p.vx * 0.3 + side, vy: 2.2, vz: p.vz * 0.3 - b.vz * 0.05 };
       if (roll < drop) { this.events.push('drop'); this.finish('Dropped', 0, 'incomplete'); }
@@ -1496,19 +1589,30 @@ export class Simulation {
   }
 
   // How contested a catch is (CATCH): the worst defender within reach of
-  // the receiver, by how close he is and whether he is between the receiver
-  // and the incoming ball or trailing behind him.
+  // the receiver (`by`), by how close he is and whether he is between the
+  // receiver and the incoming ball (`front` 1) or trailing behind him (-1).
   catchContest(p) {
     const b = this.ball, bx = -b.vx, bz = -b.vz, bl = Math.hypot(bx, bz);
-    let worst = 0;
+    let worst = 0, by = null, ahead = 0;
     for (const d of this.defense) {
       const g = dist(d, p);
       if (g >= CATCH.near || d.engaged || ['stumble', 'tackle', 'down'].includes(d.action)) continue;
       const front = bl > 0.1 && g > 1e-6 ? ((d.x - p.x) * bx + (d.z - p.z) * bz) / (bl * g) : 0;
       const close = clamp((CATCH.near - g) / (CATCH.near - CATCH.tight), 0, 1);
-      worst = Math.max(worst, close * (CATCH.trail + (CATCH.front - CATCH.trail) * (front + 1) / 2));
+      const odds = close * (CATCH.trail + (CATCH.front - CATCH.trail) * (front + 1) / 2);
+      if (odds > worst) { worst = odds; by = d; ahead = front; }
     }
-    return worst;
+    return { odds: worst, by, front: ahead };
+  }
+
+  // A defender who can play the ball: aware of it (readPass) and facing it
+  // as it comes in, within about 115 degrees of his facing.
+  seesBall(d) {
+    if (!d.ballAware) return false;
+    let dx = this.lastBall.x - d.x, dz = this.lastBall.z - d.z;
+    if (Math.hypot(dx, dz) < 0.15) { dx = -this.ball.vx; dz = -this.ball.vz; }
+    const incoming = Math.hypot(dx, dz);
+    return incoming <= 0.01 || (dx * Math.sin(d.facing) + dz * Math.cos(d.facing)) / incoming >= -0.42;
   }
 
   // Carried: at the carrier's hands on his right side, velocity zero.
