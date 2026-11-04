@@ -54,7 +54,8 @@ test('a second vertical into a deep zone is not left uncovered', () => {
 test('an underneath defender carries a seam until the deep middle takes it at All-pro, and releases earlier at Rookie', () => {
   const released = { rookie: [], pro: [] };
   for (const difficulty of ['rookie', 'pro', 'allpro']) for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
-    const s = rep('verts', 'cover3', difficulty, seed, true), carrying = new Map();
+    // The base 4-3 at every level (personnel changes with the difficulty).
+    const s = rep('verts', 'cover3', difficulty, seed, true, { package: 'base' }), carrying = new Map();
     let carried = false, deepBefore = false;
     run(s, 3.6, () => {
       const y = s.byId.Y;

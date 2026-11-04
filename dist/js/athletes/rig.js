@@ -31,6 +31,9 @@ const BONE_INDEX = Object.fromEntries(BONES.map((b, i) => [b, i]));
 // neighbouring athletes at the same level (geometry groups), usually a
 // handful of draw calls instead of one, and no vertex work for the others.
 
+// The level of an athlete who is not drawn at all (no mesh has it).
+export const HIDDEN = 2;
+
 export class Squad {
   constructor(scene, count, materials, { lod = true } = {}) {
     this.scene = scene;
@@ -70,12 +73,15 @@ export class Squad {
     this.updateGroups();
   }
 
-  // levels: per athlete 0 (full) or 1 (reduced); ignored without the
-  // reduced meshes.
+  // levels: per athlete 0 (full), 1 (reduced) or HIDDEN (not drawn: a
+  // squad member who is not on the field this rep). Without the reduced
+  // meshes 1 draws full detail.
   setLevels(levels) {
-    if (!this.meshes.bodyLow) return;
     let changed = false;
-    for (let i = 0; i < this.count; i++) if (this.levels[i] !== levels[i]) { this.levels[i] = levels[i]; changed = true; }
+    for (let i = 0; i < this.count; i++) {
+      const level = levels[i] === 1 && !this.meshes.bodyLow ? 0 : levels[i];
+      if (this.levels[i] !== level) { this.levels[i] = level; changed = true; }
+    }
     if (changed) this.updateGroups();
   }
 

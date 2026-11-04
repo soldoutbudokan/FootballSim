@@ -109,7 +109,8 @@ test('the same defensive call varies its front between reps and stays set during
 
 // A back running free: the zone handoff is done and the defense is moved far away.
 function openField(seed=1){
-  const s=new Simulation(seed,{offense:'zone',coverage:'cover3',difficulty:'pro',mode:'reps'});
+  // The base 4-3, so both outside linebackers are on the field.
+  const s=new Simulation(seed,{offense:'zone',coverage:'cover3',difficulty:'pro',mode:'reps',personnel:'base'});
   s.snap();advance(s,.8,{z:1});
   for(const d of s.defense){d.x=d.x<0?-26:26;d.z=s.spot+45;d.vx=d.vz=0;}
   return s;

@@ -112,9 +112,11 @@ function fabricNoise(ctx, x, y, w, h, seed, strength) {
 // piece (u around the torso starting at the left side, back at u = 0.25,
 // front at u = 0.75, so both numbers read left to right; v from the waist
 // seam up to the collar). The last cell is plain white: every other body
-// part samples it, so the whole squad shares one textured material.
+// part samples it, so the whole squad shares one textured material. Eight
+// rows (a 2048 px square) hold the offense and every defender who can come
+// on in another personnel package, with room to spare.
 
-export const ATLAS = { cols: 4, rows: 6, cellW: 512, cellH: 256, pad: 4 };
+export const ATLAS = { cols: 4, rows: 8, cellW: 512, cellH: 256, pad: 4 };
 
 // Measured from the chest loft in rig.js: perimeter at the number band and
 // the vertical span of the mesh, in yards.

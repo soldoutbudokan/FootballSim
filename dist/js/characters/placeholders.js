@@ -36,6 +36,11 @@ export class PlaceholderAthletes {
   update(state, dt, { menu = false } = {}) {
     const controlled = controlledPlayer(state);
     const d = this.dummy;
+    // Squad members who are not on the field this rep: folded away.
+    const here = new Set((state?.players || []).map(p => p.id));
+    d.position.set(0, -10, 0); d.rotation.set(0, 0, 0); d.scale.set(0, 0, 0); d.updateMatrix();
+    for (const [id, i] of this.index) if (!here.has(id)) { this.bodies.setMatrixAt(i, d.matrix); this.contactShadows.setMatrixAt(i, d.matrix); }
+    d.scale.set(1, 1, 1);
     for (const p of state?.players || []) {
       const i = this.index.get(p.id);
       if (i === undefined) continue;

@@ -1,6 +1,7 @@
 import { Simulation, STEP, GOAL } from './sim.js';
 import { PLAYS, formationFor, RECEIVERS, ROUTE_COLORS, COVERAGES, HOT_ROUTES, readParts, readText } from './plays.js';
 import { FieldScene } from './scene.js';
+import { PACKAGES, fullSquad } from './sim/defense.js';
 import { AdaptiveGraphics, PROFILES } from './graphics.js';
 import { FieldAudio } from './audio.js';
 
@@ -614,7 +615,8 @@ function renderHUD() {
   setText('drive-detail', goal ? 'GOAL TO GO' : sim.toGo + ' YDS TO GO');
   setText('field-position', fieldPosition(sim.spot));
   setText('rep-number', String(sim.stats.reps + (pre ? 1 : 0)).padStart(2, '0'));
-  setText('coverage-label', sim.config.coverage === 'random' && pre ? 'Disguised' : COVERAGES[sim.coverage].label);
+  // The personnel and the family ("Nickel · Cover 3"), hidden before the snap on a random call.
+  setText('coverage-label', sim.config.coverage === 'random' && pre ? 'Disguised' : `${(PACKAGES[sim.personnel] || PACKAGES.base).name} · ${COVERAGES[sim.coverage].label}`);
 
   // Play call card and actions.
   setHidden('presnap-adjustments', !pre || !!replay);
@@ -1060,7 +1062,8 @@ buildSettings();
 renderPlayCounts();
 savePrefs();
 try {
-  view = new FieldScene($('field'), sim.players);
+  // The whole squad: every defender who can come on in another package.
+  view = new FieldScene($('field'), fullSquad(sim.players));
   view.setLighting(prefs.lighting);
   view.cameraMode = prefs.camera;
   graphics = new AdaptiveGraphics((profile, scale) => {

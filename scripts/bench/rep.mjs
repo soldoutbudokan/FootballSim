@@ -71,7 +71,7 @@ export function runDrive(task) {
 export function playOut(sim, task, qbSeed, hook) {
   const rec = {
     ...key(task), play: sim.play.id, type: sim.play.type, flip: !!sim.config?.flip,
-    family: sim.coverage ?? null, shell: sim.call?.shell ?? null, front: sim.defensiveFront ?? sim.call?.front ?? null, disguised: sim.call?.disguised ?? null,
+    family: sim.coverage ?? null, personnel: sim.personnel ?? null, shell: sim.call?.shell ?? null, front: sim.defensiveFront ?? sim.call?.front ?? null, disguised: sim.call?.disguised ?? null,
     down: sim.down ?? null, toGo: sim.toGo ?? null, spot: sim.spot,
     pressureAt: null, open: [null, null], releaseAt: null, target: null, style: null,
     sepRelease: null, sepArrival: null, airYards: null, catchDepth: null,

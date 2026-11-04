@@ -5,7 +5,8 @@ import { Simulation, STEP, seededRandom } from '../dist/js/sim.js';
 // Isolate a single, physically reachable pass from the rest of the rep. This
 // fixture tests possession rules separately from how coverage earns position.
 function opportunity(difficulty = 'pro') {
-  const s = new Simulation(7, { offense: 'mesh', coverage: 'cover3', difficulty });
+  // The base 4-3 at every level, so every level fields the same bodies.
+  const s = new Simulation(7, { offense: 'mesh', coverage: 'cover3', difficulty, personnel: 'base' });
   s.phase = 'air'; s.carrier = null; s.threw = true; s.time = 1;
   for (const p of s.players) { p.x = 20; p.z = 100; p.vx = p.vz = 0; }
   const d = s.byId.FS;
