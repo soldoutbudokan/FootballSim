@@ -145,6 +145,8 @@ uniform vec3 turfPaint;
 uniform float turfStripe;
 uniform float turfNormalScale;
 uniform float turfSecondX;
+uniform float turfSheen;
+uniform float turfTilt;
 varying vec3 vTurfWorld;
 
 // Box-filtered coverage of the band |d| < w for a pixel footprint fw.
@@ -224,6 +226,7 @@ float fieldPaint(vec2 p, vec2 fw) {
 const TURF_FRAGMENT = /* glsl */`
 vec2 wp = vec2(vTurfWorld.x, -vTurfWorld.z);
 vec2 wfw = fwidth(wp);
+float turfFoot = max(wfw.x, wfw.y);   // yards per pixel
 
 // Which field (if any) this fragment belongs to, in field-local coordinates.
 bool second = wp.x > 31.666667;
@@ -241,20 +244,42 @@ vec3 grassTex = g1;
 // Mostly luminance detail with a little of the photo's hue, softened.
 vec3 variation = clamp(grassTex / turfMean, vec3(0.25), vec3(2.5));
 float detail = luma(grassTex) / luma(turfMean);
-variation = mix(vec3(1.0), mix(vec3(detail), variation, 0.25), 0.62);
+variation = mix(vec3(1.0), mix(vec3(detail), variation, 0.25), 0.7);
 float broad = texture2D(turfNoise, wp / 37.0).r;
 float mottled = texture2D(turfNoise, wp / 11.0 + 0.5).r;
+#ifdef TURF_HQ
+// Clumps a yard or two across: no lawn is one colour, and this is what still
+// reads from the high cameras once the blade detail has averaged away.
+float clumps = texture2D(turfNoise, mat2(0.6, -0.8, 0.8, 0.6) * wp / 3.7 + 0.21).r;
+#else
+float clumps = mottled;
+#endif
 
 // Mow stripes: 5 yd bands between the goal lines, cross-cut in the end zones.
-float stripe = clamp(sin(3.14159265 * (fp.y - 10.0) / 5.0) * 7.0, -1.0, 1.0);
-float endStripe = clamp(sin(3.14159265 * (fp.x + 26.666667) / 5.333333) * 7.0, -1.0, 1.0);
-stripe = (fp.y > 10.0 && fp.y < 110.0) ? stripe : endStripe;
-// Blades lean the way the mower travelled (across the field), so the bands
-// show most from the sidelines and least from behind the end zone.
-vec2 viewXZ = normalize(vTurfWorld.xz - cameraPosition.xz + vec2(1e-4));
-float stripeContrast = turfStripe * (0.7 + 1.5 * abs(viewXZ.x));
-vec3 maintained = turfColor * (1.0 + stripeContrast * stripe) * (0.94 + 0.12 * broad);
-maintained *= mix(vec3(1.0), vec3(1.03, 1.0, 0.94), 0.5 + 0.5 * stripe);
+// The mower lays the blades over, away from itself, so neighbouring bands lean
+// in opposite directions: across the field between the goal lines, along it
+// in the end zones.
+float stripeEdge = min(16.0, 0.5 / max(turfFoot, 1e-4));
+bool midfield = fp.y > 10.0 && fp.y < 110.0;
+float stripe = midfield
+  ? clamp(sin(3.14159265 * (fp.y - 10.0) / 5.0) * stripeEdge, -1.0, 1.0)
+  : clamp(sin(3.14159265 * (fp.x + 26.666667) / 5.333333) * stripeEdge, -1.0, 1.0);
+// Lean in (x, north) = the turf's tangent frame. Zero off the fields.
+vec2 turfLean = (midfield ? vec2(1.0, 0.0) : vec2(0.0, 1.0)) * stripe * onField;
+// A blade's broad upper face looks back along its lean: seen (or lit) from
+// behind the lean a band is light and glossy, from in front of it dark. That
+// is why the bands swap as the camera moves around the field. The tilted
+// shading normal (below) carries the sun's and the lamps' share of this; this
+// term is the eye's, strongest at grazing angles.
+vec3 toEye = cameraPosition - vTurfWorld;
+float eyeDistance = length(toEye);
+vec2 eyeFlat = vec2(toEye.x, -toEye.z) / max(length(toEye.xz), 1e-3);
+float grazing = 1.0 - clamp(toEye.y / max(eyeDistance, 1e-3), 0.0, 1.0);
+float nap = dot(turfLean, -eyeFlat) * (0.25 + 0.45 * grazing) + 0.5 * stripe * onField;
+vec3 maintained = turfColor * (1.0 + turfStripe * nap) * (0.9 + 0.2 * broad);
+// Light bands run a little yellower (more blade face, less shadowed thatch).
+maintained *= mix(vec3(0.985, 1.0, 1.03), vec3(1.03, 1.0, 0.93), 0.5 + 0.5 * clamp(nap, -1.0, 1.0));
+maintained *= mix(vec3(1.06, 1.0, 0.84), vec3(0.95, 1.0, 1.08), clumps) * (0.93 + 0.14 * clumps);
 vec3 rough = turfRough * (0.8 + 0.4 * broad) * mix(vec3(1.0), vec3(1.1, 1.02, 0.78), smoothstep(0.45, 0.8, mottled));
 vec3 grass = mix(rough, maintained, onField) * variation;
 
@@ -267,13 +292,25 @@ vec3 dirt = texture2D(turfDirt, wp / 2.4).rgb * turfDirtTint;
 grass = mix(grass, grass * vec3(1.1, 1.0, 0.7) * 0.94, smoothstep(0.05, 0.6, wear) * 0.7);
 grass = mix(grass, dirt, smoothstep(0.45, 0.95, wear) * 0.6 * (0.6 + 0.4 * wearSample.b));
 
-// Paint, slightly worn so the grass shows through.
+// Paint, sprayed on the grass: the edges follow the blades (a noise offset of
+// about an inch, only while a pixel is finer than that), the troughs between
+// blades stay green, and traffic wears it thin.
+float nearPaint = 1.0 - smoothstep(0.006, 0.03, turfFoot);
+#ifdef TURF_HQ
+vec2 spray = (vec2(texture2D(turfNoise, wp * 0.9).r, texture2D(turfNoise, wp.yx * 1.1 + 0.43).r) - 0.5) * 0.05 * nearPaint;
+float paint = fieldPaint(fp + spray, wfw) * step(0.001, onField);
+#else
 float paint = fieldPaint(fp, wfw) * step(0.001, onField);
-float paintWear = 0.84 + 0.16 * mottled - 0.35 * wear * (0.6 + 0.4 * wearSample.b);
-paint *= clamp(paintWear, 0.0, 1.0);
-vec3 albedo = mix(grass, turfPaint * (0.82 + 0.18 * clamp(detail, 0.0, 1.4)), paint);
+#endif
+float paintWear = 0.86 + 0.14 * mottled - 0.35 * wear * (0.6 + 0.4 * wearSample.b);
+float paintCover = mix(0.93, clamp(0.5 + 0.55 * detail, 0.45, 1.0), nearPaint);
+paint *= clamp(paintWear, 0.0, 1.0) * paintCover;
+vec3 albedo = mix(grass, turfPaint * (0.8 + 0.2 * clamp(detail, 0.0, 1.4)), paint);
 diffuseColor.rgb = albedo;
-float turfRoughness = mix(0.94, 0.78, paint);
+// Blades are glossy; painted and worn grass less so. Far away the blade
+// normals average out, so the surface is rougher there (no sparkle).
+float turfGloss = onField * (1.0 - 0.6 * paint) * (1.0 - smoothstep(0.1, 0.7, wear));
+float turfRoughness = mix(0.93, mix(turfSheen, 0.88, smoothstep(0.02, 0.12, turfFoot)), turfGloss);
 `;
 
 export function createTurfMaterial(textures) {
@@ -286,11 +323,15 @@ export function createTurfMaterial(textures) {
     turfNormal: { value: textures.normal },
     // Mean linear colour of the lawn photograph (used to normalise it).
     turfMean: { value: new THREE.Vector3(0.130, 0.244, 0.018) },
-    turfColor: { value: new THREE.Color('#2e5127') },
+    turfColor: { value: new THREE.Color('#33561d') },
     turfRough: { value: new THREE.Color('#4a5c2e') },
     turfDirtTint: { value: new THREE.Color('#d8c8b0') },
     turfPaint: { value: new THREE.Color('#f2f1ea') },
-    turfStripe: { value: 0.025 },
+    // Mow stripes: albedo contrast of the nap, how far the bands' shading
+    // normals lean (tangent of the angle) and the roughness of healthy blades.
+    turfStripe: { value: 0.3 },
+    turfTilt: { value: 0.065 },
+    turfSheen: { value: 0.74 },
     turfNormalScale: { value: 0.55 },
     turfSecondX: { value: FIELD.secondFieldX },
   };
@@ -311,7 +352,9 @@ export function createTurfMaterial(textures) {
     // the tangent frame is the world x / north / up axes in view space.
     fragment = replaceOnce(fragment, '#include <normal_fragment_maps>', /* glsl */`
       vec3 mapN = texture2D(turfNormal, wp / 2.19).xyz * 2.0 - 1.0;
-      mapN.xy *= turfNormalScale;
+      // Blade detail fades as it drops under a pixel; the mown bands lean.
+      mapN.xy *= turfNormalScale * (1.0 - 0.7 * smoothstep(0.02, 0.15, turfFoot));
+      mapN.xy -= turfLean * turfTilt;
       mat3 turfTbn = mat3(
         normalize((viewMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz),
         normalize((viewMatrix * vec4(0.0, 0.0, -1.0, 0.0)).xyz),
@@ -320,7 +363,7 @@ export function createTurfMaterial(textures) {
     `);
     shader.fragmentShader = fragment;
   };
-  material.customProgramCacheKey = () => 'turf-v2-' + ('TURF_HQ' in material.defines ? 'hq' : 'lq') + ('TURF_ANISO' in material.defines ? '-af' : '');
+  material.customProgramCacheKey = () => 'turf-v3-' + ('TURF_HQ' in material.defines ? 'hq' : 'lq') + ('TURF_ANISO' in material.defines ? '-af' : '');
   return material;
 }
 

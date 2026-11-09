@@ -72,6 +72,7 @@ export class CameraDirector {
     this.menuTime = 0;
     this.presnapAnchor = null;   // the quarterback's pre-snap spot (snap ease)
     this.swingSide = 0;          // -1 / +1: side the camera swung to in a tackle
+    this.subject = new THREE.Vector3(0, 1, 35);   // what the title and replay shots are about
   }
 
   // The next update jumps straight to the desired pose.
@@ -294,7 +295,7 @@ export class CameraDirector {
     // Aim so the formation (centred a yard behind the ball) lands at the
     // framing point instead of the centre of the screen.
     const framing = aspect < 1 ? MENU_FRAMING.portrait : MENU_FRAMING.landscape;
-    const target = aimOffset(position, new THREE.Vector3(0, 1, spot - 1), framing, fov, aspect);
+    const target = aimOffset(position, this.subject.set(0, 1, spot - 1), framing, fov, aspect);
     return { position, target, fov, smooth: 0.9 };
   }
 
@@ -303,12 +304,24 @@ export class CameraDirector {
   replayPose(state) {
     const b = state.ball;
     const push = 1 - 0.3 * Math.min(1, (state.time || 0) / 5);
+    this.subject.set(b.x, 1, b.z);
     return {
       position: new THREE.Vector3(b.x - 8.5 * push, 2.4 + 0.6 * push, b.z - 8.5 * push),
       target: new THREE.Vector3(b.x, Math.max(0.6, Math.min(b.y, 3)), b.z + 1),
       fov: 38,
       smooth: 0.3,
     };
+  }
+
+  // Depth of field for the two cinematic shots (title screen and replay): a
+  // long lens focused on the subject, with only the background falling out of
+  // focus. `focus` is where the blur starts and `range` how far beyond that it
+  // reaches its maximum (yards); `blur` is that maximum, in pixels of a
+  // 900-pixel-high frame. The playing cameras stay sharp throughout: null.
+  depthOfField({ menu = false, replay = false } = {}) {
+    if (!menu && !replay) return null;
+    const distance = this.position.distanceTo(this.subject);
+    return { focus: distance * 1.4 + 6, range: menu ? 170 : 90, blur: menu ? 4.5 : 6 };
   }
 
   // Scene-space point the camera is looking at on the ground (for grass and shadows).

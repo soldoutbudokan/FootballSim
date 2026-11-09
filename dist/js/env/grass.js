@@ -118,6 +118,12 @@ export class GrassTufts {
     };
     const material = new THREE.MeshStandardMaterial({
       map: tuftTexture(), roughness: 0.95, metalness: 0, alphaTest: 0.4, alphaToCoverage: true, side: THREE.DoubleSide,
+      // The blades are tested against depth but do not write it: thousands of
+      // thin cards in the depth buffer would read as solid clutter to the
+      // ambient-occlusion pass and turn black. Drawn after everything opaque
+      // (renderOrder below), they still hide behind feet and props, and being
+      // one colour they do not need to sort among themselves.
+      depthWrite: false,
     });
     material.onBeforeCompile = shader => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -144,6 +150,7 @@ export class GrassTufts {
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = false;
     this.mesh.matrixAutoUpdate = false;
+    this.mesh.renderOrder = 4;
     scene.add(this.mesh);
     this.setCount(0);
   }

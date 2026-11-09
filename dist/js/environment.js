@@ -8,6 +8,7 @@ import { SkyDome } from './env/sky.js';
 import { Lighting, PRESETS } from './env/lighting.js';
 import { GrassTufts } from './env/grass.js';
 import { rebuildPlayArt } from './env/playart.js';
+import { installHeightFog } from './env/atmosphere.js';
 
 // The outdoor practice facility: two natural-grass NFL fields, the team
 // building, fence, light poles, film tower, sideline equipment, trees and
@@ -18,6 +19,7 @@ export class Environment {
     this.scene = scene;
     this.renderer = renderer;
     this.assetManager = assetManager;
+    installHeightFog();
     this.root = new THREE.Group();
     this.root.name = 'facility';
     scene.add(this.root);
@@ -43,6 +45,7 @@ export class Environment {
     buildFence(this.root);
     const poles = buildLightPoles(this.root, shadows);
     this.lampLens = poles.lens;
+    this.poles = poles.poles;
     this.lampGlow = buildLampGlow(this.root, poles.heads);
     this.lighting.addPoleLights(poles.heads);
     buildFilmTower(this.root, shadows);
@@ -102,12 +105,17 @@ export class Environment {
     };
   }
 
+  // The post-processing grade of the current lighting preset.
+  get grade() { return this.lighting.preset.grade; }
+
   setLighting(mode) {
     this.lighting.setPreset(mode);
     const p = PRESETS[this.lighting.mode];
     this.lampLens.emissiveIntensity = p.lamps * 9;
     this.lampGlow.visible = p.lamps > 0.5;
     this.building.glass.emissiveIntensity = p.windows;
+    // Only the real sun shines through leaves (at night the "sun" is a pole bank).
+    this.trees.setSun(this.lighting.sunDirection, this.lighting.sun.color, p.poles > 0 ? 0 : p.sun.intensity);
     this.lighting.followFocus(this.shadowFocus, true);
   }
 
@@ -116,14 +124,11 @@ export class Environment {
     this.lighting.setQuality(profile);
     const level = profile.props ?? 1;
     this.trees.setCount([0.35, 0.7, 1, 1][Math.min(3, level)]);
-    // Leaf cards are double-sided with alpha to coverage from High up. Below
-    // that, back-facing cards are culled and the cut-out is a plain alpha
-    // test: that halves the leaf overdraw, which dominates the fill cost of
-    // the tree belts, and barely changes how they look.
+    // Leaf cards are double-sided on every tier (a crown is a shell of small
+    // cards; culling their backs would leave it half empty). From High up the
+    // cut-out is alpha to coverage; below that a plain alpha test.
     const leaves = this.trees.mesh.material, full = level >= 2;
-    const side = full ? THREE.DoubleSide : THREE.FrontSide;
-    if (leaves.side !== side || leaves.alphaToCoverage !== full) {
-      leaves.side = side;
+    if (leaves.alphaToCoverage !== full) {
       leaves.alphaToCoverage = full;
       leaves.needsUpdate = true;
     }
@@ -150,8 +155,9 @@ export class Environment {
   // Once per rendered frame: wind, clouds, the shadow frustum that follows the
   // ball, and the grass tile that follows the camera. `focus` (scene
   // coordinates) is where the camera looks; it defaults to the ball.
-  update(state, dt, { menu = false, focus = null, grass = true } = {}) {
+  update(state, dt, { menu = false, focus = null, grass = true, camera = null } = {}) {
     this.time += dt;
+    if (camera) this.clearView(camera);
     this.sky.update(dt);
     const wind = 0.6 + 0.4 * Math.sin(this.time * 0.37) * Math.sin(this.time * 0.13 + 1.7);
 
@@ -173,6 +179,21 @@ export class Environment {
       this.grass.update(dt, focus || target, wind);
     }
     if (this.profile?.detail !== false) this.animateRibbons(wind);
+  }
+
+  // A light pole close in front of the lens (the sideline camera looks past
+  // the west poles) would wipe a grey bar across the play: it is not drawn
+  // while it is within 28 yd and less than 60 degrees off the view axis. That
+  // is well outside any camera's frame when it switches, and its shadow stays.
+  clearView(camera) {
+    const e = camera.matrixWorld.elements, fx = -e[8], fz = -e[10], flat = Math.hypot(fx, fz) || 1;
+    for (const pole of this.poles) {
+      const dx = pole.x - camera.position.x, dz = pole.z - camera.position.z, distance = Math.hypot(dx, dz);
+      const hidden = distance < 28 && distance > 0 && (dx * fx + dz * fz) / (distance * flat) > 0.5;
+      if (pole.hidden === hidden) continue;
+      pole.hidden = hidden;
+      for (const mesh of pole.meshes) mesh.visible = !hidden;
+    }
   }
 
   actionPoint(state) {
