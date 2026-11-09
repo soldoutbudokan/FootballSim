@@ -2,7 +2,8 @@ import * as THREE from '../../vendor/three.module.js';
 import { TAU, SIDES, clamp, lerp, smoothstep, bump, sampleTrack, wrapAngle, damp } from './math.js';
 import { armAngles } from './pose.js';
 import { carryArm, tuck, cover, legsOut } from './carry.js';
-import { tackled, tackle, tackleYaw, shrugOff, missFor } from './tackle.js';
+import { tackled, tackle, tackleYaw, shrugOff, missFor, knockedDown } from './tackle.js';
+import { reachForBall, catchBall, giveBall, takeBall } from './ballskills.js';
 
 // Action layer: each function modifies the locomotion base pose for one
 // action of plan section 3.4 (plus 'pocket', the quarterback holding the ball
@@ -40,6 +41,9 @@ export function startAction(anim, action, data, p, ctx) {
       data.yaw = (q, c) => tackleYaw(anim, q, c);
       break;
     case 'stumble': {
+      // A defender put on his back by a run block (the simulation's pancake:
+      // a long stumble) goes down and bounces up.
+      data.pancake = anim.spec.team === 'defense' && p.actionTime > 0.75 && !(ctx.state.misses || []).some(m => m.tackler === p.id && ctx.state.time - m.at < 0.05);
       // He falls toward the side the runner went by on (when the snapshot says).
       const miss = missFor(anim, p, ctx);
       data.side = miss ? miss.side : Math.abs(anim.lean) > 0.1 ? Math.sign(anim.lean) : (anim.seed < 0.5 ? 1 : -1);
@@ -73,32 +77,6 @@ function senseCut(anim, data, age) {
   // and the body travels over it.
   _a.set(SIDES[data.plant] * 0.3, 0, clamp(0.1 + 0.055 * anim.speed, 0.15, 0.5));
   data.foot = anim.rootToWorld(_a, { x: 0, z: 0 });
-}
-
-// Hands meet a ball approaching through the air (anticipation before the
-// simulation registers the catch): both hands together, elbows soft, eyes on
-// the ball. Only for a ball that passes within reach (anticipateCatches).
-function reachForBall(anim, pose, p, ctx) {
-  const reach = anim.reach;
-  if (!reach) return;
-  if (ctx.ballScene && reach.t < 1.6) anim.lookAt(pose, ctx.ballScene, 0.85 * (1 - smoothstep(1.0, 1.6, reach.t)));
-  const w = (1 - smoothstep(0.18, 0.5, reach.t)) * (1 - smoothstep(0.8, 1.3, reach.dist));
-  if (w <= 0) return;
-  // Turn the shoulders toward the ball, then put both hands on it.
-  anim.worldToTilt(pose, reach.point, _a);
-  pose.spine.y += clamp(Math.atan2(_a.x, Math.max(0.05, _a.z)), -0.7, 0.7) * w;
-  anim.worldToChest(pose, reach.point, _a);
-  // A ball beyond the arms is met where they can get to, elbows still bent.
-  const d = anim.dims, top = _d.set(0, d.shoulder[1], d.shoulder[2]), most = 0.86 * (d.upperArm + d.forearm);
-  _a.sub(top);
-  if (_a.length() > most) _a.setLength(most);
-  _a.add(top);
-  for (let i = 0; i < 2; i++) {
-    _b.copy(_a); _b.x += SIDES[i] * 0.075;
-    pose.hands[i].lerp(_b, w);
-    pose.elbows[i].lerp(_c.set(SIDES[i] * 0.9, -0.5, -0.3), w);
-    pose.wrists[i].lerp(_c.set(-0.3, 0, SIDES[i] * 0.9), w);
-  }
 }
 
 // Which of his feet is the inside one (toward the quarterback), 0 = left,
@@ -139,6 +117,45 @@ function handsUp(pose, d, w, x = 0.14, y = 0.1, z = 0.3) {
     pose.hands[i].lerp(_w.set(SIDES[i] * x * d.torso, y, z), w);
     pose.elbows[i].lerp(_w.set(SIDES[i] * 0.45, -1, -0.35), w);
     pose.wrists[i].lerp(_w.set(-0.75, 0, 0), w);
+  }
+}
+
+// Standing around after the whistle: weight on one leg, eyes on the ball, and
+// a word about the play from the men near it: defenders wave off an
+// incompletion, the offense puts its arms up for a touchdown. Short, and not
+// everyone.
+function afterWhistle(anim, pose, p, ctx) {
+  const still = 1 - smoothstep(0.3, 1.2, anim.speed), t = ctx.deadTime, d = anim.dims;
+  if (still <= 0) return;
+  const rest = smoothstep(0.5, 1.6, t + 0.6 * anim.seed) * still, side = anim.seed < 0.5 ? 1 : -1, off = side > 0 ? 1 : 0;
+  pose.pelvis.x += side * 0.035 * rest; pose.pelvis.y -= 0.012 * rest;
+  pose.hips.z += -side * 0.06 * rest; pose.spine.z += side * 0.04 * rest;
+  pose.feet[off].z += 0.07 * rest; pose.feet[off].x += SIDES[off] * 0.03 * rest;
+  if (ctx.ballScene) anim.lookAt(pose, ctx.ballScene, 0.55 * rest);
+  const kind = ctx.state.result?.kind, defense = anim.spec.team === 'defense';
+  const b = ctx.ball, near = Math.hypot(p.x - b.x, p.z - b.z);
+  if (kind === 'incomplete' && defense && near < 7 && anim.seed < 0.62) {
+    // "No good": the arms cross low in front and sweep out, twice.
+    const from = 0.25 + 0.5 * anim.seed, u = (t - from) / 1.1, w = smoothstep(0, 0.15, u) * (1 - smoothstep(0.85, 1, u)) * still;
+    if (w > 0) {
+      const sweep = 0.5 - 0.5 * Math.cos(TAU * 2 * clamp(u, 0, 1));
+      for (let i = 0; i < 2; i++) {
+        pose.hands[i].lerp(_a.set(SIDES[i] * lerp(-0.06, 0.52, sweep), -0.3 + 0.05 * sweep, 0.3 - 0.1 * sweep), w);
+        pose.elbows[i].lerp(_b.set(SIDES[i], -0.6, -0.4), w);
+        pose.wrists[i].lerp(_b.set(-0.4, 0, 0), w);
+      }
+      pose.spine.x += 0.06 * w;
+    }
+  } else if (kind === 'touchdown' && !defense && ctx.holderId !== p.id && near < 16 && anim.seed > 0.35) {
+    // Both arms straight up.
+    const from = 0.35 + 0.8 * (anim.seed - 0.35), u = (t - from) / 1.3, w = smoothstep(0, 0.18, u) * (1 - smoothstep(0.8, 1, u)) * still;
+    if (w > 0) {
+      for (let i = 0; i < 2; i++) {
+        pose.hands[i].lerp(_a.set(SIDES[i] * 0.26, 0.8 * d.k, 0.06), w);
+        pose.elbows[i].lerp(_b.set(SIDES[i], -0.2, -0.4), w);
+      }
+      pose.spine.x -= 0.06 * w; pose.head.x -= 0.12 * w;
+    }
   }
 }
 
@@ -272,6 +289,9 @@ export const ACTIONS = {
   run(anim, pose, age, data, p, ctx) {
     for (const kind in POSTURES) if (anim.postures[kind] > 0.005) POSTURES[kind](anim, pose, anim.postures[kind], p, ctx);
     if (ctx.phase === 'air') reachForBall(anim, pose, p, ctx);
+    if (ctx.mesh) { giveBall(anim, pose, p, ctx); takeBall(anim, pose, p, ctx); }
+    // A man with nothing left to do watches the ball carrier.
+    if ((ctx.phase === 'run' || ctx.phase === 'tackle') && anim.speed < 1.6 && p.engaged == null) anim.lookAt(pose, ctx.ballScene, 0.6 * (1 - smoothstep(0.6, 1.6, anim.speed)));
     // After the whistle, most players who are standing around put their
     // hands on their hips, each in his own time rather than all at once.
     if (ctx.dead && anim.seed < 0.7) {
@@ -287,6 +307,7 @@ export const ACTIONS = {
         pose.spine.x -= 0.06 * w;
       }
     }
+    if (ctx.dead) afterWhistle(anim, pose, p, ctx);
   },
 
   // Ball high and tight; with a tackler closing in front he drops his pads
@@ -302,6 +323,13 @@ export const ACTIONS = {
       pose.head.x -= 0.1 * brace;
     }
     shrugOff(anim, pose, p, ctx);
+    // A touchdown: the free arm goes up for a moment.
+    if (ctx.dead && ctx.state.result?.kind === 'touchdown') {
+      const j = 1 - i, w = smoothstep(0.25, 0.6, ctx.deadTime) * (1 - smoothstep(1.5, 2.1, ctx.deadTime));
+      pose.hands[j].lerp(_a.set(SIDES[j] * 0.24, 0.78 * anim.dims.k, 0.12), w);
+      pose.elbows[j].lerp(_b.set(SIDES[j], -0.2, -0.3), w);
+      pose.spine.x -= 0.08 * w; pose.head.x -= 0.15 * w;
+    }
   },
 
   // Ball in both hands at the numbers. Dropping (or shuffling) he stays
@@ -330,6 +358,7 @@ export const ACTIONS = {
       for (let i = 0; i < 2; i++) pose.knees[i].lerp(_a.set(SIDES[i] * 0.3, 0, 1), set);
     }
     pose.head.set(0, 0.45 * Math.sin(t * 0.8 + anim.seed * 3), 0);
+    if (ctx.mesh) giveBall(anim, pose, p, ctx);
   },
 
   // Load, stride, release at 0.23 s, follow-through across the body.
@@ -364,49 +393,8 @@ export const ACTIONS = {
     }
   },
 
-  // Hands where the ball arrived, then bring it in to the tuck. The meeting
-  // point is fixed in the chest frame when the catch starts, so the hands do
-  // not trail behind a receiver who keeps running.
-  catch(anim, pose, age, data, p, ctx) {
-    const i = carryArm(anim, p), j = 1 - i;
-    const secure = smoothstep(0.04, 0.26, age);
-    // The shoulders stay turned to where the ball arrived (a ball thrown
-    // across or over the shoulder), then square up as it comes in.
-    if (data.twist === undefined) {
-      data.twist = 0;
-      if (data.point) {
-        anim.worldToTilt(pose, data.point, _a);
-        data.twist = clamp(Math.atan2(_a.x, Math.max(0.05, _a.z)), -0.8, 0.8);
-      }
-    }
-    pose.spine.y += data.twist * (1 - secure);
-    if (!data.local) {
-      const twisted = _w.copy(pose.spine);
-      pose.spine.y += data.twist * secure;            // full twist for the meeting point
-      data.local = data.point ? anim.worldToChest(pose, data.point, new THREE.Vector3()) : new THREE.Vector3(0, 0.2, 0.42);
-      pose.spine.copy(twisted);
-      // Never further than the arms reach, never behind the shoulders.
-      data.local.z = Math.max(0.02, data.local.z);
-      const reach = 0.92 * (anim.dims.upperArm + anim.dims.forearm);
-      const sh = _d.set(0, anim.dims.shoulder[1], 0), off = data.local.clone().sub(sh);
-      if (off.length() > reach) data.local.copy(sh).addScaledVector(off.normalize(), reach);
-    }
-    _a.copy(data.local);
-    _b.copy(_a); _b.x += SIDES[i] * 0.07;
-    _c.set(SIDES[i] * 0.105, 0.13, 0.19);
-    pose.hands[i].copy(_b).lerp(_c, secure);
-    pose.elbows[i].set(SIDES[i] * 0.9, -0.8, -0.35);
-    pose.wrists[i].set(lerp(-0.3, 0.55, secure), 0, SIDES[i] * 0.9 * (1 - secure));
-    // Off hand covers the ball as it comes in, then returns to the run.
-    _b.copy(_a); _b.x += SIDES[j] * 0.07;
-    _d.set(SIDES[i] * 0.03, 0.18, 0.25);
-    _b.lerp(_d, secure);
-    const release = smoothstep(0.32, 0.45, age);
-    pose.hands[j].copy(_b).lerp(anim.base.hands[j], release);
-    pose.elbows[j].set(SIDES[j] * 0.9, -0.8, -0.3);
-    pose.wrists[j].set(-0.3, 0, SIDES[j] * 0.9 * (1 - release));
-    if (data.point) anim.lookAt(pose, data.point, 0.7 * (1 - secure));
-  },
+  // Catching, dropping and swatting the ball (ballskills.js).
+  catch: catchBall,
 
   cut: plantAndDrive,
   juke: plantAndDrive,
@@ -447,9 +435,16 @@ export const ACTIONS = {
     }
     const rig = q ? ctx.rigs.get(q.id) : null;
     // The hands travel to their spot (from wherever they were) instead of
-    // jumping when he locks on, or switches to another man.
+    // jumping when he locks on, or switches to another man: the first trip
+    // out from the chest is the punch.
     data.hands ??= [anim.pose.hands[0].clone(), anim.pose.hands[1].clone()];
     const follow = 1 - Math.exp(-30 * ctx.dt);
+    // Hand fighting: each arm presses and gives in its own rhythm, the body
+    // rocking with it; a pass rusher now and then throws one arm over (a swim).
+    const beat = ctx.time * (4.2 + 2.4 * anim.seed) + anim.seed * 17, max = 0.96 * (d.upperArm + d.forearm);
+    const rock = Math.sin(beat);
+    pose.pelvis.z += 0.025 * rock; pose.spine.x += 0.04 * rock; pose.spine.y += 0.05 * Math.sin(beat * 0.63 + 1);
+    const swim = !offense && data.run < 0.5 ? bump(0.74, 1, Math.sin(beat * 0.31 + anim.seed * 5)) : 0, over = anim.seed < 0.5 ? 0 : 1;
     for (let i = 0; i < 2; i++) {
       if (rig) {
         // A point on the opponent's body (his chest frame): my left hand lands
@@ -462,8 +457,11 @@ export const ACTIONS = {
         anim.worldToChest(pose, _a, _b);
         _c.set(SIDES[i] * d.shoulder[0], d.shoulder[1], d.shoulder[2]);
         _d.subVectors(_b, _c);
-        const len = _d.length();
-        if (len > 0.1) _b.addScaledVector(_d, -0.07 / len);
+        const len = _d.length(), give = 0.07 + 0.07 * (0.5 + 0.5 * Math.sin(beat + i * 2.4));
+        if (len > 0.1) _b.addScaledVector(_d, -give / len);
+        if (swim > 0 && i === over) { _b.y += 0.3 * swim; _b.z -= 0.1 * swim; }
+        // A man who has got away is let go of, not followed by a stretching arm.
+        if (len > max + 0.07) _b.copy(_c).addScaledVector(_d, max / len).lerp(_w.set(SIDES[i] * 0.14 * d.torso, 0.1, 0.3), smoothstep(max + 0.1, max + 0.45, len));
         data.hands[i].lerp(_b, follow);
       }
       // Without a man (the block just ended) the hands hold where they were.
@@ -481,7 +479,12 @@ export const ACTIONS = {
   // the falling side reaches for the turf and the other arm flies back for
   // balance; then he gathers himself and runs on.
   stumble(anim, pose, age, data, p, ctx) {
-    const d = anim.dims, u = age / 0.7, side = data.side, deep = data.deep ? 1 : 0;
+    if (data.pancake) {
+      const u = age / 0.9;
+      knockedDown(anim, pose, 0.84 * smoothstep(0, 0.36, u) * (1 - smoothstep(0.52, 1, u)), u > 0.45);
+      return;
+    }
+    const d = anim.dims, u = age / 0.55, side = data.side, deep = data.deep ? 1 : 0;
     const lurch = bump(0, 0.95, u) ** 0.8, reach = bump(0.1, 0.8, u);
     pose.pelvis.y -= (0.22 + 0.14 * deep) * lurch;
     pose.spine.x += 0.2 * deep * lurch;
@@ -528,6 +531,7 @@ function plantAndDrive(anim, pose, age, data, p, ctx) {
   senseCut(anim, data, age);
   const holding = ctx.holderId === p.id, arm = holding ? carryArm(anim, p) : -1;
   if (holding) { tuck(pose, arm); shrugOff(anim, pose, p, ctx); }
+  else if (ctx.phase === 'air') reachForBall(anim, pose, p, ctx);
   pose.pelvis.y -= (juke ? 0.16 : 0.1) * w;
   pose.hips.x += 0.1 * w; pose.spine.x += 0.12 * w;
   if (data.dir === null) return;

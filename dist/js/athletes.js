@@ -6,6 +6,7 @@ import { createMaterials } from './athletes/uniform.js';
 import { Football } from './athletes/ball.js';
 import { Markers } from './athletes/markers.js';
 import { tackleContext, inferTackle, contactThreats, recentMiss } from './athletes/tackle.js';
+import { handoffMesh } from './athletes/ballskills.js';
 
 // Everything that moves: the athletes, the ball, the control indicator and
 // the contact shadows. Scene units are yards; simulation +z maps to scene -z.
@@ -159,6 +160,7 @@ export class Athletes {
     const record = state.tackle !== undefined ? state.tackle : inferTackle(state, clock, this.byId, this.tackleMemo);
     ctx.tackle = tackleContext(record, state.phase, clock, this.byId, this.tackleCache);
     ctx.miss = holderId ? recentMiss(state, clock, holderId) : null;
+    ctx.mesh = handoffMesh(ctx, this.qbId);
     ctx.threats = this.threats;
     ctx.brace = contactThreats(ctx, this.threats);
     this.anticipateCatches(ctx);

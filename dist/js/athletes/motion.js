@@ -8,13 +8,14 @@ import { tackleRole } from './tackle.js';
 // Seconds each timed action lasts in the simulation (plan section 3.4).
 // How far off downfield a lineman in his pass set may turn to face a rusher.
 const SET_TURN = 70 * Math.PI / 180;
-const DURATIONS = { throw: 0.4, catch: 0.45, juke: 0.45, cut: 0.2, stumble: 0.7 };
+const DURATIONS = { throw: 0.4, catch: 0.45, juke: 0.45, cut: 0.2, stumble: 0.55 };
 const SIM_ACTIONS = new Set(['ready', 'run', 'cut', 'juke', 'block', 'throw', 'catch', 'carry', 'wrapped', 'tackle', 'down', 'stumble']);
 
 function blendTime(from, to) {
   // The catch starts exactly where the reach for the ball left the hands
   // (the reach itself disappears once the pass is complete), so it cuts in.
-  if (to === 'ready' || to === 'catch') return 0;
+  if (to === 'ready') return 0;
+  if (to === 'catch') return from === 'run' || from === 'cut' || from === 'juke' ? 0 : 0.07;
   if (from === 'ready') return 0.24;
   if (from === 'tackled' || from === 'tackle' || from === 'assist') return 0.25;
   return { throw: 0.07, cut: 0.06, juke: 0.06, tackle: 0.12, tackled: 0.1, assist: 0.14, stumble: 0.08 }[to] ?? 0.16;
@@ -22,6 +23,30 @@ function blendTime(from, to) {
 
 const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _v = new THREE.Vector3();
 const _e = new THREE.Euler(), _q = new THREE.Quaternion();
+
+// How each man runs: his position's habits, varied a little by player so 22
+// men never stride alike. knee = knee lift, arm = arm swing, bounce = vertical
+// travel, cadence = step rate, width = extra base (yd), crouch = pad level
+// (yd lower), lean = extra forward lean at speed (rad).
+const ROLE_STYLE = {
+  ol: { knee: 0.8, arm: 0.75, bounce: 0.85, width: 0.03, crouch: 0.02, lean: 0 },
+  dl: { knee: 0.85, arm: 0.8, bounce: 0.9, width: 0.03, crouch: 0.02, lean: 0.02 },
+  te: { knee: 0.95, arm: 0.95, bounce: 1, width: 0.01, crouch: 0.005, lean: 0 },
+  lb: { knee: 0.95, arm: 0.95, bounce: 1, width: 0.015, crouch: 0.01, lean: 0.01 },
+  rb: { knee: 1, arm: 0.95, bounce: 0.95, width: 0.01, crouch: 0.025, lean: 0.03 },
+  qb: { knee: 0.9, arm: 0.85, bounce: 0.95, width: 0, crouch: 0, lean: -0.02 },
+  wr: { knee: 1.1, arm: 1.08, bounce: 1.05, width: -0.005, crouch: 0, lean: 0.01 },
+  cb: { knee: 1.08, arm: 1.05, bounce: 1.05, width: 0, crouch: 0.005, lean: 0 },
+  s: { knee: 1.05, arm: 1.02, bounce: 1, width: 0.005, crouch: 0.005, lean: 0.005 },
+};
+function gaitStyle(spec) {
+  const base = ROLE_STYLE[spec.role] || ROLE_STYLE.wr;
+  const vary = (salt, spread) => 1 + (hashString(spec.id + salt) - 0.5) * 2 * spread;
+  return {
+    knee: base.knee * vary('k', 0.1), arm: base.arm * vary('a', 0.12), bounce: base.bounce * vary('b', 0.15), cadence: vary('c', 0.05),
+    width: base.width + (hashString(spec.id + 'w') - 0.5) * 0.02, crouch: base.crouch, lean: base.lean + (hashString(spec.id + 'l') - 0.5) * 0.04,
+  };
+}
 
 // Drives one athlete: turns snapshot fields (velocity, facing, action, stride
 // phase) into a Pose for the rig. A locomotion base pose is built every frame;
@@ -32,6 +57,7 @@ export class Animator {
     this.spec = spec;
     this.dims = rig.dims;
     this.seed = hashString(spec.id);
+    this.style = gaitStyle(spec);
     this.pose = new Pose();
     this.base = new Pose();
     this.work = new Pose();
@@ -132,7 +158,9 @@ export class Animator {
     const forward = vx * Math.sin(facing) + vz * Math.cos(facing);
     const right = vx * Math.cos(facing) - vz * Math.sin(facing);
     if (speed > 0.05) this.local.set(-right / speed, forward / speed);
-    this.backpedal = typeof p.backpedal === 'boolean' ? p.backpedal : (forward < -0.45 * speed && speed > 0.8);
+    // (When his hips are held to his run for a ball over the shoulder, the
+    // simulation's flag describes a facing he is not shown in.)
+    this.backpedal = typeof p.backpedal === 'boolean' && !this.overShoulder ? p.backpedal : (forward < -0.45 * speed && speed > 0.8);
     // Backpedal weight, eased: the simulation's flag flips on and off.
     const bp = this.backpedal ? smoothstep(0.5, 2, speed) : 0;
     this.bp = teleport ? bp : damp(this.bp, bp, 10, dt);
@@ -191,6 +219,15 @@ export class Animator {
       const off = wrapAngle(target - Math.PI), limit = lerp(Math.PI, SET_TURN, set);
       if (Math.abs(off) > limit) target = Math.PI + Math.sign(off) * limit;
     }
+    // A man running flat out does not spin round to face a ball coming from
+    // behind him: his hips stay within 70 degrees of where he is going and he
+    // looks it in over his shoulder (the spine and the head do the rest).
+    this.overShoulder = 0;
+    if (this.action === 'catch' || (ctx.phase === 'air' && this.reach)) {
+      const limit = lerp(Math.PI, 1.22, smoothstep(4.5, 6, this.speed));
+      const off = wrapAngle(target - (Math.PI - this.heading));
+      if (Math.abs(off) > limit) { target = Math.PI - this.heading + Math.sign(off) * limit; this.overShoulder = 1; }
+    }
     this.yaw = teleport || ctx.presnap ? target : approachAngle(this.yaw, target, 11 * ctx.dt);
   }
 
@@ -201,6 +238,7 @@ export class Animator {
     let cadence = v < 1 ? lerp(1.5, 1.8, v) : v < 5 ? lerp(1.8, 3.2, (v - 1) / 4) : lerp(3.2, 4.5, clamp((v - 5) / 4.3, 0, 1));
     if (this.backpedal) cadence *= 1.35;
     if (role === 'ol' || role === 'dl') cadence *= 1.1;
+    cadence *= this.style.cadence;
     const churning = this.action === 'block' || this.action === 'tackled';
     if (churning) cadence = Math.max(cadence, 3.2);
     // A pass set moves on quick short kick-slide steps, never a walk.
@@ -233,10 +271,14 @@ export class Animator {
     const lateral = Math.abs(this.local.x);
     const duty = lerp(0.62, 0.36, run) - 0.06 * sprint;
     const reachLen = Math.min(2 * duty * this.stepLen, 1.2) * moving * (1 - 0.35 * lateral);
-    const lift = (lerp(0.06, 0.27, run) + 0.22 * sprint) * moving * (1 - 0.55 * bp) * (1 - 0.45 * lateral) * (1 - 0.5 * this.postures.set);
+    const style = this.style;
+    const lift = (lerp(0.06, 0.27, run) + 0.22 * sprint) * style.knee * moving * (1 - 0.55 * bp) * (1 - 0.45 * lateral) * (1 - 0.5 * this.postures.set);
+    // Braking hard: hips sink and sit back, the chest comes up, the feet
+    // reach out ahead of him to dig in.
+    const brake = clamp(-this.accel / 11, 0, 1) * smoothstep(1.2, 4, v);
     const behind = lerp(0.1, 0.28, run) * (1 - bp);
     // Pass set: a base about shoulder width and low, sliding steps.
-    const width = lerp(lerp(0.115, 0.07, run) + 0.13 * lateral + 0.04 * bp, 0.27, this.postures.set);
+    const width = lerp(lerp(0.115, 0.07, run) + 0.13 * lateral + 0.04 * bp + style.width + 0.03 * brake, 0.27, this.postures.set);
     const dx = this.local.x, dz = this.local.y;
 
     pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0; pose.tiltSide = 0;
@@ -245,7 +287,7 @@ export class Animator {
       let along, h, pitch;
       if (stance) {
         const u = ph / duty, heel = smoothstep(0.5, 1, u) * run;
-        along = lerp(reachLen * (0.5 - behind), -reachLen * (0.5 + behind), u);
+        along = lerp(reachLen * (0.5 - behind), -reachLen * (0.5 + behind), u) + 0.1 * brake;
         h = heel * 0.07; pitch = heel * 0.55;
       } else {
         // Swing: heel recovers high behind, the knee drives through, and at
@@ -268,30 +310,30 @@ export class Animator {
 
     // Pelvis: two bobs per cycle (lowest mid-stance), counter-rotating hips and
     // shoulders, forward lean from speed and acceleration, bank into turns.
-    const bob = -Math.cos(TAU * 2 * (s - duty / 2)) * lerp(0.012, 0.034, run) * moving;
+    const bob = -Math.cos(TAU * 2 * (s - duty / 2)) * lerp(0.012, 0.034, run) * moving * style.bounce;
     const bank = this.lean * smoothstep(1.5, 5, v);
     const accelLean = clamp(this.accel / 9, -0.3, 0.6) * smoothstep(0.5, 3, v);
     // Low and leaning when exploding out of a stance or a cut.
-    const crouch = 0.025 + 0.04 * run + 0.02 * sprint + 0.15 * bp + 0.09 * Math.max(0, accelLean);
+    const crouch = 0.025 + 0.04 * run + 0.02 * sprint + 0.15 * bp + 0.09 * Math.max(0, accelLean) + style.crouch * moving + 0.07 * brake;
     const swing = Math.cos(TAU * s) * moving;
-    pose.pelvis.set(-bank * 0.1, d.hipY - crouch + bob, 0);
+    pose.pelvis.set(-bank * 0.1, d.hipY - crouch + bob, -0.05 * brake);
     pose.hips.set(0.04 + 0.08 * run + 0.06 * sprint + 0.12 * accelLean + 0.22 * bp, -0.1 * run * swing, 0.035 * moving * Math.sin(TAU * s) + bank * 0.26);
     const breathe = 0.012 * Math.sin(ctx.time * 2.1 + this.seed * 7) * (1 - moving);
     // Backpedalling: chest over the knees, weight on the balls of the feet.
-    pose.spine.set(0.04 + 0.1 * run + 0.08 * sprint + 0.2 * accelLean + 0.3 * bp + breathe, 0.16 * run * swing * (1 - bp), bank * 0.1);
+    pose.spine.set(0.04 + (0.1 + style.lean) * run + 0.08 * sprint + 0.2 * accelLean + 0.3 * bp + breathe - 0.1 * brake, 0.16 * run * swing * (1 - bp), bank * 0.1);
     pose.head.set(0.04 - 0.05 * run, 0, 0);
 
     // Arms swing against the legs, set by joint angles: shoulder flexion
     // (forward +) and elbow flexion. Sprinters pump hard with the elbows near
     // 90 degrees, the front hand rising to the chin and the back hand passing
     // the hip; walkers swing nearly straight arms.
-    const amp = (0.22 * (1 - run) + 0.55 * run + 0.35 * sprint) * moving;
+    const amp = (0.22 * (1 - run) + 0.55 * run + 0.35 * sprint) * moving * style.arm;
     const bent = smoothstep(0, 0.55, run) * moving;
     for (let i = 0; i < 2; i++) {
       const side = SIDES[i], w = (i === 0 ? -1 : 1) * Math.cos(TAU * s);
       let flex = 0.05 + amp * w - 0.06 * sprint;
       let elbow = lerp(0.22, 1.5, bent) + (0.25 * w + 0.05) * run;
-      let abduct = 0.1 + 0.08 * run, inward = 0.28 * run * Math.max(0, w);
+      let abduct = 0.1 + 0.08 * run + 0.18 * brake, inward = 0.28 * run * Math.max(0, w);
       // Backpedalling defensive backs pump short, bent arms in front of the hips.
       if (bp > 0) {
         flex = lerp(flex, 0.02 + 0.34 * w, bp);

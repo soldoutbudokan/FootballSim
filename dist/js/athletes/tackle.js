@@ -239,6 +239,12 @@ function goDown(anim, pose, mode, side, u, o) {
   }
 }
 
+// Knocked flat on his back and straight back up (a pancake block): `u` as in
+// goDown, `rising` once he is on his way up (the hands push off).
+export function knockedDown(anim, pose, u, rising) {
+  goDown(anim, pose, 'supine', 0, u, { kick: 0.6, push: rising ? smoothstep(0.1, 0.5, u) : 0 });
+}
+
 // ---------------------------------------------------------------------------
 // The ball carrier (or a sacked quarterback).
 export function tackled(anim, pose, age, data, p, ctx) {

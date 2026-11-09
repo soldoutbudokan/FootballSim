@@ -520,6 +520,26 @@ function setReplayPlaying(playing) {
   $('replay-play').setAttribute('aria-label', playing ? 'Pause replay' : 'Play replay');
 }
 
+// The recording holds a frame every 0.05 s; the replay shows the moment in
+// between (positions, velocities, facing, stride and the ball eased from one
+// frame to the next), so at half speed the players move every rendered frame
+// instead of ten times a second. Everything discrete comes from the earlier
+// frame.
+function replayFrame(frames, time) {
+  const at = Math.max(0, time / .05), i = Math.min(frames.length - 1, Math.floor(at)), a = frames[i], b = frames[Math.min(frames.length - 1, i + 1)], t = at - i;
+  if (a === b || t <= 0 || a.phase === 'presnap') return a;
+  const mix = (x, y) => x + (y - x) * t;
+  const turn = (x, y) => x + Math.atan2(Math.sin(y - x), Math.cos(y - x)) * t;
+  const players = a.players.map((p, k) => {
+    const q = b.players[k];
+    if (!q || q.id !== p.id) return p;
+    return { ...p, x: mix(p.x, q.x), z: mix(p.z, q.z), vx: mix(p.vx, q.vx), vz: mix(p.vz, q.vz), speed: mix(p.speed, q.speed), facing: turn(p.facing, q.facing),
+      lean: mix(p.lean, q.lean), phase: mix(p.phase, q.phase), actionTime: p.action === q.action && q.actionTime <= p.actionTime ? mix(p.actionTime, q.actionTime) : p.actionTime };
+  });
+  const same = a.phase === b.phase && a.carrier === b.carrier, ball = same ? { ...a.ball, x: mix(a.ball.x, b.ball.x), y: mix(a.ball.y, b.ball.y), z: mix(a.ball.z, b.ball.z) } : a.ball;
+  return { ...a, time: mix(a.time, b.time), deadTime: mix(a.deadTime, b.deadTime), players, ball };
+}
+
 function openReplay() {
   if (sim.phase !== 'dead' || sim.recording.length < 2) return;
   clearInput();
@@ -1118,7 +1138,7 @@ function frame(now) {
 
   let state = sim.snapshot();
   if (replay) {
-    state = replay.frames[Math.min(replay.frames.length - 1, Math.floor(replay.time / .05))];
+    state = replayFrame(replay.frames, replay.time);
     $('replay-scrub').value = String(replay.time / replay.duration * 1000);
   }
   view.render(state, renderDelta, { menu: inMenu, showArt, replay: !!replay });
