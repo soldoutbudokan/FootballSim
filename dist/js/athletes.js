@@ -5,6 +5,7 @@ import { Animator } from './athletes/motion.js';
 import { createMaterials } from './athletes/uniform.js';
 import { Football } from './athletes/ball.js';
 import { Markers } from './athletes/markers.js';
+import { tackleContext, inferTackle, contactThreats, recentMiss } from './athletes/tackle.js';
 
 // Everything that moves: the athletes, the ball, the control indicator and
 // the contact shadows. Scene units are yards; simulation +z maps to scene -z.
@@ -60,6 +61,7 @@ export class Athletes {
     this.time = 0;
     this.byId = new Map();
     this.ballScene = new THREE.Vector3();
+    this.tackleCache = {}; this.tackleMemo = {}; this.threats = new Map();
   }
 
   setQuality(profile) {
@@ -152,6 +154,13 @@ export class Athletes {
       catchFrom: this.lastPhase === 'air' && state.phase !== 'air' ? this.ball.position.clone() : null,
     };
     this.lastPhase = state.phase;
+    // The tackle in progress (tackle.js): from the snapshot, or worked out
+    // from the actions for a simulation that does not publish it.
+    const record = state.tackle !== undefined ? state.tackle : inferTackle(state, clock, this.byId, this.tackleMemo);
+    ctx.tackle = tackleContext(record, state.phase, clock, this.byId, this.tackleCache);
+    ctx.miss = holderId ? recentMiss(state, clock, holderId) : null;
+    ctx.threats = this.threats;
+    ctx.brace = contactThreats(ctx, this.threats);
     this.anticipateCatches(ctx);
     return ctx;
   }

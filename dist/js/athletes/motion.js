@@ -3,11 +3,12 @@ import { Pose, chestMatrix, tiltMatrix, armAngles } from './pose.js';
 import { TAU, SIDES, clamp, lerp, smoothstep, fract, damp, wrapAngle, approachAngle, hashString } from './math.js';
 import { applyStance } from './stances.js';
 import { ACTIONS, startAction, livePosture, POSTURES } from './actions.js';
+import { tackleRole } from './tackle.js';
 
 // Seconds each timed action lasts in the simulation (plan section 3.4).
 // How far off downfield a lineman in his pass set may turn to face a rusher.
 const SET_TURN = 70 * Math.PI / 180;
-const DURATIONS = { throw: 0.4, catch: 0.45, juke: 0.45, cut: 0.2, tackle: 1.0, stumble: 0.7 };
+const DURATIONS = { throw: 0.4, catch: 0.45, juke: 0.45, cut: 0.2, stumble: 0.7 };
 const SIM_ACTIONS = new Set(['ready', 'run', 'cut', 'juke', 'block', 'throw', 'catch', 'carry', 'wrapped', 'tackle', 'down', 'stumble']);
 
 function blendTime(from, to) {
@@ -15,10 +16,12 @@ function blendTime(from, to) {
   // (the reach itself disappears once the pass is complete), so it cuts in.
   if (to === 'ready' || to === 'catch') return 0;
   if (from === 'ready') return 0.24;
-  return { throw: 0.07, cut: 0.06, juke: 0.06, tackle: 0.1, down: 0.14, stumble: 0.08, wrapped: 0.1 }[to] ?? 0.16;
+  if (from === 'tackled' || from === 'tackle' || from === 'assist') return 0.25;
+  return { throw: 0.07, cut: 0.06, juke: 0.06, tackle: 0.12, tackled: 0.1, assist: 0.14, stumble: 0.08 }[to] ?? 0.16;
 }
 
 const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _v = new THREE.Vector3();
+const _e = new THREE.Euler(), _q = new THREE.Quaternion();
 
 // Drives one athlete: turns snapshot fields (velocity, facing, action, stride
 // phase) into a Pose for the rig. A locomotion base pose is built every frame;
@@ -119,6 +122,11 @@ export class Animator {
       this.turn = damp(this.turn, clamp(turnRate, -12, 12), 12, dt);
     }
     this.speed = speed;
+    // The stride follows the speed, but no body changes speed in one frame
+    // (the simulation's does, at a hit): the gait sees it eased.
+    // A tackler hanging on is carried along by the runner: he is not striding.
+    const stride = ctx.tackle && ctx.tackle.tackler === p.id ? 0 : speed;
+    this.gait = teleport || this.gait === undefined ? stride : this.gait + clamp(stride - this.gait, -45 * dt, 45 * dt);
     this.heading = heading;
     const facing = Math.PI - this.yaw;
     const forward = vx * Math.sin(facing) + vz * Math.cos(facing);
@@ -132,18 +140,19 @@ export class Animator {
 
   resolveAction(p, ctx, teleport = false) {
     if (ctx.presnap) return 'ready';
+    // In a tackle (the runner, the tackler, the second man in) until he is
+    // back on his feet after the whistle.
+    const role = tackleRole(this, p, ctx.tackle);
+    if (role) return role;
     const holder = ctx.holderId === p.id;
     let a = SIM_ACTIONS.has(p.action) ? p.action : 'run';
-    if (a === 'ready') a = 'run';
+    if (a === 'ready' || a === 'wrapped' || a === 'down' || a === 'tackle') a = 'run';
     // Stay in the stance after the snap until this player actually moves, so
     // he fires out of it instead of standing up first. A replay jumps
     // straight into the first frames after the snap (its pre-snap frame is
     // usually skipped), so a jump there starts from the stance too.
     const fromStance = this.action === 'ready' || (teleport && ctx.phase === 'live' && ctx.state.time < 0.6);
     if (fromStance && a === 'run' && !holder && p.engaged == null && this.speed < 0.6 && ctx.state.time < 1.2) return 'ready';
-    // After the whistle players on the ground stay there.
-    if (ctx.dead && (this.action === 'down' || this.action === 'tackle')) return this.action;
-    if (ctx.dead && this.action === 'wrapped') return 'down';
     if (a === 'run' || a === 'carry' || (a === 'block' && holder)) {
       if (holder) return ctx.pocket && p.id === ctx.qbId ? 'pocket' : 'carry';
       if (p.engaged != null && !ctx.dead) return 'block';
@@ -157,10 +166,14 @@ export class Animator {
   // place when he comes out of a stance or off a block.
   updatePostures(p, ctx, teleport) {
     const want = livePosture(this, p, ctx);
+    // Closing on the ball carrier he breaks down to hit, whatever else he was doing.
+    const hit = ctx.threats?.get(p.id) || 0;
     for (const kind in this.postures) {
-      const target = want && want.kind === kind ? want.w : 0;
-      this.postures[kind] = teleport ? target : damp(this.postures[kind], target, 7, ctx.dt);
+      const target = kind === 'hit' ? hit : (want && want.kind === kind ? want.w : 0) * (1 - hit);
+      this.postures[kind] = teleport ? target : damp(this.postures[kind], target, kind === 'hit' ? 13 : 7, ctx.dt);
     }
+    const brace = ctx.holderId === p.id ? ctx.brace || 0 : 0;
+    this.brace = teleport ? brace : damp(this.brace || 0, brace, 12, ctx.dt);
   }
 
   updateYaw(p, ctx, teleport) {
@@ -168,6 +181,8 @@ export class Animator {
     const face = this.data.face?.(p, ctx);
     if (face) target = Math.PI - Math.atan2(face.x - p.x, face.z - p.z);
     if (this.data.holdYaw !== undefined) target = this.data.holdYaw;
+    const own = this.data.yaw?.(p, ctx);
+    if (Number.isFinite(own)) target = own;
     // A lineman in his pass set faces his rusher (the simulation's facing) but
     // never turns his back on the defense while he slides: his yaw stays
     // within SET_TURN of downfield (the offense goes toward +z).
@@ -182,15 +197,17 @@ export class Animator {
   // Stride length grows with speed: about 3.2 steps/s at 5 yd/s and 4.5 at
   // top speed. The cycle advances with distance travelled so feet do not skate.
   advanceGait(p, ctx, teleport) {
-    const v = this.speed, role = this.spec.role;
+    const v = this.gait, role = this.spec.role;
     let cadence = v < 1 ? lerp(1.5, 1.8, v) : v < 5 ? lerp(1.8, 3.2, (v - 1) / 4) : lerp(3.2, 4.5, clamp((v - 5) / 4.3, 0, 1));
     if (this.backpedal) cadence *= 1.35;
     if (role === 'ol' || role === 'dl') cadence *= 1.1;
-    const churning = this.action === 'block' || this.action === 'wrapped';
+    const churning = this.action === 'block' || this.action === 'tackled';
     if (churning) cadence = Math.max(cadence, 3.2);
     // A pass set moves on quick short kick-slide steps, never a walk.
     const set = this.postures.set;
     if (set > 0) cadence = lerp(cadence, Math.max(cadence, 3.4), set);
+    // Breaking down to tackle: short, choppy steps.
+    cadence *= 1 + 0.45 * this.postures.hit;
     // Sideways movement is a quick step-together shuffle, not a stride.
     this.stepLen = Math.max(0.2, v / cadence) * (1 - 0.6 * Math.abs(this.local.x));
     let dist = v * ctx.dt;
@@ -209,7 +226,7 @@ export class Animator {
   // parametric gait, with stance feet pinned to the ground in world space.
 
   locomotion(pose, p, ctx) {
-    const d = this.dims, v = this.speed;
+    const d = this.dims, v = this.gait;
     const moving = smoothstep(0.08, 0.9, v), run = smoothstep(2.0, 6.5, v), sprint = smoothstep(6.5, 9.0, v);
     const bp = this.bp;
     const s = fract(this.cycle);
@@ -298,6 +315,12 @@ export class Animator {
     let lowest = _v.copy(pose.pelvis).applyMatrix4(_m).y - 0.12 * depth;
     lowest = Math.min(lowest, _v.set(0, 0.12 * d.k, 0).applyMatrix4(_m2).y - 0.16 * depth);
     lowest = Math.min(lowest, _v.set(0, d.neck + 0.115, 0.01).applyMatrix4(_m2).y - 0.14);
+    // On his side the shoulder and the hip underneath carry him.
+    if (Math.abs(pose.tiltRoll) > 0.35) {
+      const side = pose.tiltRoll < 0 ? 1 : -1;
+      lowest = Math.min(lowest, _v.set(side * d.shoulder[0], d.shoulder[1], 0).applyMatrix4(_m2).y - 0.1);
+      lowest = Math.min(lowest, _v.set(pose.pelvis.x + side * d.hipX, pose.pelvis.y, pose.pelvis.z).applyMatrix4(_m).y - 0.105 * d.limb);
+    }
     if (lowest < 0) pose.tiltLift -= lowest;
   }
 
@@ -320,6 +343,22 @@ export class Animator {
       this.rootToWorld(local, lock);
     }
     foot.x = local.x; foot.z = local.z;
+  }
+
+  // A point of the body frame (the root turned by the pose's own yaw: x to
+  // his left, y up, z ahead) in the pose's tilt frame, where the feet live.
+  bodyToTilt(pose, v, out) {
+    _q.setFromEuler(_e.set(pose.tiltPitch, 0, pose.tiltRoll, 'XZY')).invert();
+    return out.set(v.x - pose.tiltSide, v.y - pose.tiltLift, v.z - pose.tiltFwd).applyQuaternion(_q);
+  }
+
+  // The chest joint of `pose` in the body frame (where his chest is over the
+  // ground, tilt and all).
+  chestInBody(pose, out) {
+    out.setFromMatrixPosition(chestMatrix(pose, this.dims, _m2));
+    out.applyQuaternion(_q.setFromEuler(_e.set(pose.tiltPitch, 0, pose.tiltRoll, 'XZY')));
+    out.x += pose.tiltSide; out.y += pose.tiltLift; out.z += pose.tiltFwd;
+    return out;
   }
 
   // Root frame (yaw only) <-> scene space, for the current position and yaw.

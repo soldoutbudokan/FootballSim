@@ -523,7 +523,8 @@ function setReplayPlaying(playing) {
 function openReplay() {
   if (sim.phase !== 'dead' || sim.recording.length < 2) return;
   clearInput();
-  replay = { time: 0, playing: true, frames: sim.recording.slice(), duration: sim.recording.at(-1).time };
+  // One frame every 0.05 s, the last ones after the whistle (the simulation clock has stopped there).
+  replay = { time: 0, playing: true, frames: sim.recording.slice(), duration: (sim.recording.length - 1) * .05 };
   setReplayPlaying(true);
   $('replay-controls').hidden = false;
   $('result').hidden = true;

@@ -99,6 +99,7 @@ const TACKLE = {
   base: 0.88, speed: 0.1, square: 0.25, min: 0.25, max: 0.97, help: 0.5,
   shaken: 0.38, shakeTime: 0.3, overrun: 0.32, overrunTime: 0.8, missAngle: 40 * DEG,
 };
+const REPLAY_TAIL = 2;                 // seconds of the dead ball kept in the recording
 const BALL_REST = 0.1;                 // centre height of a ball lying on the turf
 const CATCH_GRACE = 0.35;              // a new carrier runs on through the catch
 const MESH_REACH = 1.25;               // QB to back, body centres, at the exchange
@@ -545,7 +546,7 @@ export class Simulation {
   reset(newCalls = false) {
     this.phase = 'presnap'; this.time = 0; this.deadTime = 0;
     this.pass = null; this.throwIntent = null; this.result = null;
-    this.handoff = false; this.crossedLine = false; this.tackler = null; this.tackle = null; this.holder = null;
+    this.handoff = false; this.crossedLine = false; this.tackler = null; this.tackle = null; this.holder = null; this.misses = [];
     this.selected = 'QB'; this.carrier = 'QB'; this.jukeCooldown = 0;
     this.recording = []; this.recordClock = 0;
     this.completed = false; this.threw = false; this.events = [];
@@ -1727,6 +1728,8 @@ export class Simulation {
     // Being wrapped also breaks his stride: he keeps WRAP_KEEP of his speed.
     const speed = Math.hypot(c.vx, c.vz), ux = speed > 1e-6 ? c.vx / speed : 0, uz = speed > 1e-6 ? c.vz / speed : 0;
     const k = 0.45 * d.mass / (d.mass + c.mass);
+    // For the animation only: both men's velocity going into the hit.
+    const hit = { cvx: c.vx, cvz: c.vz, dvx: d.vx, dvz: d.vz, cf: c.facing, gap: dist(d, c), share: d.mass / (d.mass + c.mass) };
     let vx = c.vx + (d.vx - c.vx) * k, vz = c.vz + (d.vz - c.vz) * k;
     const back = vx * ux + vz * uz;
     if (back < 0) { vx -= back * ux; vz -= back * uz; }
@@ -1734,13 +1737,16 @@ export class Simulation {
     c.juke = null; c.cutting = false;
     c.action = 'wrapped'; c.actionTime = TACKLE_HOLD;
     d.action = 'tackle'; d.actionTime = 1.0;
-    this.tackle = { tackler: d.id, at: this.time, from: { x: c.x, z: c.z }, helpers: new Set(), sack };
+    this.tackle = { tackler: d.id, at: this.time, from: { x: c.x, z: c.z }, helpers: new Set(), sack, hit, joined: [] };
     this.tackler = d.id; this.phase = 'tackle'; this.throwIntent = null;
     this.events.push('tackle');
   }
 
   brokenTackle(d, c) {
     d.action = 'stumble'; d.actionTime = STUMBLE_TIME;
+    // For the animation only: who missed whom, when, and the velocities going in.
+    this.misses.push({ tackler: d.id, carrier: c.id, at: this.time, cvx: c.vx, cvz: c.vz, dvx: d.vx, dvz: d.vz, dx: d.x - c.x, dz: d.z - c.z });
+    if (this.misses.length > 4) this.misses.shift();
     d.vx *= STUMBLE_SPEED; d.vz *= STUMBLE_SPEED; d.juke = null;
     c.vx *= BROKEN_KEEP; c.vz *= BROKEN_KEEP;
     if (c.juke) { c.juke.to.x *= BROKEN_KEEP; c.juke.to.z *= BROKEN_KEEP; c.juke.from.x *= BROKEN_KEEP; c.juke.from.z *= BROKEN_KEEP; }
@@ -1754,6 +1760,7 @@ export class Simulation {
     for (const q of this.defense) {
       if (q.id === d.id || t.helpers.has(q.id) || q.engaged || q.action === 'stumble' || dist(q, c) >= REACH) continue;
       t.helpers.add(q.id);
+      t.joined.push({ id: q.id, at: this.time });
       q.action = 'tackle'; q.actionTime = 1.0;
     }
     const speed = Math.hypot(c.vx, c.vz), slowed = Math.max(0, speed - (TACKLE_DECEL + GANG_DECEL * t.helpers.size) * dt);
@@ -1787,6 +1794,12 @@ export class Simulation {
   // to the turf and comes to rest.
   stepDead(dt) {
     this.deadTime += dt;
+    // The recording runs on a little past the whistle, so a replay shows the
+    // runner going down instead of stopping on the hit.
+    if (this.deadTime < REPLAY_TAIL) {
+      this.recordClock += dt;
+      if (this.recordClock >= 0.05) { this.recordClock -= 0.05; this.saveFrame(); }
+    }
     for (const p of this.players) {
       p.juke = null;
       // Short moves run out; the downed carrier and his tacklers stay down,
@@ -1846,6 +1859,10 @@ export class Simulation {
       phase: this.phase, time: this.time, deadTime: this.deadTime, carrier: this.carrier, selected: this.selected, spot: this.spot,
       // The line is in pass protection (never on a run play).
       pocket: this.inPocket(),
+      // For the animation: the tackle in progress (or the one that ended the
+      // rep) and the last few missed tackles.
+      tackle: this.tackle ? { tackler: this.tackle.tackler, carrier: this.carrier, at: this.tackle.at, sack: this.tackle.sack, ...this.tackle.hit, helpers: this.tackle.joined.slice() } : null,
+      misses: this.misses.slice(),
       ball: { ...this.ball },
       players: this.players.map(p => ({
         id: p.id, x: p.x, z: p.z, vx: p.vx, vz: p.vz, facing: p.facing,
