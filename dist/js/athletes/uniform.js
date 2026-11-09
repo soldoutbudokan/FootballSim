@@ -213,8 +213,10 @@ function paintJersey(ctx, x0, y0, spec) {
   ctx.fillStyle = look.light ? TEAM.navy : TEAM.silver;
   ctx.beginPath(); ctx.moveTo(cx, cy - dy); ctx.lineTo(cx + dx, cy); ctx.lineTo(cx, cy + dy); ctx.lineTo(cx - dx, cy); ctx.closePath(); ctx.fill();
   // Numbers: front and back.
-  const outlines = look.light ? [[look.outline, 0.85]] : look.jersey === TEAM.red ? [[look.outline, 0.9]] : [['#081220', 1.2], [look.outline, 0.8]];
-  for (const [u, v, height] of [[0.75, 0.42, 0.18], [0.25, 0.47, 0.23]]) {
+  // Big enough to read from the game camera; one thin twill border, so the
+  // fill stays bold when the texture is minified.
+  const outlines = [[look.outline, look.light ? 0.75 : 0.6]];
+  for (const [u, v, height] of [[0.75, 0.42, 0.19], [0.25, 0.45, 0.265]]) {
     drawNumber(ctx, spec.number, t.x(u), t.y(v), pxV * height, look.number, squeeze, outlines);
   }
   // Sleeves: the number on the shoulder cap and two stripes above the hem.
@@ -275,7 +277,7 @@ export function buildJerseyAtlas(players) {
   paintShared(ctx, sx, sy);
   const texture = new THREE.CanvasTexture(c);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
+  texture.anisotropy = 4;
   const scale = [(cellW - 2 * pad) / c.width, (cellH - 2 * pad) / c.height], shared = origin(sx, sy);
   const [wx, wy, ww, wh] = REGIONS.white;
   const white = [shared[0] + (wx + ww / 2) * scale[0], shared[1] + (wy + wh / 2) * scale[1]];
@@ -334,7 +336,7 @@ function helmetTexture() {
   ctx.fillStyle = '#0b0d11'; ctx.fillRect(S - 56, S - 56, 56, 56);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.anisotropy = 4;
   return t;
 }
 
@@ -412,7 +414,6 @@ export function detailTexture() {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
   t.generateMipmaps = true;
-  t.anisotropy = 4;
   t.needsUpdate = true;
   return t;
 }
@@ -453,15 +454,15 @@ function leatherTexture() {
 
 let leatherNormalData = null;
 function leatherNormal() {
-  const W = 512, H = 256;
+  const W = 1024, H = 512;
   if (!leatherNormalData) {
     const h = new Float32Array(W * H), data = new Uint8Array(W * H * 4);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const u = (x + 0.5) / W, v = (y + 0.5) / H;
       // Pebbles, and the grooves of the four seams.
-      const pebble = 1 - smoothstep(0.12, 0.6, cellular(u, v * 0.5, 72, 0.9));
-      const seam = Math.min(...[0, 0.25, 0.5, 0.75, 1].map(q => Math.abs(u - q)));
-      h[y * W + x] = 0.35 * pebble - 1.2 * (1 - smoothstep(0, 0.006, seam));
+      const pebble = 1 - smoothstep(0.1, 0.62, cellular(u, v * 0.56, 132, 0.9));
+      const seam = Math.abs(((u * 4 + 0.5) % 1) - 0.5) / 4;
+      h[y * W + x] = 0.5 * pebble - 1.6 * (1 - smoothstep(0, 0.004, seam));
     }
     const at = (x, y) => h[Math.max(0, Math.min(H - 1, y)) * W + ((x + W) % W)];
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -501,7 +502,7 @@ export function createMaterials(players) {
     detail: detailTexture(),
     body: new THREE.MeshPhysicalMaterial({ name: 'athlete-body', map: atlas.texture, vertexColors: true, roughness: 1, metalness: 1, sheen: 1, sheenRoughness: 0.5, sheenColor: '#ffffff' }),
     helmet: new THREE.MeshPhysicalMaterial({ name: 'athlete-helmet', map: helmetTexture(), vertexColors: true, roughness: 1, metalness: 1, clearcoat: 1, clearcoatRoughness: 0.07 }),
-    leather: new THREE.MeshStandardMaterial({ name: 'ball-leather', map: leatherTexture(), normalMap: leatherNormal(), normalScale: new THREE.Vector2(0.9, 0.9), roughness: 0.56 }),
+    leather: new THREE.MeshStandardMaterial({ name: 'ball-leather', map: leatherTexture(), normalMap: leatherNormal(), normalScale: new THREE.Vector2(0.7, 0.7), roughness: 0.58 }),
     laces: new THREE.MeshStandardMaterial({ name: 'ball-laces', color: '#efece2', roughness: 0.75 }),
   };
 }

@@ -226,20 +226,22 @@ export function createGeometries({ low = false } = {}) {
     // through the cloth front and back, split down the sternum and the spine.
     chest: loft([
       { y: -0.06, w: 0.188, d: 0.131, n: 2.1 }, { y: 0.03, w: 0.21, d: 0.15, n: 2.1 },
-      { y: 0.11, w: 0.234, d: 0.158, n: 2.2 }, { y: 0.17, w: 0.258, d: 0.164, n: 2.4 },
-      { y: 0.23, w: 0.286, d: 0.164, n: 2.35 }, { y: 0.285, w: 0.302, d: 0.154, n: 2.4 },
-      { y: 0.32, w: 0.292, d: 0.138, n: 2.5 }, { y: 0.34, w: 0.235, d: 0.12, n: 2.4 },
+      { y: 0.11, w: 0.232, d: 0.158, n: 2.2 }, { y: 0.17, w: 0.248, d: 0.164, n: 2.3 },
+      { y: 0.23, w: 0.262, d: 0.152, n: 2.2 }, { y: 0.285, w: 0.27, d: 0.136, n: 2.2 },
+      { y: 0.32, w: 0.262, d: 0.122, n: 2.3 }, { y: 0.34, w: 0.222, d: 0.11, n: 2.3 },
       { y: 0.355, w: 0.15, d: 0.1, n: 2.2 }, { y: 0.372, w: 0.1, d: 0.084 },
     ], {
       ...L(24, 2), capBottom: false, flipU: true, ao: AO.chest,
       sculpt: (y, t) => {
-        const face = Math.abs(Math.sin(t)), plate = smoothstep(0.085, 0.12, y) * (1 - smoothstep(0.3, 0.34, y));
-        return 0.019 * plate * face ** 1.5
+        const face = Math.abs(Math.sin(t)), plate = smoothstep(0.085, 0.12, y) * (1 - smoothstep(0.2, 0.3, y));
+        // The back plate shows less than the chest plate: it would stand off
+        // the spine as a ledge when he bends over.
+        return (Math.sin(t) > 0 ? 0.019 : 0.011) * plate * face ** 1.5
           - 0.007 * plate * (bumpAt(angleBetween(t, FRONT), 0, 0.14) + bumpAt(angleBetween(t, BACK), 0, 0.14)) * smoothstep(0.1, 0.16, y)
           + 0.004 * Math.sin(t * 4 + y * 26) * (1 - smoothstep(0.02, 0.1, y));
       },
     }),
-    collar: loft([{ y: 0.356, w: 0.118, d: 0.096 }, { y: 0.37, w: 0.104, d: 0.088 }, { y: 0.381, w: 0.096, d: 0.083 }], { ...L(16, 1), capTop: false, capBottom: false, ao: AO.collar }),
+    collar: loft([{ y: 0.35, w: 0.103, d: 0.091 }, { y: 0.37, w: 0.097, d: 0.086 }, { y: 0.384, w: 0.092, d: 0.081 }], { ...L(16, 1), capTop: false, capBottom: false, ao: AO.collar }),
     // Neck and the slope of the trapezius under the collar.
     neck: loft([
       { y: 0.3, w: 0.11, d: 0.082 }, { y: 0.35, w: 0.088, d: 0.076, z: -0.004 }, { y: 0.39, w: 0.077, d: 0.072, z: -0.004 }, { y: 0.47, w: 0.067, d: 0.067 },
@@ -261,7 +263,7 @@ export function createGeometries({ low = false } = {}) {
         { y: -0.27, t: OUT + 0.35, sy: 0.1, st: 0.45, a: 0.006 },               // outer quad
         { y: -0.37, t: IN - 0.5, sy: 0.04, st: 0.4, a: 0.006 },                 // teardrop above the knee
         { y: -0.2, t: BACK, sy: 0.11, st: 0.6, a: 0.008 },                      // hamstrings
-        { y: -0.475, t: FRONT, sy: 0.036, st: 0.55, a: 0.015, flat: 0.5 },      // knee pad
+        { y: -0.475, t: FRONT, sy: 0.036, st: 0.55, a: 0.012, flat: 0.5 },      // knee pad
         { y: -0.47, t: BACK, sy: 0.03, st: 0.5, a: -0.006 },                    // back of the knee
         { y: -0.562, t: 0, sy: 0.008, st: 0, a: 0.003 },                        // cuff band
       ]),
@@ -294,9 +296,9 @@ export function createGeometries({ low = false } = {}) {
     // The shoulder-pad cap under the jersey, and the tight sleeve that ends
     // on the biceps. The cap sits out over the deltoid, away from the neck.
     sleeve: loft([
-      { y: 0.09, w: 0.036, d: 0.058, x: -0.012 }, { y: 0.066, w: 0.08, d: 0.094, x: -0.01, n: 2.3 },
-      { y: 0.02, w: 0.106, d: 0.122, x: -0.008, n: 2.5 }, { y: -0.035, w: 0.11, d: 0.122, x: -0.006, n: 2.5 },
-      { y: -0.08, w: 0.1, d: 0.108, x: -0.004, n: 2.3 }, { y: -0.103, w: 0.086, d: 0.091 },
+      { y: 0.094, w: 0.036, d: 0.058, x: -0.012, z: -0.004 }, { y: 0.07, w: 0.082, d: 0.098, x: -0.012, z: -0.006, n: 2.3 },
+      { y: 0.022, w: 0.108, d: 0.126, x: -0.011, z: -0.008, n: 2.4 }, { y: -0.035, w: 0.112, d: 0.127, x: -0.008, z: -0.008, n: 2.4 },
+      { y: -0.08, w: 0.1, d: 0.11, x: -0.004, z: -0.005, n: 2.3 }, { y: -0.103, w: 0.086, d: 0.091 },
       { y: -0.15, w: 0.0805, d: 0.087, z: -0.002 }, { y: -0.196, w: 0.0765, d: 0.082, z: -0.003 }, { y: -0.203, w: 0.068, d: 0.073, z: -0.003 },
     ], { ...L(14, 2), capBottom: false, ao: AO.sleeve }),
     // Forearm: full below the elbow, tapering to a narrow wrist.
@@ -309,7 +311,7 @@ export function createGeometries({ low = false } = {}) {
       ...L(10, 2), capTop: false, capBottom: false, ao: AO.forearm,
       sculpt: mounds([{ y: -0.08, t: OUT + 2.6, sy: 0.06, st: 0.6, a: 0.005 }, { y: -0.1, t: BACK, sy: 0.07, st: 0.5, a: 0.003 }]),
     }),
-    tape: loft([{ y: -0.25, w: 0.0385, d: 0.0345 }, { y: -0.29, w: 0.0355, d: 0.032 }, { y: -0.338, w: 0.033, d: 0.0295 }], { ...L(10, 1), capTop: false, capBottom: false }),
+    tape: loft([{ y: -0.25, w: 0.04, d: 0.036 }, { y: -0.29, w: 0.037, d: 0.0335 }, { y: -0.34, w: 0.0345, d: 0.031 }], { ...L(10, 1), capTop: false, capBottom: false }),
     glove: glove({ low }),
     cleat: cleat({ low }),
     studs: cleatStuds(),
@@ -337,6 +339,8 @@ export function createGeometries({ low = false } = {}) {
 // the pose solver.
 
 const HELMET_CENTRE = 0.115;
+// The joints of the rig being built whose bone stands above them.
+const SPINE = new Set();
 
 const _q = new THREE.Quaternion(), _qi = new THREE.Quaternion(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
 const _t = new THREE.Vector3(), _pole = new THREE.Vector3(), _origin = new THREE.Vector3();
@@ -374,6 +378,7 @@ export class Rig {
       const fore = joint(upper, 0, -d.upperArm, 0);
       this.uppers.push(upper); this.forearms.push(fore); this.hands.push(joint(fore, 0, -d.forearm, 0));
     });
+    SPINE.clear(); SPINE.add(this.abdomen).add(this.chest).add(this.head);
     this.joints = [
       this.pelvis, this.abdomen, this.chest, this.head,
       this.thighs[0], this.shins[0], this.feet[0], this.thighs[1], this.shins[1], this.feet[1],
@@ -416,8 +421,11 @@ export class Rig {
     const joints = blend.map(([name, radius, crease]) => {
       const other = this.joints[BONE_INDEX[name]];
       // The joint is the origin of whichever bone is the child of the pair.
-      const ownIsLower = own.parent === other;
-      const pivot = ownIsLower ? own : other, upper = ownIsLower ? other : own;
+      // Down a limb the child hangs below its joint; up the spine (abdomen,
+      // chest, head) it stands above it.
+      const ownIsChild = own.parent === other;
+      const pivot = ownIsChild ? own : other, upper = ownIsChild ? other : own;
+      const ownIsLower = ownIsChild !== SPINE.has(pivot);
       _t.setFromMatrixPosition(pivot.matrixWorld);
       const j = { x: _t.x, y: _t.y, z: _t.z, radius, ownIsLower, other: this.boneBase + BONE_INDEX[name] };
       // The fold side of a hinge, given in the upper bone's frame.
@@ -467,8 +475,8 @@ export class Rig {
     // The lower jersey takes the bottom row of the torso panel (its side
     // panels and the folds at the belt) all the way down.
     const hem = region('torso', { flipU: true });
-    body('abdomen', geometry.abdomen, { scale: belly, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.05 * torso, 0.31, 0.55), uv: u => hem(u, 0.03), blend: [['pelvis', 0.06], ['chest', 0.08]] });
-    body('chest', geometry.chest, { scale: [torso, k, depth], surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.36 * torso, 0.432, 0.55), uv: region('torso'), blend: [['abdomen', 0.08]] });
+    body('abdomen', geometry.abdomen, { scale: belly, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.05 * torso, 0.31, 0.55), uv: u => hem(u, 0.03), blend: [['pelvis', 0.06], ['chest', 0.1]] });
+    body('chest', geometry.chest, { scale: [torso, k, depth], surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.36 * torso, 0.432, 0.55), uv: region('torso'), blend: [['abdomen', 0.1]] });
     body('chest', geometry.collar, { scale: [torso ** 0.6, k, depth ** 0.6], color: trim, surface: SURFACE.collar, grain: grain(GRAIN.rib, 0.66, 0.04, 0.8), uv: plain, detail: true });
     body('chest', geometry.neck, { scale: [torso ** 0.6, k, depth ** 0.6], color: look.skin, surface: SURFACE.skin, grain: grain(GRAIN.skin, 0.48, 0.17, 0.3), uv: plain, blend: [['head', 0.05]] });
     // The towel tucked into the front of the pants hangs over the right thigh

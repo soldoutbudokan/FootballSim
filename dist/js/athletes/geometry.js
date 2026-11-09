@@ -462,8 +462,9 @@ export function glove({ low = false } = {}) {
   thumb.rotateX(0.5); thumb.rotateZ(0.32); thumb.translate(0.008, -0.04, -0.036);
   parts.push(thumb);
   const g = mergeGeometries(parts);
-  // The palm (+X) and the insides of the fingers are a darker grip surface.
-  shadeBy(g, (x, y) => (y < -0.02 && x > 0.008 ? 0.5 : 1));
+  // The palm (+X) and the insides of the fingers are a darker grip surface;
+  // the wrist closes with a darker strap.
+  shadeBy(g, (x, y) => (y < -0.02 && x > 0.008 ? 0.5 : y > -0.013 ? 0.62 : 1));
   return g;
 }
 
