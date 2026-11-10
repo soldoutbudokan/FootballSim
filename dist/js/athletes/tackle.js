@@ -439,7 +439,10 @@ function assist(anim, pose, p, ctx, tk) {
     anim.worldToChest(pose, _a, _b);
     _b.x += SIDES[i] * 0.12;
     const reach = _w.set(SIDES[i] * d.shoulder[0], d.shoulder[1], d.shoulder[2]).distanceTo(_b) / (d.upperArm + d.forearm);
-    const w = hit * (1 - smoothstep(0.98, 1.3, reach));
+    // A grip lets go over a few frames, not in one, when the runner falls
+    // out of reach.
+    const grip = anim.assistGrip ||= [0, 0], want = hit * (1 - smoothstep(0.98, 1.3, reach));
+    const w = grip[i] = Tj < 0.02 ? want : clamp(want, grip[i] - 4 * ctx.dt, grip[i] + 10 * ctx.dt);
     pose.hands[i].lerp(_b, w);
     pose.elbows[i].lerp(_w.set(SIDES[i] * 0.8, -0.6, -0.3), w);
     pose.wrists[i].lerp(_w.set(-0.7, 0, 0), w);

@@ -88,7 +88,11 @@ export class Animator {
     if (teleport || action !== this.action) {
       // A switch before the last cross-fade has finished fades from the pose
       // on screen, held still; re-evaluating only the last action would pop.
-      this.held = !teleport && this.blend < 1 && this.prevAction ? (this.heldPose ||= new Pose()).copy(this.pose) : null;
+      // Contact stops a man's stride in one step, so the locomotion under
+      // the old action collapses with it: a tackle always fades from the pose
+      // on screen.
+      const contact = action === 'tackle' || action === 'tackled' || action === 'assist';
+      this.held = !teleport && this.action && (contact || (this.blend < 1 && this.prevAction)) ? (this.heldPose ||= new Pose()).copy(this.pose) : null;
       this.prevAction = teleport ? null : this.action;
       this.prevAge = this.age;
       this.prevData = this.data;
