@@ -4,13 +4,19 @@ import { HDRLoader } from '../../vendor/HDRLoader.js';
 // Lighting presets. Sun azimuth is a compass bearing (0 = north = downfield,
 // 90 = east = the second field). Colours are sRGB hex. Intensities are in
 // three.js physical units (directional: lux-like irradiance; spot: candela).
+// `fogDensity` is the haze extinction per yard at ground level (see
+// atmosphere.js). `grade` is the look the post-processing pipeline applies
+// after tone mapping (post.js): contrast and saturation (1 = unchanged), the
+// tints multiplied into shadows and highlights, vignette and grain amounts,
+// bloom strength and how much of the ambient occlusion is applied.
 export const PRESETS = {
   day: {
-    sun: { elevation: 47, azimuth: 222, color: '#fff1de', intensity: 3.0 },
-    hemisphere: { sky: '#c6daf5', ground: '#55603a', intensity: 0.34 },
-    environment: { source: 'hdr', intensity: 0.45 },
+    sun: { elevation: 38, azimuth: 276, color: '#fff0da', intensity: 3.6 },
+    hemisphere: { sky: '#c6daf5', ground: '#55603a', intensity: 0.28 },
+    environment: { source: 'hdr', intensity: 0.4 },
     exposure: 0.85,
-    fog: '#bccddb', fogDensity: 0.0017,
+    fog: '#a8bfd6', fogDensity: 0.0007,
+    grade: { contrast: 1.09, saturation: 0.92, shadows: '#f3f6ff', highlights: '#fffaf1', vignette: 0.16, grain: 0.012, bloom: 0.12, ao: 1 },
     sky: {
       turbidity: 2.0, rayleigh: 3.0, mieCoefficient: 0.0022, mieDirectionalG: 0.8, gain: 0.26, saturation: 1.7,
       cloudCoverage: 0.64, cloudSoftness: 0.17, cloudOpacity: 0.9, cloudLit: '#ffffff', cloudShade: '#a4adb8',
@@ -21,11 +27,12 @@ export const PRESETS = {
   sunset: {
     // Golden hour: a low, deep orange sun with long shadows, a dimmer cool
     // fill from the darkening sky, warm haze, lights coming on indoors.
-    sun: { elevation: 5, azimuth: 292, color: '#ff8c42', intensity: 3.3 },
-    hemisphere: { sky: '#959ac0', ground: '#5a4230', intensity: 0.75 },
+    sun: { elevation: 9, azimuth: 292, color: '#ff9a4e', intensity: 4.4 },
+    hemisphere: { sky: '#959ac0', ground: '#5a4230', intensity: 0.88 },
     environment: { source: 'sky', intensity: 0.8 },
     exposure: 1.12,
-    fog: '#c98d5e', fogDensity: 0.0026,
+    fog: '#c98d5e', fogDensity: 0.0011,
+    grade: { contrast: 1.05, saturation: 0.94, shadows: '#eef2ff', highlights: '#fff5e8', vignette: 0.22, grain: 0.014, bloom: 0.16, ao: 0.9 },
     sky: {
       turbidity: 8, rayleigh: 3.2, mieCoefficient: 0.008, mieDirectionalG: 0.88, gain: 0.4, saturation: 1.35,
       cloudCoverage: 0.58, cloudSoftness: 0.24, cloudOpacity: 0.85, cloudLit: '#ff9e62', cloudShade: '#5b4b60',
@@ -34,24 +41,26 @@ export const PRESETS = {
     poles: 0, windows: 0.7, lamps: 0.3,
   },
   night: {
-    // The directional light stands in for the dominant (north-west) pole bank:
-    // it is the one shadow-casting light. The four spot lights add the pools.
-    sun: { elevation: 52, azimuth: 300, color: '#e4ecff', intensity: 0.4, skyElevation: -9 },
-    hemisphere: { sky: '#2b3c5c', ground: '#0b100a', intensity: 0.26 },
+    // The four pole banks (spot lights) do the lighting and cast the shadows;
+    // the directional light is only a dim, shadowless fill for the stretch
+    // between their pools.
+    sun: { elevation: 52, azimuth: 300, color: '#e4ecff', intensity: 0.3, skyElevation: -9 },
+    hemisphere: { sky: '#2b3c5c', ground: '#0b100a', intensity: 0.3 },
     environment: { source: 'sky', intensity: 1.0 },
     exposure: 1.15,
-    fog: '#121a24', fogDensity: 0.0042,
+    fog: '#141d2a', fogDensity: 0.0016,
+    grade: { contrast: 1.06, saturation: 0.87, shadows: '#e9f0ff', highlights: '#fffdf8', vignette: 0.28, grain: 0.02, bloom: 0.2, ao: 1 },
     sky: {
       turbidity: 2, rayleigh: 1, mieCoefficient: 0.005, mieDirectionalG: 0.8, gain: 0.3,
       cloudCoverage: 0.6, cloudSoftness: 0.3, cloudOpacity: 0.7, cloudLit: '#3a4252', cloudShade: '#171c25',
       cloudBrightness: 0.06, hazeHeight: 0.1, night: true,
     },
-    poles: 3800, windows: 1.0, lamps: 1,
+    poles: 5200, windows: 1.0, lamps: 1,
   },
 };
 
 const SHADOW_SIZE = 48;   // yards covered by the sun's shadow map during play
-const POLE_CONE = 33;     // half-angle in degrees of each pole bank's beam
+const POLE_CONE = 41;     // half-angle in degrees of each pole bank's beam
 const UP = new THREE.Vector3(0, 1, 0);
 const TMP_RIGHT = new THREE.Vector3(), TMP_UP = new THREE.Vector3();
 
@@ -99,7 +108,8 @@ export class Lighting {
     this.sunDirection = new THREE.Vector3(0, 1, 0);
     this.focus = new THREE.Vector3(0, 0, -35);
     this.spots = [];
-    this.dominant = null;          // the pole light that casts shadows at night
+    this.casters = [];             // the pole lights that cast shadows at night
+    this.poleShadows = 1;          // how many of them (the nearest to the play)
     this.shadowsEnabled = true;
     this.setShadowSize(SHADOW_SIZE);
     this.pmrem = new THREE.PMREMGenerator(renderer);
@@ -132,24 +142,24 @@ export class Lighting {
     }
   }
 
-  // Exactly one light casts shadows: the sun by day, the pole light nearest
-  // the play at night. None on the performance tier.
+  // By day the sun casts the shadows. At night the pole banks nearest the
+  // play do: one on Balanced, two from High up, so every player throws the
+  // crossed pair of shadows that says "under the lights". None on the
+  // performance tier.
   updateShadowCasters() {
     const night = this.preset.poles > 0;
     this.sun.castShadow = this.shadowsEnabled && !night;
-    for (const spot of this.spots) spot.castShadow = this.shadowsEnabled && night && spot === this.dominant;
+    for (const spot of this.spots) spot.castShadow = this.shadowsEnabled && night && this.casters.includes(spot);
   }
 
-  // The pole light nearest a scene-space point (re-chosen only between reps).
+  // The pole lights nearest a scene-space point (re-chosen only between reps).
   chooseDominant(point) {
-    let best = null, bestDistance = Infinity;
-    for (const spot of this.spots) {
-      const d = Math.hypot(spot.position.x - point.x, spot.position.z - point.z);
-      if (d < bestDistance) { best = spot; bestDistance = d; }
-    }
-    this.dominant = best;
+    const distance = spot => Math.hypot(spot.position.x - point.x, spot.position.z - point.z);
+    this.casters = [...this.spots].sort((a, b) => distance(a) - distance(b)).slice(0, this.poleShadows);
     this.updateShadowCasters();
   }
+
+  get dominant() { return this.casters[0] || null; }
 
   setPreset(mode) {
     this.mode = PRESETS[mode] ? mode : 'day';
@@ -215,6 +225,11 @@ export class Lighting {
   setQuality(profile) {
     const enabled = profile.shadow > 0;
     this.shadowsEnabled = enabled;
+    const poleShadows = profile.shadow >= 2048 ? 2 : 1;
+    if (poleShadows !== this.poleShadows) {
+      this.poleShadows = poleShadows;
+      this.chooseDominant(this.focus);
+    }
     this.renderer.shadowMap.enabled = enabled;
     if (enabled) {
       for (const light of [this.sun, ...this.spots]) {

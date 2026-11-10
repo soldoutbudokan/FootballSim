@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { StaticBatch, canvasTexture, makeRandom, sceneZ, standard } from './common.js';
+import { StaticBatch, canvasTexture, makeRandom, mergeGeometries, sceneZ, standard, weathered } from './common.js';
 
 // Large practice-facility structures: the team building south of the fields,
 // the windscreen fence, the four light poles and the film tower.
@@ -20,7 +20,7 @@ export const materials = {
   aluminium: () => standard('#c8ccd0', 0.3, 0.85),
   darkMetal: () => standard('#2a3037', 0.52, 0.55),
   steelDark: () => standard('#3a4047', 0.5, 0.6),
-  concrete: () => standard('#a7a59d', 0.93, 0),
+  concrete: () => weathered(standard('#a7a59d', 0.93, 0), 7, 0.34),
   navy: () => standard('#13263b', 0.88, 0),
   silver: () => standard('#c9ccd1', 0.45, 0.6),
   rubber: () => standard('#141617', 0.9, 0),
@@ -232,13 +232,19 @@ export function buildFence(parent) {
 // ---------------------------------------------------------------------------
 // Light poles (~25 yd, three-fixture heads aimed at the main field)
 
+// Each pole is its own set of meshes, so that one standing between a camera and
+// the play can be hidden (see Environment.update). Its shadow is cast by a
+// separate, never-drawn copy and therefore stays on the grass.
+const SHADOW_ONLY = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+
 export function buildLightPoles(parent, shadows) {
-  const batch = new StaticBatch('light-poles');
+  const poles = [];
   const steel = materials.galvanized(), housing = standard('#2b3035', 0.55, 0.5), concrete = materials.concrete();
   const lens = new THREE.MeshStandardMaterial({ color: '#d9dde0', roughness: 0.2, metalness: 0.1, emissive: '#f4f7ff', emissiveIntensity: 0 });
   const heads = [];
   const H = LAYOUT.poleHeight;
   for (const pole of LAYOUT.poles) {
+    const batch = new StaticBatch('light-pole');
     const x = pole.x, z = sceneZ(pole.z);
     // Aim inside the near hash, a little toward the near goal line, so the
     // four wide beams overlap into an even field with brighter pools.
@@ -261,9 +267,15 @@ export function buildLightPoles(parent, shadows) {
     const headPosition = new THREE.Vector3(x, H, z).add(new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).multiplyScalar(0.9));
     heads.push({ position: headPosition, aim, yaw });
     shadows.add(x, z, 1.8, 1.8, { strength: 0.5 });
+    const meshes = batch.build(parent, { castShadow: false });
+    const caster = new THREE.Mesh(mergeGeometries(meshes.map(mesh => ({ geometry: mesh.geometry, matrix: mesh.matrix }))), SHADOW_ONLY);
+    caster.name = 'light-pole-shadow';
+    caster.castShadow = true;
+    caster.matrixAutoUpdate = false;
+    parent.add(caster);
+    poles.push({ x, z, meshes });
   }
-  batch.build(parent, { castShadow: true });
-  return { heads, lens };
+  return { heads, lens, poles };
 }
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 // A unit plane facing local +x (lens fronts).
@@ -273,9 +285,9 @@ const UNIT_PLANE_X = new THREE.PlaneGeometry(1, 1).rotateY(Math.PI / 2);
 export function buildLampGlow(parent, heads) {
   const glowTexture = canvasTexture(128, 128, (c, w, h) => {
     const g = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
-    g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(0.18, 'rgba(235,242,255,0.55)');
-    g.addColorStop(0.5, 'rgba(200,215,255,0.12)');
+    g.addColorStop(0, 'rgba(255,255,255,0.9)');
+    g.addColorStop(0.12, 'rgba(235,242,255,0.3)');
+    g.addColorStop(0.45, 'rgba(200,215,255,0.06)');
     g.addColorStop(1, 'rgba(200,215,255,0)');
     c.fillStyle = g;
     c.fillRect(0, 0, w, h);
@@ -284,7 +296,7 @@ export function buildLampGlow(parent, heads) {
   // Soft light shafts: brightest near the lamp, fading along the beam and
   // toward the silhouette edges of the cone.
   const beamMaterial = new THREE.ShaderMaterial({
-    uniforms: { beamColor: { value: new THREE.Color('#cfdcff') }, beamStrength: { value: 0.05 } },
+    uniforms: { beamColor: { value: new THREE.Color('#cfdcff') }, beamStrength: { value: 0.024 } },
     vertexShader: /* glsl */`
       varying float vAlong;
       varying float vFacing;
@@ -301,7 +313,7 @@ export function buildLampGlow(parent, heads) {
       varying float vAlong;
       varying float vFacing;
       void main() {
-        float a = beamStrength * pow(1.0 - vAlong, 2.0) * vFacing * vFacing;
+        float a = beamStrength * pow(1.0 - vAlong, 2.0) * smoothstep(0.0, 0.12, vAlong) * vFacing * vFacing * vFacing;
         gl_FragColor = vec4(beamColor * a, 1.0);
       }`,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,

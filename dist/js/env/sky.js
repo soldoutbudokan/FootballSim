@@ -4,7 +4,7 @@ import { noiseTexture } from './common.js';
 
 // Physically based sky: the three.js r180 Preetham `Sky`, extended with a
 // drifting procedural cloud layer, a night sky (stars and light-pollution
-// glow) and a horizon haze that blends into the scene fog exactly.
+// glow) and a horizon haze that blends into the scene fog.
 
 const EXTRA_UNIFORMS = /* glsl */`
 uniform float skyGain;
@@ -47,18 +47,22 @@ float n = texture2D(cloudMap, cuv).r * 0.6 + texture2D(cloudMap, cuv * 2.37 + 0.
 float density = smoothstep(cloudCoverage, cloudCoverage + cloudSoftness, n) * smoothstep(0.0, 0.16, direction.y);
 float thick = smoothstep(cloudCoverage, cloudCoverage + 0.42, n);
 float toward = max(dot(direction, vSunDirection), 0.0);
-vec3 cloud = mix(cloudLit, cloudShade, thick * 0.75) + cloudLit * pow(toward, 12.0) * 0.6 * (1.0 - thick);
+// Self-shadowing: how much cloud lies a step toward the sun. Sunward edges
+// stay bright, the far side and the thick middles fall into shade, which
+// gives the layer form instead of flat white patches.
+vec2 sunStep = normalize(vSunDirection.xz + vec2(1e-4)) * 0.03;
+float sunward = texture2D(cloudMap, cuv + sunStep).r * 0.6 + texture2D(cloudMap, (cuv + sunStep) * 2.37 + 0.31).r * 0.28 + 0.06;
+float shade = max(thick * 0.55, smoothstep(cloudCoverage - 0.04, cloudCoverage + 0.3, sunward) * 0.9);
+vec3 cloud = mix(cloudLit, cloudShade, shade) + cloudLit * pow(toward, 12.0) * 0.6 * (1.0 - thick);
 col = mix(col, cloud, density * cloudOpacity);
 
-gl_FragColor = vec4(col, 1.0);
-`;
-
-// Applied after tone mapping, in the output colour space, so the horizon meets
-// the fogged distance exactly.
-const HAZE = /* glsl */`
-#include <colorspace_fragment>
+// Horizon haze in the scene's fog colour, mixed in before tone mapping exactly
+// as the fog is mixed into distant geometry, so the horizon meets the fogged
+// hills at the same colour on every tier.
 float haze = 1.0 - smoothstep(-0.02, hazeHeight, direction.y);
-gl_FragColor.rgb = mix(gl_FragColor.rgb, linearToOutputTexel(vec4(hazeColor, 1.0)).rgb, haze);
+col = mix(col, hazeColor, haze);
+
+gl_FragColor = vec4(col, 1.0);
 `;
 
 function patch(source, search, replacement) {
@@ -87,13 +91,12 @@ export class SkyDome {
       cloudShade: { value: new THREE.Color(0.6, 0.62, 0.66) },
       nightMix: { value: 0 },
       nightZenith: { value: new THREE.Color('#02050b') },
-      nightHorizon: { value: new THREE.Color('#151b24') },
+      nightHorizon: { value: new THREE.Color('#1b2433') },
       hazeColor: { value: new THREE.Color('#c8d4dc') },
       hazeHeight: { value: 0.08 },
     });
     let fragment = EXTRA_UNIFORMS + material.fragmentShader;
     fragment = patch(fragment, 'gl_FragColor = vec4( retColor, 1.0 );', COMPOSE);
-    fragment = patch(fragment, '#include <colorspace_fragment>', HAZE);
     material.fragmentShader = fragment;
     scene.add(this.mesh);
     this.sunDirection = new THREE.Vector3(0, 1, 0);

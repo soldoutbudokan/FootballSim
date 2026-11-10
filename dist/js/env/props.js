@@ -143,14 +143,27 @@ function scissorLift(parent, shadows) {
 
 // A simple standing staff figure (polo, trousers, cap); feet at (x, y, z).
 function figure(batch, x, y, z, shirt, trousers, skin = standard('#b5835e', 0.7, 0)) {
-  batch.tube(trousers, [x, y, z - 0.09], [x, y + 0.95, z - 0.09], 0.075, { segments: 7 });
-  batch.tube(trousers, [x, y, z + 0.09], [x, y + 0.95, z + 0.09], 0.075, { segments: 7 });
-  batch.tube(shirt, [x, y + 0.9, z], [x, y + 1.55, z], 0.17, { top: 0.2, segments: 9 });
-  batch.tube(shirt, [x, y + 1.5, z - 0.25], [x + 0.05, y + 1.0, z - 0.27], 0.055, { segments: 6 });
-  batch.tube(shirt, [x, y + 1.5, z + 0.25], [x + 0.05, y + 1.0, z + 0.27], 0.055, { segments: 6 });
-  batch.place(skin, SPHERE, x, y + 1.72, z, { scale: [0.1, 0.12, 0.1] });
-  batch.place(shirt, new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), x, y + 1.77, z, { scale: [0.11, 0.07, 0.11] });
-  batch.box(shirt, x + 0.1, y + 1.77, z, 0.12, 0.015, 0.16);
+  // He faces +x; his shoulders run along z. About 1.95 yd (5 ft 10 in) tall.
+  const shoe = standard('#1b1c1e', 0.7, 0);
+  for (const side of [-1, 1]) {
+    const lz = z + side * 0.095;
+    batch.box(shoe, x + 0.045, y + 0.04, lz, 0.29, 0.08, 0.105);
+    batch.tube(trousers, [x, y + 0.07, lz], [x + 0.01, y + 0.52, lz], 0.058, { top: 0.066, segments: 8 });
+    batch.tube(trousers, [x + 0.01, y + 0.5, lz], [x, y + 1.0, z + side * 0.085], 0.07, { top: 0.088, segments: 8 });
+    // Short sleeve to above the elbow, then a bare forearm hanging slightly forward.
+    batch.place(shirt, SPHERE, x, y + 1.555, z + side * 0.2, { scale: [0.062, 0.058, 0.062] });
+    batch.tube(shirt, [x, y + 1.55, z + side * 0.215], [x + 0.015, y + 1.3, z + side * 0.25], 0.054, { top: 0.05, segments: 7 });
+    batch.tube(skin, [x + 0.015, y + 1.32, z + side * 0.255], [x + 0.03, y + 1.2, z + side * 0.26], 0.042, { segments: 7 });
+    batch.tube(skin, [x + 0.03, y + 1.21, z + side * 0.26], [x + 0.11, y + 0.97, z + side * 0.235], 0.04, { top: 0.033, segments: 7 });
+    batch.place(skin, SPHERE, x + 0.125, y + 0.92, z + side * 0.23, { scale: [0.04, 0.055, 0.03] });
+  }
+  batch.place(trousers, SPHERE, x, y + 1.01, z, { scale: [0.115, 0.13, 0.175] });
+  batch.place(shirt, SPHERE, x + 0.005, y + 1.43, z, { scale: [0.115, 0.2, 0.21] });
+  batch.place(shirt, SPHERE, x + 0.012, y + 1.19, z, { scale: [0.122, 0.27, 0.178] });
+  batch.tube(skin, [x, y + 1.6, z], [x + 0.01, y + 1.72, z], 0.047, { segments: 7 });
+  batch.place(skin, SPHERE, x + 0.015, y + 1.8, z, { scale: [0.102, 0.122, 0.094] });
+  batch.place(shirt, new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), x + 0.012, y + 1.835, z, { scale: [0.106, 0.09, 0.099] });
+  batch.box(shirt, x + 0.135, y + 1.845, z, 0.12, 0.014, 0.15);
 }
 
 // Trainer's pop-up tent with a taping table.

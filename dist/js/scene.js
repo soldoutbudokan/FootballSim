@@ -4,10 +4,13 @@ import { Athletes } from './athletes.js';
 import { AthletesLayer } from './characters/layer.js';
 import { pixelRatio, PROFILES } from './graphics.js';
 import { CameraDirector, normalizeCameraMode } from './env/camera.js';
+import { PostPipeline, postSettings } from './env/post.js';
 
-// Orchestrates the renderer, the camera and the two visual layers
-// (Environment: field, facility, sky and light; AthletesLayer: players and
-// ball, procedural or skinned).
+// Orchestrates the renderer, the camera, the two visual layers (Environment:
+// field, facility, sky and light; AthletesLayer: players and ball, procedural
+// or skinned) and the post-processing pipeline that the Balanced profile and
+// above draw through (env/post.js). On the Performance profile, or without
+// float render targets, the scene is drawn straight to the canvas.
 // Simulation space is yards with +z toward the opponent's goal; scene space
 // negates z.
 export class FieldScene {
@@ -20,6 +23,11 @@ export class FieldScene {
     this.renderer.toneMappingExposure = 1;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // One frame is several render calls (shadow maps, scene, post passes), so
+    // renderer.info is reset once per frame and counts all of them.
+    this.renderer.info.autoReset = false;
+    this.post = PostPipeline.supported(this.renderer) ? new PostPipeline(this.renderer) : null;
+    this.drawingSize = new THREE.Vector2();
 
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.25, 2600);
     this.director = new CameraDirector(this.camera);
@@ -50,13 +58,17 @@ export class FieldScene {
 
   get firstDown() { return this.environment.firstDown; }
 
-  setLighting(mode) { this.environment.setLighting(mode); }
+  setLighting(mode) {
+    this.environment.setLighting(mode);
+    this.post?.setGrade(this.environment.grade);
+  }
 
   setQuality(profile, scale = 1) {
     this.profile = profile;
     this.scale = scale;
     this.environment.setQuality(profile);
     this.athletes.setQuality(profile);
+    this.post?.configure(postSettings(profile));
     this.resize();
   }
 
@@ -64,6 +76,8 @@ export class FieldScene {
     const w = this.canvas.clientWidth || window.innerWidth, h = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setPixelRatio(pixelRatio(w, h, window.devicePixelRatio || 1, this.profile, this.scale));
     this.renderer.setSize(w, h, false);
+    this.renderer.getDrawingBufferSize(this.drawingSize);
+    this.post?.setSize(this.drawingSize.x, this.drawingSize.y);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -97,9 +111,15 @@ export class FieldScene {
     this.director.update(state, dt, { menu, replay, aspect: this.camera.aspect });
     // Grass tufts only matter for the low cameras.
     const low = menu || replay || this.director.mode === 'game';
-    this.environment.update(state, dt, { menu, focus: this.tuftFocus(), grass: low });
+    this.environment.update(state, dt, { menu, focus: this.tuftFocus(), grass: low, camera: this.camera });
     this.athletes.update(state, dt, { menu });
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.info.reset();
+    if (this.post?.enabled) {
+      this.post.render(this.scene, this.camera, dt, { dof: this.director.depthOfField?.({ menu, replay }) ?? null });
+    } else {
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   // Centre of the grass tile: on the ground about 10 yd in front of the camera.

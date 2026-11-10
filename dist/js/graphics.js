@@ -4,11 +4,19 @@
 //   props:  environment detail level 0..3 (trees, small sideline props, turf detail)
 //   grass:  grass tufts around the camera (0 = none)
 //   detail: small animated details (goal-post ribbons) and athlete detail
+//   post:   the post-processing pipeline (env/post.js), or null to draw
+//           straight to the canvas. When set, the scene is rendered in HDR and
+//           tone mapped, graded, vignetted and dithered in one composite pass;
+//           the fields below add passes on top of that:
+//             msaa:  samples of the HDR scene target
+//             bloom: levels of the bloom pyramid (0 = none)
+//             ao:    ambient-occlusion samples per pixel at half resolution (0 = none)
+//             dof:   depth of field on the replay and title cameras
 export const PROFILES = [
-  { id:'performance', label:'Performance', pixels:800000, dpr:.85, shadow:0, props:0, grass:0, detail:false },
-  { id:'balanced', label:'Balanced', pixels:1500000, dpr:1.15, shadow:1024, props:1, grass:9000, detail:true },
-  { id:'high', label:'High', pixels:2500000, dpr:1.5, shadow:2048, props:2, grass:22000, detail:true },
-  { id:'ultra', label:'Ultra', pixels:4200000, dpr:2, shadow:4096, props:3, grass:45000, detail:true },
+  { id:'performance', label:'Performance', pixels:800000, dpr:.85, shadow:0, props:0, grass:0, detail:false, post:null },
+  { id:'balanced', label:'Balanced', pixels:1500000, dpr:1.15, shadow:1024, props:1, grass:9000, detail:true, post:{ msaa:4, bloom:4, ao:0, dof:false } },
+  { id:'high', label:'High', pixels:2500000, dpr:1.5, shadow:2048, props:2, grass:22000, detail:true, post:{ msaa:4, bloom:5, ao:8, dof:true } },
+  { id:'ultra', label:'Ultra', pixels:4200000, dpr:2, shadow:4096, props:3, grass:45000, detail:true, post:{ msaa:4, bloom:6, ao:12, dof:true } },
 ];
 export function pixelRatio(w,h,dpr,profile,scale=1) {
   return Math.max(1/Math.max(1,w,h), Math.min(dpr,profile.dpr,Math.sqrt(profile.pixels/Math.max(1,w*h)))*scale);

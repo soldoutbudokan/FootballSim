@@ -9,71 +9,177 @@ export const GROUND_CENTER = { x: 18, z: 60 };   // simulation coordinates
 export const GROUND_RADIUS = 232;
 
 // ---------------------------------------------------------------------------
-// Trees: trunks plus clusters of crossed "leaf clump" cards with rounded
-// (crown-centred) normals so they light like volumes.
+// Trees. Broadleaf crowns are a few overlapping lobes, each a shell of crossed
+// leaf-clump cards; conifers are three crossed cards carrying a painted spruce.
+// Normals are rounded (they point away from the crown) so a tree lights as one
+// volume, vertex colours carry the tint and the darkness inside the crown, and
+// the shader adds the glow of sunlight coming through the leaves.
 
-function leafTexture() {
-  const random = makeRandom(5511);
-  return canvasTexture(256, 256, (c, w, h) => {
-    c.clearRect(0, 0, w, h);
-    for (let i = 0; i < 1400; i++) {
-      // Leaves cluster inside a lumpy disc; outer leaves are sparser.
-      const a = random() * Math.PI * 2, r = Math.sqrt(random()) * w * 0.46 * (0.8 + 0.2 * Math.sin(a * 5 + 1.3));
-      const x = w / 2 + Math.cos(a) * r, y = h / 2 + Math.sin(a) * r;
-      const shade = 0.55 + 0.45 * (1 - (y / h)) * (0.7 + 0.3 * random()) - (r / (w * 0.46)) * 0.1;
-      const v = Math.round(Math.max(0.25, Math.min(1, shade)) * 255);
-      c.fillStyle = `rgb(${Math.round(v * 0.92)},${v},${Math.round(v * 0.86)})`;
+// One atlas: four leaf clumps on the left (2 x 2), two spruces on the right.
+const ATLAS = { width: 1024, height: 512 };
+const CLUMP_UV = [[0, 0], [0.25, 0], [0, 0.5], [0.25, 0.5]].map(([u, v]) => ({ u0: u, v0: v, u1: u + 0.25, v1: v + 0.5 }));
+const SPRUCE_UV = [{ u0: 0.5, v0: 0, u1: 0.75, v1: 1 }, { u0: 0.75, v0: 0, u1: 1, v1: 1 }];
+const LEAF_MEAN = [96, 128, 62];   // sRGB; also what transparent texels are filled with
+
+function drawClump(c, random, x0, y0, size) {
+  // Sub-clusters of leaves with gaps between them, sparser toward the rim.
+  const clusters = 13 + Math.floor(random() * 5);
+  for (let k = 0; k < clusters; k++) {
+    const a = random() * Math.PI * 2, r = Math.sqrt(random()) * size * 0.33;
+    const cx = x0 + size / 2 + Math.cos(a) * r, cy = y0 + size / 2 + Math.sin(a) * r * 0.92;
+    const spread = size * (0.07 + random() * 0.05), leaves = 70 + Math.floor(random() * 50);
+    const tone = 0.8 + random() * 0.3;
+    for (let i = 0; i < leaves; i++) {
+      const la = random() * Math.PI * 2, lr = Math.sqrt(-2 * Math.log(1 - random() * 0.98)) * spread * 0.62;
+      const x = cx + Math.cos(la) * lr, y = cy + Math.sin(la) * lr;
+      if (Math.hypot(x - x0 - size / 2, y - y0 - size / 2) > size * 0.47) continue;
+      // Lit from above: leaves high in a sub-cluster are lighter.
+      const lit = (0.74 + 0.18 * (cy - y) / spread + (random() - 0.5) * 0.3) * tone;
+      const v = Math.max(0.42, Math.min(1.3, lit));
+      c.fillStyle = `rgb(${Math.round(LEAF_MEAN[0] * v)},${Math.round(LEAF_MEAN[1] * v)},${Math.round(LEAF_MEAN[2] * v * (0.9 + random() * 0.2))})`;
       c.beginPath();
-      c.ellipse(x, y, 3 + random() * 5, 2 + random() * 3, random() * Math.PI, 0, Math.PI * 2);
+      c.ellipse(x, y, size * (0.012 + random() * 0.016), size * (0.007 + random() * 0.008), random() * Math.PI, 0, Math.PI * 2);
       c.fill();
     }
-  });
+  }
 }
 
-function treeGeometry(random, tint) {
-  const parts = [];
-  const conifer = random() < 0.3;
-  const height = conifer ? 9 + random() * 10 : 7 + random() * 10;
-  const trunkTop = height * (conifer ? 0.35 : 0.5);
-  const trunk = new THREE.CylinderGeometry(0.16, 0.26, trunkTop, 6, 1, true);
-  trunk.translate(0, trunkTop / 2, 0);
-  parts.push({ geometry: trunk, matrix: new THREE.Matrix4(), color: new THREE.Color('#4a3f35') });
-  const card = new THREE.PlaneGeometry(1, 1);
-  const center = new THREE.Vector3(0, conifer ? height * 0.55 : height * 0.64, 0);
-  const radius = conifer ? height * 0.2 : height * (0.3 + random() * 0.06);
-  const clumps = conifer ? 9 : 8 + Math.floor(random() * 4);
-  for (let i = 0; i < clumps; i++) {
-    let position, size;
-    if (conifer) {
-      const t = i / (clumps - 1);
-      const y = height * (0.3 + 0.68 * t);
-      const r = radius * (1 - t) * 0.6;
-      const a = random() * Math.PI * 2;
-      position = new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r);
-      size = radius * (2.4 - 1.9 * t);
-    } else {
-      const a = random() * Math.PI * 2, e = (random() - 0.35) * 1.4, r = radius * (0.25 + random() * 0.6);
-      position = center.clone().add(new THREE.Vector3(Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r * 0.75, Math.sin(a) * Math.cos(e) * r));
-      size = radius * (1.05 + random() * 0.55);
+function drawSpruce(c, random, x0, y0, w, h) {
+  const cx = x0 + w / 2, top = y0 + h * 0.02, bottom = y0 + h * 0.97;
+  const tiers = 15;
+  for (let i = 0; i < tiers; i++) {
+    const t = i / (tiers - 1);
+    const y = top + (bottom - top) * (0.03 + 0.83 * t);
+    const half = w * 0.46 * Math.pow(0.08 + 0.92 * t, 0.85) * (0.82 + random() * 0.26);
+    const drop = h * (0.06 + 0.05 * t);
+    // A tier: boughs fanning out and drooping, each a spray of needle strokes.
+    const boughs = 5 + Math.floor(t * 7);
+    for (let k = 0; k < boughs; k++) {
+      const side = (k / (boughs - 1)) * 2 - 1;
+      const bx = cx + side * half * (0.9 + random() * 0.15), by = y + drop * (0.25 + 0.75 * Math.abs(side)) + (random() - 0.5) * drop * 0.3;
+      const v = 0.52 + 0.5 * (1 - Math.abs(side) * 0.3) * (0.75 + random() * 0.4) - 0.14 * t;
+      for (let n = 0; n < 24; n++) {
+        const u = random(), px = cx + (bx - cx) * u, py = y + (by - y) * u * u;
+        const tone = Math.max(0.36, v * (0.7 + 0.5 * u));
+        c.strokeStyle = `rgb(${Math.round(50 * tone)},${Math.round(80 * tone)},${Math.round(46 * tone)})`;
+        c.lineWidth = w * (0.012 + random() * 0.012);
+        c.beginPath();
+        c.moveTo(px, py);
+        c.lineTo(px + side * w * 0.035 + (random() - 0.5) * w * 0.05, py + h * (0.012 + random() * 0.03));
+        c.stroke();
+      }
     }
-    const yaw = random() * Math.PI;
-    for (const turn of [0, Math.PI / 2]) {
-      const m = new THREE.Matrix4().compose(position, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw + turn), new THREE.Vector3(size, size, size));
-      const shade = (0.8 + 0.35 * (position.y - center.y + radius) / (2 * radius)) * (0.9 + random() * 0.15);
-      parts.push({ geometry: card, matrix: m, color: tint.clone().multiplyScalar(shade), crown: true });
+  }
+}
+
+function leafAtlas() {
+  const random = makeRandom(5511);
+  const canvas = document.createElement('canvas');
+  canvas.width = ATLAS.width;
+  canvas.height = ATLAS.height;
+  const c = canvas.getContext('2d', { willReadFrequently: true });
+  for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]]) drawClump(c, random, i * 256, j * 256, 256);
+  drawSpruce(c, random, 512, 0, 256, 512);
+  drawSpruce(c, random, 768, 0, 256, 512);
+  // Transparent texels are black in a canvas; filtered and mip-mapped, that
+  // black bleeds into every leaf edge as a dark outline. Give them the mean
+  // leaf colour instead (alpha stays 0).
+  const image = c.getImageData(0, 0, ATLAS.width, ATLAS.height), data = image.data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 8) { data[i] = LEAF_MEAN[0]; data[i + 1] = LEAF_MEAN[1]; data[i + 2] = LEAF_MEAN[2]; data[i + 3] = 0; }
+  }
+  const texture = new THREE.DataTexture(new Uint8Array(data.buffer), ATLAS.width, ATLAS.height, THREE.RGBAFormat);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.flipY = false;   // canvas rows run top to bottom: v = 0 is the top of the atlas
+  texture.needsUpdate = true;
+  return texture;
+}
+
+// A unit card (x and y in -0.5..0.5) showing one atlas cell; v runs down the image.
+function atlasCard(cell) {
+  const card = new THREE.PlaneGeometry(1, 1);
+  const uv = card.attributes.uv;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, cell.u0 + uv.getX(i) * (cell.u1 - cell.u0), cell.v0 + (1 - uv.getY(i)) * (cell.v1 - cell.v0));
+  }
+  return card;
+}
+
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+function treeGeometry(random, tint, cards) {
+  const parts = [];
+  const conifer = random() < 0.2;
+  const height = conifer ? 10 + random() * 10 : 7 + random() * 10;
+  const trunkTop = height * (conifer ? 0.3 : 0.42);
+  const trunk = new THREE.CylinderGeometry(0.14, 0.27, trunkTop, 6, 1, true);
+  trunk.translate(0, trunkTop / 2, 0);
+  parts.push({ geometry: trunk, matrix: new THREE.Matrix4(), color: new THREE.Color('#3f372e') });
+  const crown = [];   // per card: the centre its normals point away from
+  if (conifer) {
+    const card = cards.spruce[Math.floor(random() * cards.spruce.length)];
+    const width = height * (0.36 + random() * 0.1), tall = height * 0.94, yaw = random() * Math.PI;
+    const dark = tint.clone().multiply(new THREE.Color(0.8, 0.9, 0.95));
+    for (let k = 0; k < 3; k++) {
+      const m = new THREE.Matrix4().compose(
+        new THREE.Vector3(0, height - tall / 2, 0),
+        new THREE.Quaternion().setFromAxisAngle(Y_AXIS, yaw + k * Math.PI / 3),
+        new THREE.Vector3(width, tall, 1));
+      parts.push({ geometry: card, matrix: m, color: dark });
+      crown.push({ centre: new THREE.Vector3(0, height * 0.45, 0), flatten: 0.25, lift: 0.5 });
+    }
+  } else {
+    // Two to four lobes: a main crown and smaller ones pushed out to the sides.
+    const radius = height * (0.3 + random() * 0.07);
+    const main = new THREE.Vector3(0, height * 0.59, 0);
+    const lobes = [{ centre: main, radius }];
+    const extra = 1 + Math.floor(random() * 3);
+    for (let i = 0; i < extra; i++) {
+      const a = random() * Math.PI * 2, r = radius * (0.55 + random() * 0.35);
+      lobes.push({
+        centre: new THREE.Vector3(Math.cos(a) * r, height * (0.44 + random() * 0.24), Math.sin(a) * r),
+        radius: radius * (0.55 + random() * 0.25),
+      });
+    }
+    for (const lobe of lobes) {
+      const clumps = Math.max(3, Math.round(7 * lobe.radius / radius));
+      for (let i = 0; i < clumps; i++) {
+        // On the lobe's shell, a few more of them on the upper half.
+        const a = random() * Math.PI * 2, e = Math.asin(Math.min(1, random() * 1.75 - 0.75));
+        const shell = lobe.radius * (0.45 + random() * 0.35);
+        const position = lobe.centre.clone().add(new THREE.Vector3(Math.cos(a) * Math.cos(e) * shell, Math.sin(e) * shell * 0.8, Math.sin(a) * Math.cos(e) * shell));
+        const size = lobe.radius * (1.0 + random() * 0.5);
+        const yaw = random() * Math.PI;
+        // Darker inside and underneath, lighter on top and outside.
+        const outward = position.clone().sub(main).length() / (radius * 1.6);
+        const up = (position.y - main.y + radius) / (2 * radius);
+        const shade = (0.62 + 0.28 * Math.min(1, outward) + 0.3 * Math.max(0, Math.min(1, up))) * (0.92 + random() * 0.16);
+        for (const turn of [0, Math.PI / 2]) {
+          const card = cards.clump[Math.floor(random() * cards.clump.length)];
+          const m = new THREE.Matrix4().compose(position, new THREE.Quaternion().setFromAxisAngle(Y_AXIS, yaw + turn), new THREE.Vector3(size, size, size));
+          parts.push({ geometry: card, matrix: m, color: tint.clone().multiplyScalar(shade) });
+          crown.push({ centre: main, flatten: 0.55, lift: 0.55 });
+        }
+      }
     }
   }
   const merged = mergeGeometries(parts, true);
   // Rounded normals: point away from the crown centre (tilted up) so each tree
   // shades as one volume instead of as flat cards.
   const pos = merged.attributes.position, nor = merged.attributes.normal;
-  const trunkVerts = trunk.attributes.position.count;
   const v = new THREE.Vector3();
-  for (let i = trunkVerts; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i).sub(center).normalize();
-    v.y = v.y * 0.7 + 0.45;
-    v.normalize();
-    nor.setXYZ(i, v.x, v.y, v.z);
+  let offset = trunk.attributes.position.count;
+  for (const group of crown) {
+    for (let i = offset; i < offset + 4; i++) {
+      v.fromBufferAttribute(pos, i).sub(group.centre).normalize();
+      v.y = v.y * group.flatten + group.lift;
+      v.normalize();
+      nor.setXYZ(i, v.x, v.y, v.z);
+    }
+    offset += 4;
   }
   return merged;
 }
@@ -110,8 +216,9 @@ function treeSites(random) {
 export function buildTrees(parent) {
   const random = makeRandom(8123);
   const templates = [];
-  const tints = ['#3d5530', '#34492b', '#465f37', '#2e4127', '#52683b', '#3b5233', '#5a6a3c', '#31452f'].map(c => new THREE.Color(c));
-  for (let i = 0; i < 16; i++) templates.push(treeGeometry(random, tints[i % tints.length]));
+  const tints = ['#a9bd86', '#93ae7c', '#bcc78a', '#839c74', '#c8cc8c', '#9bb583', '#beb87c', '#8ea57f'].map(c => new THREE.Color(c));
+  const cards = { clump: CLUMP_UV.map(atlasCard), spruce: SPRUCE_UV.map(atlasCard) };
+  for (let i = 0; i < 20; i++) templates.push(treeGeometry(random, tints[i % tints.length], cards));
   const sites = treeSites(random);
   const parts = [], ranges = [];
   let indexCount = 0;
@@ -128,12 +235,26 @@ export function buildTrees(parent) {
   }
   const geometry = mergeGeometriesWithColor(parts);
   const material = new THREE.MeshStandardMaterial({
-    map: leafTexture(), vertexColors: true, roughness: 1, metalness: 0,
-    alphaTest: 0.45, alphaToCoverage: true, side: THREE.DoubleSide,
+    map: leafAtlas(), vertexColors: true, roughness: 0.82, metalness: 0,
+    alphaTest: 0.42, alphaToCoverage: true, side: THREE.DoubleSide,
   });
+  // Sunlight through the canopy: looking toward the sun, leaves glow yellow-green.
+  const uniforms = { treeSun: { value: new THREE.Vector3(0, 1, 0) }, treeSunColor: { value: new THREE.Color(0, 0, 0) } };
   material.onBeforeCompile = shader => {
-    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', KEEP_NORMAL_FRAGMENT);
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = 'uniform vec3 treeSun;\nuniform vec3 treeSunColor;\n' + shader.fragmentShader
+      .replace('#include <normal_fragment_begin>', KEEP_NORMAL_FRAGMENT)
+      // Distant cards would thin out as the mip-mapped alpha drops under the
+      // cut-off: firm the alpha up with distance.
+      .replace('#include <alphatest_fragment>', '#ifdef USE_FOG\n diffuseColor.a *= 1.0 + 0.012 * min(vFogDepth, 300.0);\n#endif\n#include <alphatest_fragment>')
+      .replace('#include <lights_fragment_end>', /* glsl */`#include <lights_fragment_end>
+        vec3 treeSunView = normalize((viewMatrix * vec4(treeSun, 0.0)).xyz);
+        float treeThrough = pow(clamp(dot(-geometryViewDir, treeSunView), 0.0, 1.0), 2.0);
+        // ... and a little of it is scattered around inside every crown, so
+        // the side away from the sun is dim green, not black.
+        reflectedLight.directDiffuse += diffuseColor.rgb * vec3(1.15, 1.05, 0.45) * treeSunColor * (treeThrough * 0.11 + 0.03);`);
   };
+  material.customProgramCacheKey = () => 'trees-v3';
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'trees';
   mesh.matrixAutoUpdate = false;
@@ -141,6 +262,11 @@ export function buildTrees(parent) {
   return {
     mesh,
     setCount(fraction) { geometry.setDrawRange(0, ranges[Math.max(0, Math.round(ranges.length * fraction) - 1)]); },
+    // World-space direction to the sun and its colour x intensity (linear).
+    setSun(direction, color, intensity) {
+      uniforms.treeSun.value.copy(direction);
+      uniforms.treeSunColor.value.copy(color).multiplyScalar(intensity);
+    },
   };
 }
 

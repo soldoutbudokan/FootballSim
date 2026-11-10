@@ -18,7 +18,7 @@ test('invalid saved graphics choices return to auto',()=>{const a=new AdaptiveGr
 
 test('profiles describe environment props and keep the performance tier light', () => {
   for (const p of PROFILES) {
-    for (const key of ['id', 'label', 'pixels', 'dpr', 'shadow', 'props', 'grass', 'detail']) assert.ok(key in p, `${p.id} has ${key}`);
+    for (const key of ['id', 'label', 'pixels', 'dpr', 'shadow', 'props', 'grass', 'detail', 'post']) assert.ok(key in p, `${p.id} has ${key}`);
     assert.ok(!('crowd' in p), 'the practice facility has no crowd');
   }
   const performance = PROFILES[0];
@@ -264,4 +264,92 @@ cameraTest('the athletes are built once for the whole squad and draw only the pl
     m.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
     assert.equal(scale.x > 0.5, !!nickel.byId[p.id], `${p.id} ${scale.x > 0.5 ? 'shown' : 'hidden'}`);
   });
+});
+
+// --- post-processing, atmosphere and grade ------------------------------------
+
+test('the performance tier draws without post-processing; each tier above adds passes', () => {
+  assert.equal(PROFILES[0].post, null, 'performance has no post pipeline');
+  for (let i = 1; i < PROFILES.length; i++) {
+    const post = PROFILES[i].post, id = PROFILES[i].id;
+    assert.ok(post && typeof post === 'object', `${id} uses the post pipeline`);
+    for (const key of ['msaa', 'bloom', 'ao', 'dof']) assert.ok(key in post, `${id}.post has ${key}`);
+    assert.ok([0, 2, 4, 8].includes(post.msaa), `${id} msaa is a sample count`);
+    assert.ok(post.bloom >= 2 && post.bloom <= 7, `${id} bloom pyramid depth`);
+    assert.ok(post.ao >= 0 && post.ao <= 16, `${id} ambient-occlusion samples`);
+    if (i > 1) {
+      const lower = PROFILES[i - 1].post;
+      for (const key of ['msaa', 'bloom', 'ao']) assert.ok(post[key] >= lower[key], `${id} ${key} is not below the tier under it`);
+      assert.ok(post.dof || !lower.dof, `${id} keeps depth of field`);
+    }
+  }
+  // The default (auto starts on Balanced, which is also what CI renders in
+  // software) stays cheap: no per-pixel occlusion, no extra full-screen pass.
+  const balanced = PROFILES[1].post;
+  assert.equal(balanced.ao, 0);
+  assert.equal(balanced.dof, false);
+  assert.ok(PROFILES[2].post.ao > 0, 'high has ambient occlusion');
+});
+
+const envModules = THREE ? {
+  post: await import('../dist/js/env/post.js'),
+  atmosphere: await import('../dist/js/env/atmosphere.js'),
+  lighting: await import('../dist/js/env/lighting.js'),
+} : null;
+
+cameraTest('profiles map onto pipeline settings', () => {
+  const { postSettings } = envModules.post;
+  assert.equal(postSettings(PROFILES[0]), null);
+  assert.equal(postSettings({}), null, 'a profile without the field draws directly');
+  for (const p of PROFILES.slice(1)) assert.deepEqual(postSettings(p), p.post);
+  assert.deepEqual(postSettings({ post: {} }), { msaa: 4, ao: 0, bloom: 0, dof: false });
+});
+
+cameraTest('height fog thickens with distance, thins with height and leaves the play clear', () => {
+  const { fogAmount } = envModules.atmosphere;
+  const { PRESETS } = envModules.lighting;
+  for (const [id, p] of Object.entries(PRESETS)) {
+    const at = (distance, y = 0) => fogAmount(p.fogDensity, distance, y, 8);
+    assert.ok(at(0) === 0 && at(50) < at(150) && at(150) < at(600), `${id}: more haze farther away`);
+    assert.ok(at(300, 30) < at(300, 0), `${id}: less haze higher up`);
+    assert.ok(at(40) < 0.09, `${id}: players 40 yd downfield stay clear (${at(40).toFixed(3)})`);
+    assert.ok(at(1000) > 0.6, `${id}: the horizon dissolves into the sky (${at(1000).toFixed(2)})`);
+    assert.ok(at(300) < 0.6, `${id}: the tree belts are hazy, not hidden (${at(300).toFixed(2)})`);
+  }
+});
+
+cameraTest('every lighting preset carries a restrained grade', () => {
+  const { PRESETS } = envModules.lighting;
+  const luma = hex => { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
+  for (const [id, p] of Object.entries(PRESETS)) {
+    const g = p.grade;
+    assert.ok(g, `${id} has a grade`);
+    assert.ok(g.contrast >= 1 && g.contrast <= 1.12, `${id}: contrast ${g.contrast}`);
+    assert.ok(g.saturation >= 0.85 && g.saturation <= 1.02, `${id}: saturation ${g.saturation}`);
+    assert.ok(g.vignette >= 0 && g.vignette <= 0.3, `${id}: vignette ${g.vignette}`);
+    assert.ok(g.grain >= 0 && g.grain <= 0.025, `${id}: grain ${g.grain}`);
+    assert.ok(g.bloom >= 0 && g.bloom <= 0.3, `${id}: bloom ${g.bloom}`);
+    assert.ok(g.ao > 0 && g.ao <= 1, `${id}: occlusion ${g.ao}`);
+    // Split toning stays a tint: cool shadows, warm highlights, both near white.
+    const s = new THREE.Color(g.shadows), h = new THREE.Color(g.highlights);
+    assert.ok(luma(g.shadows) > 0.8 && luma(g.highlights) > 0.9, `${id}: tints are near white`);
+    assert.ok(s.b >= s.r, `${id}: shadows are not warm`);
+    assert.ok(h.r >= h.b, `${id}: highlights are not cool`);
+  }
+});
+
+cameraTest('only the title and replay cameras have depth of field, focused beyond the subject', () => {
+  const sim = new Simulation(7, { offense: 'mesh', coverage: 'cover3' });
+  for (const mode of ['game', 'broadcast', 'all22']) {
+    const { d } = director(mode);
+    run(d, sim.snapshot(), 0.5);
+    assert.equal(d.depthOfField({}), null, `${mode} stays sharp`);
+  }
+  const { d } = director('game');
+  for (const options of [{ menu: true }, { replay: true }]) {
+    run(d, sim.snapshot(), 1, options);
+    const dof = d.depthOfField(options), subject = d.position.distanceTo(d.subject);
+    assert.ok(dof.focus > subject + 3, 'the subject and the players around it are in focus');
+    assert.ok(dof.range > 20 && dof.blur > 0 && dof.blur <= 12);
+  }
 });

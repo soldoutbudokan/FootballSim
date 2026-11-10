@@ -12,10 +12,12 @@ The release contains every runtime file: Three.js 0.180.0 and its addons, textur
 
 ## The practice facility
 
-- **Two natural-grass NFL fields** side by side, 120 × 53⅓ yd, with 4-inch lines, 8-inch goal lines, a 6 ft white border, hash marks at the NFL inbound lines (70 ft 9 in from each sideline), sideline ticks, numbers every 10 yards 12 yards in from the sideline with direction arrows, yellow gooseneck goal posts and orange pylons. No midfield logo and no end-zone lettering. The turf is a desaturated natural green with 5-yard mowing stripes, worn grass between the hashes, and paint that lets the grass show through.
+- **Two natural-grass NFL fields** side by side, 120 × 53⅓ yd, with 4-inch lines, 8-inch goal lines, a 6 ft white border, hash marks at the NFL inbound lines (70 ft 9 in from each sideline), sideline ticks, numbers every 10 yards 12 yards in from the sideline with direction arrows, yellow gooseneck goal posts and orange pylons. No midfield logo and no end-zone lettering. The turf is mown natural grass: the 5-yard mowing bands lean in alternating directions (cross-cut in the end zones), so they are light or dark, and more or less glossy, depending on where the camera and the sun are, and they swap as the camera moves around the field. Yard-scale clumps of colour, worn grass between the hashes, blade-scale normals up close and paint that is sprayed on the grass (ragged at the edges, green in the troughs, thin where it is worn) keep it from reading as a flat green plane.
 - **Around the field:** a two-storey team building with a glass front and a deep roof overhang behind the offense, a green windscreen fence on chain-link posts, four practice light poles, a scaffold film tower, a scissor lift with a camera platform, a small aluminium bleacher at the 50, and sideline equipment (two-man sled, cones, ball cart, water station, trainer's tent, tackling dummies, benches, a play clock on a trailer) with a few staff figures. Beyond the fence are trees, gentle terrain, a parking lot and a few low buildings. There is no stadium, crowd, skyline or scoreboard.
-- **Sky and light:** the three.js physically based `Sky` with procedural clouds drives the sun and the fog colour. *Afternoon* uses an HDR environment for reflections; *Golden hour* has a low warm sun and long shadows; *Under the lights* uses four pole-light banks with visible pools, the nearest one casting shadows. ACES tone mapping with an exposure per preset.
+- **Sky and light:** the three.js physically based `Sky` with procedural clouds drives the sun and the fog colour. *Afternoon* uses an HDR environment for reflections; *Golden hour* has a low warm sun and long shadows; *Under the lights* uses four pole-light banks with visible pools, the nearest one casting shadows. The clouds shade themselves away from the sun. Haze is analytic height fog (`env/atmosphere.js`): densest at the ground and thinning upward, so the far end zone, the tree belts and the hills recede in layers and meet the sky's horizon colour.
 - **Shadows:** a tight shadow frustum (about 48 × 48 yd) follows the ball and the controlled player each frame; every player also has a soft contact shadow. Instanced grass tufts with a cheap wind sway grow around the camera on the low views.
+- **The image:** from Balanced up the scene is rendered in HDR and finished by a small post-processing pipeline written for this game (`env/post.js`): ambient occlusion from depth (High and Ultra), bloom of what is brighter than paper white only (helmet glints, lamp lenses, the low sun), ACES filmic tone mapping with an exposure per lighting preset, a restrained grade per preset (a little contrast, slightly reduced saturation, cool shadows and warm highlights), a light vignette and fine grain that also removes banding. The title screen and the replay add depth of field behind the players. The aim is a broadcast camera pointed at a real field, not a filter; `tests/graphics.test.mjs` bounds the grade.
+- **Trees:** broadleaf crowns are overlapping lobes of leaf-clump cards with rounded normals, darker inside the crown, and glow when the sun is behind them; spruces are crossed painted cards.
 
 ## Athletes
 
@@ -203,12 +205,23 @@ Auto starts at Balanced, waits through a warm-up, and lowers quality after repea
 
 | Profile | Pixel budget | Max pixel ratio | Sun shadow map | Environment detail | Grass tufts | Small details |
 | --- | ---: | ---: | --- | --- | ---: | --- |
-| Performance | 800,000 | 0.85 | none (contact shadows only) | 35 % of the trees with single-sided leaf cards, no small sideline props, simple turf shading, athletes beyond 20 yd at reduced detail | 0 | off |
-| Balanced | 1,500,000 | 1.15 | 1024² | 70 % of the trees with single-sided leaf cards, full sideline, detailed turf without anisotropic filtering, athletes beyond 40 yd at reduced detail | 9,000 | on |
-| High | 2,500,000 | 1.5 | 2048² | all trees with double-sided, alpha-to-coverage leaf cards, full sideline, detailed turf with 8x anisotropic filtering, full-detail athletes | 22,000 | on |
+| Performance | 800,000 | 0.85 | none (contact shadows only) | 35 % of the trees with alpha-tested leaf cards, no small sideline props, simple turf shading, athletes beyond 20 yd at reduced detail | 0 | off |
+| Balanced | 1,500,000 | 1.15 | 1024² | 70 % of the trees with alpha-tested leaf cards, full sideline, detailed turf without anisotropic filtering, athletes beyond 40 yd at reduced detail | 9,000 | on |
+| High | 2,500,000 | 1.5 | 2048² | all trees with alpha-to-coverage leaf cards, full sideline, detailed turf with 8x anisotropic filtering, full-detail athletes | 22,000 | on |
 | Ultra | 4,200,000 | 2 | 4096² | as High | 45,000 | on |
 
-"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). Reduced-detail athletes (about 2,800 instead of 11,000 triangles, no small details) are drawn from a second set of meshes on the same skeletons, chosen per athlete by distance from the camera. There is no post-processing on any tier. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
+Post-processing (`dist/js/env/post.js`) is tied to the same profiles; each tier adds passes deliberately:
+
+| Profile | Scene target | Bloom | Ambient occlusion | Depth of field (title, replay) | Night shadows |
+| --- | --- | --- | --- | --- | --- |
+| Performance | the canvas, directly (renderer tone mapping, no post passes) | none | none | none | none |
+| Balanced | HDR, 4x multisampled; one composite pass (tone mapping, grade, vignette, grain) | 4-level pyramid from half resolution | none | none | nearest pole bank |
+| High | as Balanced | 5 levels | 8 samples per pixel at half resolution, depth-aware blur | on | two nearest pole banks |
+| Ultra | as Balanced | 6 levels | 12 samples | on | two nearest pole banks |
+
+Without float render targets the game falls back to drawing straight to the canvas on every profile.
+
+"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). Reduced-detail athletes (about 2,800 instead of 11,000 triangles, no small details) are drawn from a second set of meshes on the same skeletons, chosen per athlete by distance from the camera. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
 
 ## Scope and realism
 

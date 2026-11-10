@@ -33,6 +33,32 @@ export function standard(color, roughness = 0.75, metalness = 0, extra = {}) {
   return materialCache.get(key);
 }
 
+// Poured or rolled surfaces (concrete, asphalt) are never one flat colour:
+// this gives a cached standard material slow stains and a fine grain from a
+// shared noise texture sampled in world space, so it needs no UVs and never
+// stretches over the merged boxes of a batch. `scale` is the size in yards of
+// the broad stains; `amount` their depth.
+let weatherNoise = null;
+export function weathered(material, scale = 6, amount = 0.3) {
+  if (material.userData.weathered) return material;
+  material.userData.weathered = true;
+  weatherNoise ||= noiseTexture(256, 7717, 8, 6);
+  const uniforms = { weatherMap: { value: weatherNoise }, weatherScale: { value: new THREE.Vector2(1 / scale, amount) } };
+  material.onBeforeCompile = shader => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = 'varying vec3 vWeatherWorld;\n' + shader.vertexShader.replace(
+      '#include <project_vertex>', '#include <project_vertex>\n vWeatherWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = 'uniform sampler2D weatherMap;\nuniform vec2 weatherScale;\nvarying vec3 vWeatherWorld;\n' + shader.fragmentShader.replace(
+      '#include <map_fragment>', /* glsl */`#include <map_fragment>
+      vec2 weatherUv = (vWeatherWorld.xz + vWeatherWorld.y * vec2(0.71, 0.37)) * weatherScale.x;
+      float weatherBroad = texture2D(weatherMap, weatherUv).r;
+      float weatherFine = texture2D(weatherMap, weatherUv * 9.3 + 0.27).r;
+      diffuseColor.rgb *= 1.0 + weatherScale.y * (0.7 * (weatherBroad - 0.55) + 0.3 * (weatherFine - 0.5));`);
+  };
+  material.customProgramCacheKey = () => 'weathered';
+  return material;
+}
+
 export function canvasTexture(width, height, draw, { srgb = true } = {}) {
   const canvas = document.createElement('canvas');
   canvas.width = width;
