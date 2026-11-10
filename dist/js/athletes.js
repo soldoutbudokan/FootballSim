@@ -1,10 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
 import { GRAVITY } from './sim.js';
+import { smoothstep } from './athletes/math.js';
 import { Squad, Rig, createGeometries, HIDDEN } from './athletes/rig.js';
 import { Animator } from './athletes/motion.js';
 import { createMaterials } from './athletes/uniform.js';
 import { Football } from './athletes/ball.js';
 import { Markers } from './athletes/markers.js';
+import { tackleContext, inferTackle, contactThreats, recentMiss } from './athletes/tackle.js';
+import { handoffMesh } from './athletes/ballskills.js';
 
 // Everything that moves: the athletes, the ball, the control indicator and
 // the contact shadows. Scene units are yards; simulation +z maps to scene -z.
@@ -60,6 +63,7 @@ export class Athletes {
     this.time = 0;
     this.byId = new Map();
     this.ballScene = new THREE.Vector3();
+    this.tackleCache = {}; this.tackleMemo = {}; this.threats = new Map();
   }
 
   setQuality(profile) {
@@ -152,7 +156,21 @@ export class Athletes {
       // it in the receiver's hands, the hands still have to meet it there.
       catchFrom: this.lastPhase === 'air' && state.phase !== 'air' ? this.ball.position.clone() : null,
     };
+    // Seconds the ball has been in the air (a replay that jumps into the
+    // flight has no release to count from: long enough).
+    if (state.phase !== 'air') this.airSince = null;
+    else if (this.lastPhase !== 'air') this.airSince = reset ? -Infinity : clock;
+    else if (reset || this.airSince === null || this.airSince > clock) this.airSince = -Infinity;
+    ctx.airTime = state.phase === 'air' ? clock - this.airSince : 0;
     this.lastPhase = state.phase;
+    // The tackle in progress (tackle.js): from the snapshot, or worked out
+    // from the actions for a simulation that does not publish it.
+    const record = state.tackle !== undefined ? state.tackle : inferTackle(state, clock, this.byId, this.tackleMemo);
+    ctx.tackle = tackleContext(record, state.phase, clock, this.byId, this.tackleCache);
+    ctx.miss = holderId ? recentMiss(state, clock, holderId) : null;
+    ctx.mesh = handoffMesh(ctx, this.qbId);
+    ctx.threats = this.threats;
+    ctx.brace = contactThreats(ctx, this.threats);
     this.anticipateCatches(ctx);
     return ctx;
   }
@@ -208,7 +226,20 @@ export class Athletes {
       if (ctx.presnap) anim.catchPoint = null;
       anim.reach = null;
     }
-    if (!air) return;
+    if (air) this.findReaches(ctx);
+    // How far each man's hands are out for the ball (0..1): up as it gets
+    // close, and eased, so they neither appear on a ball the instant it is
+    // thrown past him nor vanish when the flight ends.
+    const ramp = smoothstep(0, 0.16, ctx.airTime), step = ctx.dt / 0.13;
+    for (const anim of this.animators.values()) {
+      const r = anim.reach;
+      if (r) anim.lastReach = r;
+      const want = r ? (1 - smoothstep(0.12, 0.4, r.t)) * (1 - smoothstep(0.8, 1.3, r.dist)) * ramp : 0, now = anim.reachW || 0;
+      anim.reachW = ctx.reset || ctx.presnap ? want : now + Math.max(-step, Math.min(step, want - now));
+    }
+  }
+
+  findReaches(ctx) {
     const b = ctx.ball, vx = b.vx || 0, vy = b.vy || 0, vz = b.vz || 0;
     for (const [id, anim] of this.animators) {
       const role = anim.spec.role;

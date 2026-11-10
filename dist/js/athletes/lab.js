@@ -145,10 +145,13 @@ const SCENARIOS = {
     }, 'Y');
   },
 
-  // Carrier meets a linebacker: wrap-up, driven back, both go down.
+  // Carrier meets a linebacker head on: the hit, the fall, the pile, and
+  // both men getting up after the whistle.
   tackle: () => tackleScene('LB2', { x: 2.7, z: 50 }, 5.5, 'wrap'),
-  // Safety closing fast from distance: a diving tackle at the legs.
+  // Safety closing fast from the side.
   dive: () => tackleScene('SS', { x: 7.5, z: 52 }, 8.6, 'dive'),
+  // A corner running him down from behind: a diving tackle at the legs.
+  chase: () => tackleScene('CB1', { x: 3.5, z: 36.5 }, 9.4, 'dive'),
 
   // Guard and tackle engaged in pass protection.
   block: () => scripted(presnap(), 2.5, (t, s, p) => {
@@ -190,7 +193,7 @@ const SCENARIOS = {
 
 function tackleScene(id, start, closing, mode) {
   const contactDist = mode === 'dive' ? 1.2 : 0.9;
-  return scripted(presnap(), 3.5, (t, s, p) => {
+  return scripted(presnap(), 5.5, (t, s, p) => {
     const r = p.R, d = p[id];
     if (t === 0) { standStill(s); s.phase = 'run'; s.carrier = s.selected = 'R'; Object.assign(r, { x: 2, z: 40 }); Object.assign(d, start); }
     if (s.phase === 'run') {
@@ -199,6 +202,8 @@ function tackleScene(id, start, closing, mode) {
       d.vx = dx / len * closing; d.vz = dz / len * closing;
       if (Math.hypot(r.x - d.x, r.z - d.z) < contactDist) {
         s.phase = 'tackle'; s.contact = t;
+        // The record the simulation publishes for the tackle choreography.
+        s.tackle = { tackler: id, carrier: 'R', at: t, sack: false, cvx: r.vx, cvz: r.vz, dvx: d.vx, dvz: d.vz, cf: r.facing, gap: Math.hypot(r.x - d.x, r.z - d.z), share: 0.5, helpers: [] };
         setAction(r, 'wrapped', 2); setAction(d, 'tackle', 1.0);
       }
     } else if (s.phase === 'tackle') {
@@ -206,7 +211,8 @@ function tackleScene(id, start, closing, mode) {
       r.vx = 0; r.vz = v; d.vx = r.vx * 0.9; d.vz = r.vz * 0.9;
       if (v < 0.5 || t - s.contact > 0.9) { s.phase = 'dead'; s.deadTime = 0; s.whistle = t; setAction(r, 'down', 1); r.vz = 0; d.vz = 0; }
     } else {
-      // After the whistle the simulation clock stops and deadTime runs.
+      // After the whistle the simulation clock stops and deadTime runs (long
+      // enough here to see both men get back up).
       s.deadTime += DT;
       for (const q of s.players) { q.vx *= 0.92; q.vz *= 0.92; }
       s.time = s.whistle;

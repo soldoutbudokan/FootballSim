@@ -154,3 +154,120 @@ poseTest('only players the ball passes within reach of reach for it, and never f
   });
   assert.ok(reachers.has('X'), 'the receiver reaches for the pass');
 });
+
+// ---------------------------------------------------------------------------
+// Tackles. The runner is driven straight upfield until someone brings him
+// down, then the rep runs on past the whistle so both men get back up.
+function tackleRep(seed, offense, each) {
+  const r = rep(seed, { offense, coverage: 'cover3' });
+  r.sim.snap();
+  let i = 0;
+  const frame = () => { if (i++ % 2) { const s = r.sim.snapshot(); r.athletes.update(s, 1 / 60); each(s, r); } };
+  while (r.sim.phase !== 'dead' && r.sim.time < 12) { r.sim.step(STEP, { z: 1, sprint: true }); frame(); }
+  for (let k = 0; k < 5.5 / STEP; k++) { r.sim.step(STEP); frame(); }
+  return r;
+}
+const TACKLE_REPS = [[1, 'zone'], [2, 'zone'], [3, 'zone'], [5, 'zone'], [1, 'power'], [2, 'power'], [4, 'stretch'], [2, 'counter'], [6, 'mesh']];
+const JOINTS = rig => [rig.world.pelvis, rig.world.chest, rig.world.head, ...rig.world.hands, ...rig.world.feet];
+const JOINT_NAMES = ['pelvis', 'chest', 'head', 'left hand', 'right hand', 'left foot', 'right foot'];
+// Most a joint may move in one 60 Hz frame.
+const STEP_LIMIT = [0.22, 0.25, 0.3, 0.45, 0.45, 0.4, 0.4];
+const FLOOR = [0.08, 0.09, 0.05, -0.04, -0.04, 0.02, 0.02];
+
+poseTest('a tackle keeps both men on top of the turf and moves them without a pop', () => {
+  let tackles = 0, frames = 0;
+  for (const [seed, offense] of TACKLE_REPS) {
+    const last = new Map();
+    tackleRep(seed, offense, (s, r) => {
+      const tk = s.tackle;
+      if (!tk) return;
+      if (!last.size) tackles++;
+      frames++;
+      for (const id of [tk.carrier, tk.tackler, ...tk.helpers.map(h => h.id)]) {
+        const p = s.players.find(q => q.id === id), rig = r.athletes.rigs.get(id), anim = r.athletes.animators.get(id);
+        // Joints against his own root and against the runner's (a tackler
+        // hanging on travels with the runner while the simulation lets his own
+        // root trail behind), so neither root's travel counts as a jump.
+        const c = s.players.find(q => q.id === tk.carrier);
+        const now = JOINTS(rig).map(v => [new THREE.Vector3(v.x - p.x, v.y, v.z + p.z), new THREE.Vector3(v.x - c.x, v.y, v.z + c.z)]), before = last.get(id);
+        const where = `${offense}/${seed} ${id} (${anim.action}) at ${(s.time + s.deadTime).toFixed(2)} s`;
+        now.forEach(([v, w], k) => {
+          assert.ok(v.y > FLOOR[k], `${where}: ${JOINT_NAMES[k]} at height ${v.y.toFixed(2)}`);
+          if (!before) return;
+          const moved = Math.min(v.distanceTo(before[k][0]), w.distanceTo(before[k][1]));
+          assert.ok(moved < STEP_LIMIT[k], `${where}: ${JOINT_NAMES[k]} jumped ${moved.toFixed(2)} yd in a frame`);
+        });
+        last.set(id, now);
+      }
+    });
+  }
+  assert.ok(tackles >= 7 && frames > 1500, `tackles ${tackles}, frames ${frames}`);
+});
+
+poseTest('the tackler wraps the runner, they come to rest without lying inside each other, and both get up', () => {
+  let wraps = 0, held = 0, piles = 0;
+  const kinds = new Set();
+  for (const [seed, offense] of TACKLE_REPS) {
+    let seen = false;
+    const r = tackleRep(seed, offense, (s, r) => {
+      const tk = s.tackle, info = r.athletes.tackleCache.value;
+      if (!tk || !info) return;
+      seen = true;
+      const A = r.athletes.rigs.get(tk.carrier), B = r.athletes.rigs.get(tk.tackler), T = s.time + s.deadTime - tk.at;
+      kinds.add(info.layout + ':' + info.mode);
+      // On his legs (not pulled down beside him): both hands stay on the
+      // runner between the hit and the ground.
+      if (info.layout !== 'lanes' && T > 0.15 && T < info.land) {
+        const feet = A.world.feet[0].clone().add(A.world.feet[1]).multiplyScalar(0.5), legs = new THREE.Line3(A.world.pelvis, feet), near = new THREE.Vector3();
+        for (const hand of B.world.hands) {
+          wraps++;
+          if (legs.closestPointToPoint(hand, true, near).distanceTo(hand) < 0.42) held++;
+        }
+      }
+      // At rest: neither helmet inside the other man's pads, nor the
+      // tackler's chest inside the runner's.
+      if (s.phase === 'dead' && T > info.land + 0.3 && T < info.land + 0.5) {
+        piles++;
+        const ha = helmet(A), hb = helmet(B), where = `${offense}/${seed} ${info.layout} ${info.mode}`;
+        assert.ok(ha.distanceTo(hb) > 0.24, `${where}: helmets ${ha.distanceTo(hb).toFixed(2)} yd apart`);
+        assert.ok(bodyDistance(B, ha) > -0.08 && bodyDistance(A, hb) > -0.08, `${where}: a helmet inside the other man`);
+        assert.ok(bodyDistance(A, B.world.chest) > -0.08, `${where}: the tackler's chest inside the runner`);
+      }
+    });
+    if (!seen) continue;
+    // Five seconds after the whistle everyone in it is standing again.
+    const tk = r.sim.snapshot().tackle;
+    for (const id of [tk.carrier, tk.tackler]) {
+      const rig = r.athletes.rigs.get(id), anim = r.athletes.animators.get(id);
+      assert.ok(!['tackled', 'tackle', 'assist'].includes(anim.action), `${offense}/${seed} ${id} still ${anim.action}`);
+      assert.ok(rig.world.pelvis.y > 0.85 * rig.dims.hipY && rig.world.head.y > 1.5 * rig.dims.k, `${offense}/${seed} ${id} is not back on his feet`);
+    }
+  }
+  assert.ok(wraps > 100 && piles > 40, `wrap samples ${wraps}, pile samples ${piles}`);
+  assert.ok(held / wraps > 0.9, `hands on the runner in ${held} of ${wraps} samples`);
+  assert.ok(kinds.size >= 3, `kinds of tackle seen: ${[...kinds].join(', ')}`);
+});
+
+poseTest('a replay that jumps into a pile shows the same pile as playing up to it', () => {
+  let checked = 0;
+  for (const [seed, offense] of TACKLE_REPS.slice(0, 4)) {
+    const r = tackleRep(seed, offense, () => {});
+    const frames = r.sim.recording, tk = frames.at(-1).tackle;
+    if (!tk) continue;
+    const info = r.athletes.tackleCache.value;
+    // The replay plays its 20 Hz frames forward; remember the pile...
+    const k = frames.findIndex(f => f.phase === 'dead' && f.time + f.deadTime - tk.at > info.land + 0.45);
+    assert.ok(k > 3, `${offense}/${seed}: a recorded frame on the ground`);
+    r.athletes.update(frames[0], 0.05);
+    for (let i = 1; i <= k; i++) r.athletes.update(frames[i], 0.05);
+    const played = [tk.carrier, tk.tackler].map(id => JOINTS(r.athletes.rigs.get(id)).map(v => v.clone()));
+    // ...then scrub back to just after the snap and jump straight to it.
+    r.athletes.update(frames[2], 0.05);
+    r.athletes.update(frames[k], 0.05);
+    [tk.carrier, tk.tackler].forEach((id, n) => JOINTS(r.athletes.rigs.get(id)).forEach((v, j) => {
+      assert.ok(v.distanceTo(played[n][j]) < 0.06, `${offense}/${seed} ${id} ${JOINT_NAMES[j]} is ${v.distanceTo(played[n][j]).toFixed(2)} yd from where it was`);
+    }));
+    checked++;
+  }
+  assert.ok(checked >= 3, `piles checked: ${checked}`);
+});
