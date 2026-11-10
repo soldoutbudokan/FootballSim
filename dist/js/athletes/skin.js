@@ -231,7 +231,10 @@ export function skinMaterial(material, boneTexture, { depth = false, detailMap =
         .replace('#include <begin_vertex>', 'mat4 athM = athSkin();\nvec3 transformed = (athM * vec4(position, 1.0)).xyz;');
       return;
     }
-    if (detailed()) shader.uniforms.athDetailMap = { value: detailMap };
+    // Always present: three.js keeps one uniforms object per material, the
+    // last compiled program's, so a program compiled with the detail layer
+    // and reused after a plain one would otherwise never get its texture.
+    if (detailMap) shader.uniforms.athDetailMap = { value: detailMap };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\n' + HEADER)
       .replace('#include <beginnormal_vertex>', 'mat4 athM = athSkin();\nvec3 objectNormal = normalize(mat3(athM) * normal);')
