@@ -484,8 +484,9 @@ export function shrugOff(anim, pose, p, ctx) {
   if (w <= 0) return;
   const q = ctx.byId.get(m.tackler), rig = ctx.rigs.get(m.tackler);
   if (!q) return;
-  const local = anim.worldToRoot(_c.set(q.x, 0, -q.z), _w), dist = Math.hypot(local.x, local.z) || 1;
-  const lx = local.x / dist, lz = local.z / dist, side = lx >= 0 ? 0 : 1;      // the arm on his side
+  // Where the tackler was as he missed (to the runner's left, ahead of him):
+  // fixed for the whole reaction, so the arm he uses cannot change mid-way.
+  const lx = m.lx, lz = m.lz, side = lx >= 0 ? 0 : 1;      // the arm on his side
   const arm = carryArm(anim, p), d = anim.dims;
   // Knocked off his stride: hips sink, he leans away from the hands on him.
   pose.pelvis.y -= 0.09 * d.k * w;
@@ -517,7 +518,10 @@ export function recentMiss(state, clock, holderId) {
   let found = null;
   for (const m of state.misses || []) {
     const age = clock - m.at;
-    if (m.carrier === holderId && age >= 0 && age < 0.5) found = { tackler: m.tackler, age };
+    if (m.carrier !== holderId || age < 0 || age >= 0.5) continue;
+    const speed = Math.hypot(m.cvx, m.cvz), gap = Math.hypot(m.dx, m.dz) || 1;
+    const fx = speed > 0.5 ? m.cvx / speed : 0, fz = speed > 0.5 ? m.cvz / speed : 1;
+    found = { tackler: m.tackler, age, lx: (-m.dx * fz + m.dz * fx) / gap, lz: (m.dx * fx + m.dz * fz) / gap };
   }
   return found;
 }

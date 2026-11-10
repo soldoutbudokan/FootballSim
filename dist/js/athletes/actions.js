@@ -288,7 +288,7 @@ const THROW_SPINE = [[0, 0.06, 0.1, 0], [0.1, -0.04, -0.5, 0.1], [0.17, -0.04, -
 export const ACTIONS = {
   run(anim, pose, age, data, p, ctx) {
     for (const kind in POSTURES) if (anim.postures[kind] > 0.005) POSTURES[kind](anim, pose, anim.postures[kind], p, ctx);
-    if (ctx.phase === 'air') reachForBall(anim, pose, p, ctx);
+    if (ctx.phase === 'air' || anim.reachW > 0) reachForBall(anim, pose, p, ctx);
     if (ctx.mesh) { giveBall(anim, pose, p, ctx); takeBall(anim, pose, p, ctx); }
     // A man with nothing left to do watches the ball carrier.
     if ((ctx.phase === 'run' || ctx.phase === 'tackle') && anim.speed < 1.6 && p.engaged == null) anim.lookAt(pose, ctx.ballScene, 0.6 * (1 - smoothstep(0.6, 1.6, anim.speed)));
@@ -531,7 +531,7 @@ function plantAndDrive(anim, pose, age, data, p, ctx) {
   senseCut(anim, data, age);
   const holding = ctx.holderId === p.id, arm = holding ? carryArm(anim, p) : -1;
   if (holding) { tuck(pose, arm); shrugOff(anim, pose, p, ctx); }
-  else if (ctx.phase === 'air') reachForBall(anim, pose, p, ctx);
+  else if (ctx.phase === 'air' || anim.reachW > 0) reachForBall(anim, pose, p, ctx);
   pose.pelvis.y -= (juke ? 0.16 : 0.1) * w;
   pose.hips.x += 0.1 * w; pose.spine.x += 0.12 * w;
   if (data.dir === null) return;

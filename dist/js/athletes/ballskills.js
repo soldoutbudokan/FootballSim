@@ -17,9 +17,9 @@ const JUMP = 0.38;             // highest jump, yards
 // The body's height for a ball arriving `y` yd off the ground, `tau` seconds
 // from its arrival (negative before): a jump that peaks as the ball gets
 // there, or a knee bend down to a low one. Returns how low he went (0..1).
-function meetHeight(anim, pose, y, tau) {
+function meetHeight(anim, pose, y, tau, scale = 1) {
   const k = anim.dims.k;
-  const high = clamp((y - 2.0 * k) / 0.55, 0, 1), low = clamp((1.05 * k - y) / 0.5, 0, 1);
+  const high = clamp((y - 2.0 * k) / 0.55, 0, 1) * scale, low = clamp((1.05 * k - y) / 0.5, 0, 1) * scale;
   if (high > 0) {
     const air = Math.max(0, 1 - (tau / JUMP_TIME) ** 2), load = bump(-0.36, -0.17, tau), land = bump(0.17, 0.36, tau);
     pose.tiltLift += JUMP * high * air;
@@ -40,15 +40,12 @@ function meetHeight(anim, pose, y, tau) {
 // simulation registers the catch): both hands together, elbows soft, eyes on
 // the ball. Only for a ball that passes within reach (anticipateCatches).
 export function reachForBall(anim, pose, p, ctx) {
-  const reach = anim.reach;
-  if (!reach) return;
-  if (ctx.ballScene && reach.t < 1.6) anim.lookAt(pose, ctx.ballScene, 0.85 * (1 - smoothstep(1.0, 1.6, reach.t)));
-  const near = 1 - smoothstep(0.8, 1.3, reach.dist);
-  if (near <= 0) return;
-  const sink = meetHeight(anim, pose, reach.point.y, -reach.t) * near;
-  // The arms go late: the hands show in the last third of a second.
-  const w = (1 - smoothstep(0.12, 0.4, reach.t)) * near;
+  const live = anim.reach, reach = live || anim.lastReach, w = anim.reachW || 0;
+  if (!reach || (!live && w <= 0)) return;
+  if (live && ctx.ballScene && reach.t < 1.6) anim.lookAt(pose, ctx.ballScene, 0.85 * (1 - smoothstep(1.0, 1.6, reach.t)));
+  else if (ctx.ballScene) anim.lookAt(pose, ctx.ballScene, 0.85 * w);
   if (w <= 0) return;
+  const sink = meetHeight(anim, pose, reach.point.y, -reach.t, live ? 1 - smoothstep(0.8, 1.3, reach.dist) : w) * w;
   // Turn the shoulders toward the ball, then put both hands on it.
   anim.worldToTilt(pose, reach.point, _a);
   pose.spine.y += clamp(Math.atan2(_a.x, Math.max(0.05, _a.z)), -0.7, 0.7) * w;
