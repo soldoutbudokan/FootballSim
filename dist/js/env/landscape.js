@@ -134,7 +134,7 @@ function treeGeometry(random, tint, cards) {
   } else {
     // Two to four lobes: a main crown and smaller ones pushed out to the sides.
     const radius = height * (0.3 + random() * 0.07);
-    const main = new THREE.Vector3(0, height * 0.62, 0);
+    const main = new THREE.Vector3(0, height * 0.59, 0);
     const lobes = [{ centre: main, radius }];
     const extra = 1 + Math.floor(random() * 3);
     for (let i = 0; i < extra; i++) {
@@ -147,8 +147,8 @@ function treeGeometry(random, tint, cards) {
     for (const lobe of lobes) {
       const clumps = Math.max(3, Math.round(7 * lobe.radius / radius));
       for (let i = 0; i < clumps; i++) {
-        // On the lobe's shell, more of them on the upper half.
-        const a = random() * Math.PI * 2, e = Math.asin(Math.min(1, random() * 1.4 - 0.4));
+        // On the lobe's shell, a few more of them on the upper half.
+        const a = random() * Math.PI * 2, e = Math.asin(Math.min(1, random() * 1.75 - 0.75));
         const shell = lobe.radius * (0.45 + random() * 0.35);
         const position = lobe.centre.clone().add(new THREE.Vector3(Math.cos(a) * Math.cos(e) * shell, Math.sin(e) * shell * 0.8, Math.sin(a) * Math.cos(e) * shell));
         const size = lobe.radius * (1.0 + random() * 0.5);

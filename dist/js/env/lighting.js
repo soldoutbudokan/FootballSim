@@ -41,8 +41,9 @@ export const PRESETS = {
     poles: 0, windows: 0.7, lamps: 0.3,
   },
   night: {
-    // The directional light stands in for the dominant (north-west) pole bank:
-    // it is the one shadow-casting light. The four spot lights add the pools.
+    // The four pole banks (spot lights) do the lighting and cast the shadows;
+    // the directional light is only a dim, shadowless fill for the stretch
+    // between their pools.
     sun: { elevation: 52, azimuth: 300, color: '#e4ecff', intensity: 0.3, skyElevation: -9 },
     hemisphere: { sky: '#2b3c5c', ground: '#0b100a', intensity: 0.3 },
     environment: { source: 'sky', intensity: 1.0 },
