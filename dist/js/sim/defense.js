@@ -51,12 +51,19 @@ export const DIFFICULTY = {
   // `press`: how much more (or less) often the coordinator presses his zone
   // corners: a pressed corner bails from the line on top of #1, an off one
   // gives the quick throw.
+  // Pursuit (sim/pursuit.js): `gather` the share of defenders who come to
+  // balance in front of a runner instead of arriving flat out; `trigger`
+  // yards behind the line from which an underneath man comes up for a
+  // quarterback who runs (0: he waits until he is over the line).
+  // `spaceRead`: how well a linebacker or defensive back takes on a blocker
+  // who comes at him in space (a free lineman, a receiver's stalk block):
+  // added to his side of that block's margin (sim/run.js RUN_BLOCK).
   rookie: { latency: 0.30, carrier: 0.32, chase: 0.25, read: 0.30, ballReaction: 0.36, judgment: 1.8, routeLead: 0.06, anticipate: 0, contain: 0.3, carry: 16, help: 0.2,
-    menu: 'rookie', situ: 0.5, disguise: 0.1, late: 0, hold: 0.45, scout: 0, runRead: 0.6, bust: 0.25, home: 0.35, fill: 0.2, blockRead: -0.45, bite: 0.55, eyes: 0, squeeze: 0, press: -0.3 },
+    menu: 'rookie', situ: 0.5, disguise: 0.1, late: 0, hold: 0.45, scout: 0, runRead: 0.6, bust: 0.25, home: 0.35, fill: 0.2, blockRead: -0.45, bite: 0.55, eyes: 0, squeeze: 0, press: -0.3, gather: 0.2, spaceRead: 0, trigger: 0 },
   pro: { latency: 0.28, carrier: 0.28, chase: 0.21, read: 0.24, ballReaction: 0.28, judgment: 0.9, routeLead: 0.13, anticipate: 0.5, contain: 1.0, carry: 21, help: 0.45,
-    menu: 'pro', situ: 0.8, disguise: 0.35, late: 0.25, hold: 0.3, scout: 0.5, runRead: 0.55, bust: 0.08, home: 0.8, fill: 0.6, blockRead: 0, bite: 0.42, eyes: 0.5, squeeze: 0.5, press: 0 },
+    menu: 'pro', situ: 0.8, disguise: 0.35, late: 0.25, hold: 0.3, scout: 0.5, runRead: 0.55, bust: 0.08, home: 0.8, fill: 0.6, blockRead: 0, bite: 0.42, eyes: 0.5, squeeze: 0.5, press: 0, gather: 0.6, spaceRead: 0.4, trigger: 6 },
   allpro: { latency: 0.2, carrier: 0.26, chase: 0.17, read: 0.18, ballReaction: 0.18, judgment: 0.35, routeLead: 0.20, anticipate: 1, contain: 1.5, carry: Infinity, help: 0.7,
-    menu: 'allpro', situ: 1, disguise: 0.5, late: 0.4, hold: 0.15, scout: 1, runRead: 0.5, bust: 0.03, home: 0.95, fill: 0.9, blockRead: 0.3, bite: 0.3, eyes: 1, squeeze: 0.7, press: 0.3 },
+    menu: 'allpro', situ: 1, disguise: 0.5, late: 0.4, hold: 0.15, scout: 1, runRead: 0.5, bust: 0.03, home: 0.95, fill: 0.9, blockRead: 0.3, bite: 0.3, eyes: 1, squeeze: 0.7, press: 0.3, gather: 0.9, spaceRead: 0.9, trigger: 10 },
 };
 
 export const DEFENSE = [
@@ -1086,6 +1093,7 @@ export const defense = {
     const lag = { dl: d.latency + 0.1, lb: skill.runRead, s: skill.runRead + 0.15, cb: skill.runRead + 0.3 }[d.role];
     d.readRun = d.role === 'dl' ? lag : lag - 0.12 * tend.runBias;
     this.runDiscipline(d);
+    this.pursuitDiscipline(d);
     const fake = skill.bite * (1 + 0.6 * tend.runBias);
     d.bite = d.rushing || !d.assign || d.assign.kind === 'man' && d.role !== 'lb' ? 0
       : d.role === 'lb' ? GET_OFF.lb + fake : d.role === 's' && d.start.z - this.spot < 11 ? GET_OFF.s + 0.5 * fake : 0;

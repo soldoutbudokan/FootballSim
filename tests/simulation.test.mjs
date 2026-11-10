@@ -206,6 +206,9 @@ test('a tackle drags 0-3 yards after contact and the rep ends within 1.2 s of co
   for(const approach of ['head-on','from behind','from the side']){
     const s=openField(2),r=s.byId.R,d=s.byId.LB2;advance(s,1.2,{z:1,sprint:true});
     s.random=()=>0;d.turned=true;
+    // His teammates follow the play downfield now: out of the way, so the
+    // tackler set down behind him has a clear run.
+    for(const o of s.offense)if(o!==r){o.x=o.x<0?-24:24;o.z=s.spot-15;o.vx=o.vz=0;}
     if(approach==='head-on'){d.x=r.x;d.z=r.z+8;d.vx=0;d.vz=-5;}
     else if(approach==='from behind'){d.x=r.x+.3;d.z=r.z-2.5;d.vx=0;d.vz=9.4;d.top=d.speed=10;}
     else {d.x=r.x+6;d.z=r.z+5;d.vx=-6;d.vz=0;}
@@ -251,7 +254,9 @@ test('a straight runner is tackled by a set defender most of the time; a juke ju
   let straight=0,juked=0;
   for(let seed=1;seed<=40;seed++){if(rep(seed,false)==='tackle')straight++;if(rep(seed,true)!=='tackle')juked++;}
   assert.ok(straight>=30,'straight runner tackled '+straight+' of 40');
-  assert.ok(juked>=14&&juked<=28,'juke broke free '+juked+' of 40');
+  // (A set man is under control, so he rides out part of the move: see the
+  // test of coming to balance in tests/pursuit.test.mjs.)
+  assert.ok(juked>=10&&juked<=24,'juke broke free '+juked+' of 40');
 });
 
 test('a second man on the same step hits a runner already off balance, and a third joins the wrap',()=>{
