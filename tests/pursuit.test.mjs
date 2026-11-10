@@ -150,3 +150,19 @@ test('a free underneath zone defender breaks on the quarterback\'s shoulders: no
   assert.ok(Math.abs(moved[1] - 3) < 1e-9, 'Pro breaks half of the 6 yd: ' + moved[1]);
   assert.ok(Math.abs(moved[2] - 6) < 1e-9, 'All-pro breaks all 6 yd: ' + moved[2]);
 });
+
+test('a linebacker reads a block in space by a free blocker as well as his level does; a lineman in his gap is unchanged', () => {
+  for (const level of LEVELS) {
+    const s = new Simulation(5, { offense: 'zone', coverage: 'cover3', difficulty: level, mode: 'reps', personnel: 'base' });
+    s.snap(); advance(s, 0.3);
+    const st = s.runState(), o = s.byId.RG, read = DIFFICULTY[level].spaceRead;
+    const margin = (id, freed) => { o.freed = freed; const m = s.blockMargin(st, { d: id, blockers: ['RG'] }); o.freed = false; return m; };
+    assert.ok(Math.abs(margin('LB2', false) - margin('LB2', true) - read) < 1e-9, `${level}: a free lineman's block on a linebacker counts ${read} less`);
+    assert.equal(margin('DT1', false), margin('DT1', true), level + ': not against a defensive lineman');
+    // A receiver's stalk block is a block in space too.
+    const stalk = s.blockMargin(st, { d: 'SS', blockers: ['Y'] });
+    s.skill = { ...s.skill, spaceRead: 0 };
+    assert.ok(Math.abs(s.blockMargin(st, { d: 'SS', blockers: ['Y'] }) - stalk - read) < 1e-9, level + ': a stalk block on a safety');
+  }
+  assert.ok(DIFFICULTY.rookie.spaceRead === 0 && DIFFICULTY.pro.spaceRead < DIFFICULTY.allpro.spaceRead);
+});
