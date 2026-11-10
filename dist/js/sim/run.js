@@ -4,6 +4,8 @@
 // owned, flow, the backside staying home for the cutback, the safety in the
 // alley). Mixed into Simulation like the other sim modules. Positions are on
 // the field: a flipped play mirrors `side`.
+import { RECEIVERS } from '../plays.js';
+import { SUPPORT } from './support.js';
 import { clamp, dist, scaled, seekWant, speedCap, STUMBLE_SPEED, GET_OFF, LEVERAGE } from './common.js';
 
 // One per-rep draw per player (Simulation.reset: `form`, uniform 0-1) gives
@@ -37,7 +39,10 @@ const POWER_DIGIT = 1, NEED_DIGIT = 7919, PANCAKE_DIGIT = 6007, BUST_DIGIT = 427
 // blocker has lost the angle comes off at once, and a sealed man the back
 // runs past stays sealed; a back who runs into him (within `grab` yd) is his.
 // Receivers blocking (a stalk block on a corner or a safety) hold `stalk` as
-// long.
+// long, and a lineman who is off his own man and blocks whoever is most
+// dangerous (sim/support.js) `space` as long: a block on the move in space
+// is not a block from his stance. A linebacker or defensive back blocked by
+// such free blockers reads the block coming (DIFFICULTY `spaceRead`, on m).
 //
 // While locked: with m over `drive` the blocker drives him back at
 // `driveSpeed` yd/s per unit over it (at most `driveMost`); under −`drive`
@@ -52,7 +57,7 @@ const POWER_DIGIT = 1, NEED_DIGIT = 7919, PANCAKE_DIGIT = 6007, BUST_DIGIT = 427
 const RUN_BLOCK = {
   mass: 2.5, form: 1.0, count: 0.55, line: 0.6, double: 0.85, angle: 0.35, reach: -0.35,
   hold: 2.3, holdK: 0.8, min: 0.35, max: 8, power: 2.5,
-  ball: 1.2, range: 2.4, close: 0.9, grab: 0.75, near: 0.4, coming: 3, open: 2, squareFrom: 0.3, stalk: 0.6,
+  ball: 1.2, range: 2.4, close: 0.9, grab: 0.75, near: 0.4, coming: 3, open: 2, squareFrom: 0.3, stalk: 0.6, space: 0.75,
   drive: 0.5, driveSpeed: 1.3, driveMost: 1.8, driveMax: 2.5, penSpeed: 1.4, penMost: 2.0, lean: 0.3,
   beaten: 0.5, beatenTime: 0.45, pancake: 0.25, pancakeFrom: 1.3, pancakeAt: [0.5, 1.2], down: 0.9,
   lock: 1.55, part: 2.2, relock: 1, pick: 3,
@@ -72,7 +77,16 @@ const RUN_BLOCK = {
 // (`down`), the back side hinges like a zone lineman to cover the gap the
 // puller left; the puller kicks out the first man he finds in the hole, or
 // leads up on a linebacker, within `hole` yd of it.
-const RUN_PLAN = { depth: 2.5, wide: 9, boxDeep: 8.5, zone: [-0.7, 1.8, 0.4], down: [-2.2, 0.7, -0.6], near: 2.6, depth2: 1.2, most: 0.8, late: 0.5, key: 0.1, flow: 2, hole: 5 };
+const RUN_PLAN = { depth: 2.5, wide: 9, boxDeep: 8.5, zone: [-0.7, 1.8, 0.4], down: [-2.2, 0.7, -0.6], near: 2.6, depth2: 1.2, most: 0.8, late: 0.5, key: 0.1, flow: 2, hole: 5, free: 0.9, reach: 2.5, lead: 3, follow: 2 };
+// The pull. The guard opens for `step` s, then runs flat `depth` yd behind
+// the line at full speed to `short` yd inside the hole and turns up once he
+// is within `turn` yd of it (or `late` s after the snap). On the way he
+// looks for work: a free defender within `see` yd of him, no more than
+// `back` yd behind his run and shallower than `shallow` yd past the line,
+// stops the pull there. His man is the free defender who would be in the
+// hole first, no deeper than `deep` yd, the men on the line (and the one he
+// has just met) counted `line` s sooner.
+const PULL = { step: 0.18, depth: 1.3, short: 0.8, turn: 1.6, late: 2.6, see: 3, back: 0.5, shallow: 2, deep: 6, line: 0.35 };
 
 // Run fits. Gaps on each side, from where the line lined up and moved with
 // it as a whole (so the gaps flow with a zone play): A beside the centre, B
@@ -113,7 +127,7 @@ export const running = {
   // ---------------------------------------------------------------------------
   // Run blocking (RUN_BLOCK, RUN_PLAN), once a step on a run play.
   runBlocking(dt) {
-    const st = this.runState(), c = this.guardPoint();
+    const st = this.runState(), c = this.guardPoint(), puller = this.play.pullingGuard;
     if (!st.plan) { this.planRunBlocks(st); st.plan = true; }
     // Blocks hold or end; pairs that drifted apart part.
     for (const [id, b] of [...st.blocks]) {
@@ -122,14 +136,45 @@ export const running = {
       if (!b.blockers.length || d.action === 'tackle') { st.blocks.delete(id); continue; }
       this.blockLife(st, b, d, dt);
     }
+    // The scheme first: each lineman's own man while he can still block him.
+    // Whoever is left over, and the receivers, take the most dangerous man
+    // they can cut off (sim/support.js).
+    const men = new Map(), free = [], taken = new Set(st.blocks.keys()), pinned = new Set(), ref0 = this.supportRef();
     for (const o of this.line) {
-      if (o.id === this.play.pullingGuard && this.pullBlock(o)) continue;
-      if (o.id === this.play.pullingGuard && !o.pullPicked) { o.pullPicked = true; this.pullTarget(o, st); }
-      const d = this.runMan(o, st);
+      if (o.id === puller && this.pullBlock(o, st)) { men.set(o.id, o); continue; }
+      const d = this.schemeMan(o, st, ref0);
+      if (d) { men.set(o.id, d); taken.add(d.id); }
+      else { free.push(o); if (this.blockOf(st, o)) pinned.add(o.id); }
+    }
+    for (const id of RECEIVERS) {
+      const p = this.byId[id];
+      if (id === 'R' || id === this.carrier) continue;
+      free.push(p); if (this.blockOf(st, p)) pinned.add(p.id);
+    }
+    const ref = this.planSupport(free, taken, (o, d) => this.lostMan(o, d), pinned);
+    for (const o of this.line) {
+      const man = men.get(o.id);
+      if (man === o) continue;
       o.sprinting = false;
-      if (!d) { o.want = seekWant(o, { x: o.x, z: Math.max(o.z, this.spot + 0.5) }, speedCap(o, 0.5)); continue; }
+      const d = man || (o.support ? this.byId[o.support.id] : null);
+      if (!d) {
+        // Nobody left to block: follow the play downfield.
+        const r = ref && ref.carrier;
+        o.want = r && r.z > o.z - 2
+          ? seekWant(o, { x: o.x + clamp(r.x - o.x, -RUN_PLAN.follow, RUN_PLAN.follow), z: Math.max(o.z, r.z + 1) }, speedCap(o, 0.6))
+          : seekWant(o, { x: o.x, z: Math.max(o.z, this.spot + 0.5) }, speedCap(o, 0.5));
+        continue;
+      }
       if (!this.blockOf(st, o) && dist(o, d) < RUN_BLOCK.lock) this.runLock(st, o, d);
-      o.want = this.runBlockWant(st, o, d, c);
+      const b = st.blocks.get(d.id), locked = !!b && b.blockers.includes(o.id);
+      if (locked || !ref) o.want = this.runBlockWant(st, o, d, c);
+      else if (!man) o.want = this.supportWant(o, d, o.support, ref, 0.85);
+      else {
+        // His own man at the second level: he climbs to where that man is
+        // going, not to where he stands.
+        const cut = d.start.z - this.spot >= RUN_PLAN.depth && dist(o, d) > RUN_PLAN.lead ? this.cutOff(o, this.threatOf(d, ref)) : null;
+        o.want = cut ? seekWant(o, cut, speedCap(o, 0.85), speedCap(o, 0.5)) : this.runBlockWant(st, o, d, c);
+      }
     }
     for (const b of st.blocks.values()) for (const oid of b.blockers) this.engage(this.byId[oid], this.byId[b.d]);
   },
@@ -175,25 +220,68 @@ export const running = {
     });
   },
 
-  // The puller has come round: he kicks out the first man he finds in the
-  // hole (the end man on the line), or leads up on a linebacker.
+  // The puller has come round, or met somebody on the way: he takes the
+  // most dangerous man nobody has at the hole (PULL), the one who would be
+  // in it first, the end man on the line before a linebacker.
   pullTarget(o, st) {
-    const hole = { x: this.pocketX() + st.side * Math.abs(this.play.lane || 4), z: this.spot + 0.5 };
+    const s = st.side, hole = { x: this.pocketX() + s * Math.abs(this.play.lane || 4), z: this.spot + 0.5 };
     let pick = null, cost = Infinity;
     for (const d of this.defense) {
       const b = st.blocks.get(d.id);
-      if ((b && b.blockers.length) || d.action === 'stumble' || d.z > this.spot + 6 || dist(d, hole) > RUN_PLAN.hole) continue;
-      const c = dist(d, o) - (d.start.z - this.spot < RUN_PLAN.depth ? 1.5 : 0);
+      if ((b && b.blockers.length) || d.action === 'stumble' || d.action === 'tackle' || d.z > this.spot + PULL.deep || this.claimed(d, o)) continue;
+      const near = dist(d, o) < PULL.see && s * (d.x - o.x) > -PULL.back;
+      if (!near && (dist(d, hole) > RUN_PLAN.hole || s * (d.x - o.x) < -PULL.back)) continue;
+      const c = dist(d, hole) / speedCap(d) - (d.start.z - this.spot < RUN_PLAN.depth ? PULL.line : 0) - (near ? PULL.line : 0);
       if (c < cost) { cost = c; pick = d; }
     }
     o.runMan = pick ? pick.id : null; o.runKind = pick ? 'angle' : 'base'; o.combo = null; o.climbTo = null;
+    return pick;
   },
 
-  // A blocker's man this step: his planned man; a double team's second man
-  // climbs to his linebacker when the time comes; once his block is over
-  // (shed, knocked down, or a man he cannot reach) the nearest man in front
-  // of him nobody has.
-  runMan(o, st) {
+  // Another lineman's own man (not `o`'s).
+  claimed(d, o) {
+    for (const q of this.line) if (q !== o && !q.freed && q.runMan === d.id) return true;
+    return false;
+  },
+
+  // A gap scheme pulls a guard: he opens at the snap, runs flat behind the
+  // line (PULL) and turns up into the called gap, looking for work the whole
+  // way: the first free defender who shows in his path is his. True while he
+  // is still pulling (his step is set here).
+  pullBlock(o, st) {
+    if (o.pullStage >= 2) return false;
+    const s = st.side, x = this.pocketX() + s * Math.abs(this.play.lane || 4), cap = speedCap(o);
+    o.pullStage ||= 0;
+    o.sprinting = true;
+    if (o.pullStage === 0) {
+      // The pull step: open to the play side and lose a little ground.
+      if (this.time >= GET_OFF.ol + PULL.step) o.pullStage = 1;
+      else { o.want = scaled(s * 0.8, -0.6, cap); return true; }
+    }
+    // Somebody in his way, or he is at the hole: time to block.
+    let met = false;
+    for (const d of this.defense) {
+      const b = st.blocks.get(d.id);
+      if ((b && b.blockers.length) || d.action === 'stumble' || this.claimed(d, o)) continue;
+      if (dist(d, o) < PULL.see && s * (d.x - o.x) > -PULL.back && d.z < this.spot + PULL.shallow) { met = true; break; }
+    }
+    if (met || s * (x - o.x) < PULL.turn || this.time > PULL.late) {
+      o.pullStage = 2;
+      this.pullTarget(o, st);
+      return false;
+    }
+    o.want = seekWant(o, { x: x - s * PULL.short, z: this.spot - PULL.depth }, cap, cap);
+    return true;
+  },
+
+  // A lineman's own man from the scheme this step, while he can still block
+  // him: his planned man; a double team's second man climbs to his
+  // linebacker when the time comes. Null once that man is gone (shed, down,
+  // behind the runner) or, after `free` s, out of reach: no longer a threat
+  // to the runner, or past the point where this blocker could get in his
+  // way. From then on the lineman is a free blocker (sim/support.js).
+  schemeMan(o, st, ref) {
+    if (o.freed) return null;
     let d = o.runMan ? this.byId[o.runMan] : null;
     if (o.combo && o.climbTo && d) {
       const lb = this.byId[o.climbTo], b = st.blocks.get(d.id);
@@ -206,17 +294,22 @@ export const running = {
         d = this.byId[o.runMan];
       }
     }
-    // Nobody blocks a man behind the runner (that would be a block in the back).
-    const c = this.handoff ? this.byId[this.carrier] : null;
-    if (d && !this.lostMan(o, d) && d.action !== 'tackle' && dist(o, d) < 8 && !(c && d.z < c.z - 1)) return d;
-    let pick = null, far = RUN_BLOCK.pick;
-    for (const q of this.defense) {
-      const b = st.blocks.get(q.id);
-      if ((b && b.blockers.length) || this.lostMan(o, q) || q.action === 'tackle' || q.z < o.z - 1 || (c && q.z < c.z - 1) || dist(o, q) >= far) continue;
-      far = dist(o, q); pick = q;
+    if (d && d.action !== 'tackle') {
+      const b = st.blocks.get(d.id);
+      if (b && b.blockers.includes(o.id)) return d;
+      // Nobody blocks a man behind the runner (that would be a block in the back).
+      const c = this.handoff ? this.byId[this.carrier] : null;
+      if (!this.lostMan(o, d) && dist(o, d) < 8 && !(c && d.z < c.z - 1) && !this.outOfReach(o, d, ref)) return d;
     }
-    o.runMan = pick ? pick.id : null; o.runKind = 'base';
-    return pick;
+    o.freed = true; o.runMan = null; o.runKind = 'base'; o.combo = null; o.climbTo = null;
+    return null;
+  },
+
+  // His man is no longer his to block (RUN_PLAN `free`, `reach`).
+  outOfReach(o, d, ref) {
+    if (!ref || this.time < RUN_PLAN.free || dist(o, d) < RUN_PLAN.reach) return false;
+    const th = this.threatOf(d, ref);
+    return !(th.T < SUPPORT.horizon) || !this.cutOff(o, th);
   },
 
   lostMan(o, d) { return (o.lostAt?.[d.id] ?? -9) > this.time - RUN_BLOCK.relock; },
@@ -255,14 +348,18 @@ export const running = {
       if (kind === 'angle') { scheme = Math.max(scheme, RUN_BLOCK.angle); read = true; }
       if (kind === 'reach') { scheme = Math.min(scheme, RUN_BLOCK.reach); read = true; }
     });
-    return Math.log2(power / this.blockPower(d)) + RUN_BLOCK.count + scheme - (read ? this.skill.blockRead ?? 0 : 0) + (this.line.some(o => b.blockers.includes(o.id)) ? st.line : 0);
+    // A block in space: a free blocker (a lineman off his own man, a
+    // receiver) on a linebacker or a defensive back, who sees him coming
+    // and takes him on as well as his level reads it (`spaceRead`).
+    const space = d.role !== 'dl' && b.blockers.every(id => { const o = this.byId[id]; return o.role !== 'ol' || o.freed; });
+    return Math.log2(power / this.blockPower(d)) + RUN_BLOCK.count + scheme - (read ? this.skill.blockRead ?? 0 : 0) - (space ? this.skill.spaceRead ?? 0 : 0) + (this.line.some(o => b.blockers.includes(o.id)) ? st.line : 0);
   },
 
   // One step of a block's life (see RUN_BLOCK): pressure toward the shed,
   // faster when the carrier comes at him and his blocker is not between them.
   blockLife(st, b, d, dt) {
     const m = this.blockMargin(st, b), t = this.time - b.at, R = RUN_BLOCK;
-    const stalk = b.blockers.every(id => this.byId[id].role !== 'ol') ? R.stalk : 1;
+    const stalk = b.blockers.every(id => this.byId[id].role !== 'ol') ? R.stalk : b.blockers.every(id => this.byId[id].role !== 'ol' || this.byId[id].freed) ? R.space : 1;
     const hold = clamp(R.hold * stalk * 2 ** (R.holdK * m), R.min, R.max);
     let rate = R.power / hold * (t / hold) ** (R.power - 1);
     const c = this.byId[this.carrier];

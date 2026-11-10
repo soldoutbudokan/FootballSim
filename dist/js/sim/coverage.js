@@ -94,6 +94,9 @@ const PLASTER = { hold: 3.5, keep: 2 };
 // the quarterback's throwing motion (DIFFICULTY.eyes). A spy mirrors the
 // quarterback `depth` yd past the line and attacks once he leaves the pocket.
 const RAT = { window: 10, carry: 12, crosser: 2 };
+// A free underneath zone defender follows the quarterback's throwing motion
+// too (zoneEyes), no farther than `reach` yd from where he was playing.
+const ZONE_EYES = { reach: 6 };
 const SPY = { depth: 4.5, effort: 0.9 };
 // Steps of the quarterback's facing kept for the defenders reading his eyes
 // (more than the slowest reaction time).
@@ -172,6 +175,9 @@ export const coverage = {
     // hands: he reads the runner DIFFICULTY.chase s late, not his ordinary
     // reaction latency.
     const chase = this.completed && this.carrier && this.carrier !== 'QB' ? this.skill.chase : undefined;
+    // The underneath man who comes up for a quarterback running at the line
+    // (sim/pursuit.js).
+    const trigger = this.runTrigger();
     this.defense.forEach(d => {
       if (chase !== undefined) d.latency = chase;
       d.sprinting = true;
@@ -198,6 +204,7 @@ export const coverage = {
       if (d.rushing) { d.want = this.rushWant(d); return; }
       // A spy attacks a quarterback who leaves the pocket.
       if (loose && d.assign?.kind === 'spy') { this.turnHips(d); d.want = this.pursue(d, 'QB', speedCap(d), 0, d.leverage); return; }
+      if (trigger === d.id && this.carrier === 'QB') { this.turnHips(d); d.want = this.pursue(d, 'QB', speedCap(d), 0, d.leverage); return; }
       // A play fake holds the second level: a read step downhill, then the
       // drop. He reads the fake shown, not the call: he plays the run until
       // his reaction time after the quarterback stops selling it (fakeRead).
@@ -505,7 +512,7 @@ export const coverage = {
         for (const k of ids) { const r = seen[k], g = dist(u.d, r); if (r.z > spot + LEAN.from && upfield(r) && g < near) { near = g; id = k; } }
       }
       const z = checkdown && u.role === 'hole' ? Math.min(u.z, spot + COVER.back) : u.z;
-      u.job = id ? { kind: 'lean', id, w: skill.help, x: u.x, z, lo: pole ? u.z : spot + 2, hi: spot + 16 } : { kind: 'spot', x: u.x, z };
+      u.job = id ? { kind: 'lean', id, w: skill.help, x: u.x, z, lo: pole ? u.z : spot + 2, hi: spot + 16, under: true } : { kind: 'spot', x: u.x, z, under: true };
     }
     for (const z of deeps) {
       if (z.job) continue;
@@ -728,9 +735,26 @@ export const coverage = {
         return { want: trackWant(d, sink, { x: r.vx * k, z: sz < spot + LEAN.to ? r.vz * k : 0 }, cap, 2), threat: r };
       }
       const free = z > job.lo && z < job.hi;
-      return { want: trackWant(d, { x: job.x + (ax - job.x) * job.w, z: Math.min(115, z) }, { x: r.vx * job.w, z: free ? vz : 0 }, cap, 2), threat: r };
+      // (A free underneath man breaks on the quarterback's shoulders: zoneEyes.)
+      const lx = job.x + (ax - job.x) * job.w, ex = job.under ? this.zoneEyes(d, lx, z) : lx;
+      if (ex !== lx) return { want: seekWant(d, { x: ex, z: Math.min(115, z) }, cap), threat: r };
+      return { want: trackWant(d, { x: lx, z: Math.min(115, z) }, { x: r.vx * job.w, z: free ? vz : 0 }, cap, 2), threat: r };
     }
-    return { want: seekWant(d, { x: job.x, z: job.z }, cap), threat: null };
+    return { want: seekWant(d, { x: job.under ? this.zoneEyes(d, job.x, job.z) : job.x, z: job.z }, cap), threat: null };
+  },
+
+  // Zone eyes. An underneath zone defender with nobody to cover watches the
+  // quarterback: once he sees him start to throw (seesThrow) he breaks to
+  // the line of the quarterback's shoulders at his own depth, up to
+  // ZONE_EYES.reach yd from where he was, as far as the difficulty reads the
+  // throwing motion (DIFFICULTY.eyes: not at Rookie, half the way at Pro, all
+  // of it at All-pro). Returns the x he plays.
+  zoneEyes(d, x, z) {
+    if (!this.seesThrow(d)) return x;
+    const facing = this.qbFacingSeen(d.latency);
+    if (Math.cos(facing) <= 0.2) return x;
+    const qb = this.perceive('QB', d.latency), line = qb.x + Math.tan(facing) * (z - qb.z);
+    return x + (clamp(line, x - ZONE_EYES.reach, x + ZONE_EYES.reach) - x) * this.skill.eyes;
   },
 
   // A man who reads the quarterback's eyes (DIFFICULTY.eyes) sees the

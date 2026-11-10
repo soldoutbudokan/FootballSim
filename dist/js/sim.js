@@ -5,6 +5,8 @@ import { coverage } from './sim/coverage.js';
 import { protection } from './sim/protection.js';
 import { callPlay } from './sim/offense.js';
 import { running } from './sim/run.js';
+import { support, SUPPORT } from './sim/support.js';
+import { pursuit, GATHER } from './sim/pursuit.js';
 
 // Units are yards and seconds. +z points downfield (own end line z = 0, goal
 // lines at z = 10 and z = 110) and +x is the offense's right. A heading is
@@ -76,11 +78,13 @@ const REACH = 0.95;                    // tackling reach, yards
 const DIVE_REACH = 1.7;                // a diving tackle from behind
 const WRAP_KEEP = 0.8;
 const SCREEN = 0.3;                    // a body this close to the line between tackler and runner blocks the tackle
-// Receivers blocking on a run or after a catch: the nearest defender in
-// front of him within `range` yd, if that defender is within `near` yd of the
-// ball carrier; he locks on inside `engage` yd and holds him at most `hold`
-// s (a stalk block, not a pin), then lets him go for good.
-const DOWNFIELD = { range: 3.5, engage: 1.2, near: 12, hold: 1.3 };
+// Receivers blocking on a run, after a catch or for a quarterback who runs
+// (who they take: sim/support.js): a receiver locks on inside `engage` yd and
+// holds his man at most `hold` s (a stalk block, not a pin), then lets him go
+// for good; the runner coming within `shed` yd of a blocked man pulls him off
+// the block `shedTime` s later. With nobody to block on a run play he keeps
+// his track until the back is `through` yd past the line.
+const DOWNFIELD = { engage: 1.2, hold: 1.3, shed: 1.6, shedTime: 0.3, through: 1 };
 const TACKLE_DECEL = 12, GANG_DECEL = 6, TACKLE_HOLD = 0.9;
 // A miss: the tackler stumbles for STUMBLE_TIME at STUMBLE_SPEED of his top
 // speed; the runner keeps BROKEN_KEEP of his speed through the contact.
@@ -89,7 +93,8 @@ const STUMBLE_TIME = 0.55, BROKEN_KEEP = 0.65;
 // `base`; each unit of speed edge ((his speed - the runner's) / 3, ±1.5) is
 // worth `speed`, in full from behind and only `square` of it head on (the
 // runner runs into a man in his path). A runner who cut or juked within
-// `shakeTime` s takes `shaken` off. A man who comes in hot, within
+// `shakeTime` s takes `shaken` off (less from a tackler who is under
+// control, at any difficulty: sim/pursuit.js GATHER). A man who comes in hot, within
 // `overrunTime` s of a cut or juke, on a line that now misses the runner by
 // over `missAngle`, has been made to overrun him and takes `overrun` off (the
 // larger of the two counts, they do not add up). A second man on the same
@@ -933,33 +938,60 @@ export class Simulation {
       }
       // A back who picked up a blitzer stays in to block (see protect).
       if (p.pickup) { p.sprinting = false; continue; }
-      // On runs, and once a pass is caught, the other receivers block.
-      const blocking = (run && id !== 'R') || (this.completed && this.phase !== 'air');
+      // On runs, once a pass is caught and when the quarterback runs, the
+      // other receivers block; with a pass in the air to somebody else they
+      // go to the man they will block (blockDownfield).
+      const blocking = (run && id !== 'R') || (this.completed && this.phase !== 'air') || (this.carrier === 'QB' && this.crossedLine && !run) || (this.phase === 'air' && !!p.support);
       if (blocking && this.blockDownfield(p)) continue;
       p.want = reading ? this.runRoute(p, speedCap(p)) : routeWant(p, speedCap(p));
     }
   }
 
-  // Receivers blocking (DOWNFIELD): take the nearest defender in front of
-  // them who matters to the play, and hold him for a stalk block's length.
+  // Receivers blocking (DOWNFIELD, sim/support.js): each takes the most
+  // dangerous defender he can cut off, the free man who would get to the
+  // ball first, and holds him for a stalk block's length. With nobody to
+  // block he gets in front of the ball. False: he keeps running his route.
   blockDownfield(p) {
-    let defender = null, best = Infinity;
-    for (const d of this.defense) if (d.z > p.z - 1 && d.action !== 'tackle' && d.id !== p.blockDone && dist(d, p) < best) { best = dist(d, p); defender = d; }
-    const c = this.guardPoint();
-    if (!defender || best >= DOWNFIELD.range || dist(defender, c) > DOWNFIELD.near) return false;
-    // On a run play the stalk block lives like any run block (sim/run.js).
-    if (this.play.type === 'run') {
-      const b = best < DOWNFIELD.engage ? this.runState().blocks.get(defender.id) : null;
-      if (best < DOWNFIELD.engage && !b && !this.stalkBlock(p, defender)) { p.blockDone = defender.id; p.want = ZERO; p.sprinting = false; return true; }
-      if (best < DOWNFIELD.engage && (!b || b.blockers.includes(p.id))) this.engage(p, defender);
-    } else if (best < DOWNFIELD.engage && !defender.engaged && this.time < defender.shed + 0.9) {
-      if (p.blockOn !== defender.id) { p.blockOn = defender.id; p.blockAt = this.time; }
-      // The block is over: he lets his man go and eases off.
-      if (this.time - p.blockAt > DOWNFIELD.hold) { p.blockDone = defender.id; p.want = ZERO; p.sprinting = false; return true; }
-      this.engage(p, defender);
+    const run = this.play.type === 'run', ref = this.supportRef(), pick = p.support;
+    const d = pick ? this.byId[pick.id] : null;
+    p.stalking = false;
+    if (!ref) return false;
+    if (!d) return this.escort(p, ref);
+    const gap = dist(d, p);
+    if (ref.air) {
+      // No contact before the catch: he waits a step off his man.
+      const off = scaled(ref.x - d.x, ref.z - d.z, SUPPORT.wait);
+      p.want = gap < SUPPORT.close + SUPPORT.wait ? seekWant(p, { x: d.x + off.x, z: d.z + off.z }, speedCap(p)) : seekWant(p, pick, speedCap(p), speedCap(p, SUPPORT.arrive));
+      return true;
     }
-    const away = scaled(c.x - defender.x, c.z - defender.z, 0.9);
-    p.want = seekWant(p, { x: defender.x + away.x, z: defender.z + away.z }, speedCap(p, 0.9));
+    // On a run play the stalk block lives like any run block (sim/run.js).
+    if (run) {
+      const b = gap < DOWNFIELD.engage ? this.runState().blocks.get(d.id) : null;
+      if (gap < DOWNFIELD.engage && !b && !this.stalkBlock(p, d)) { p.blockDone = d.id; p.support = null; return this.escort(p, ref); }
+      if (gap < DOWNFIELD.engage && (!b || b.blockers.includes(p.id))) this.engage(p, d);
+    } else {
+      // After a catch: a block of at most `hold` s, and the runner coming
+      // within `shed` yd of the defender pulls him off it `shedTime` s later.
+      const c = ref.carrier;
+      if (c && dist(d, c) < DOWNFIELD.shed) d.ballNearAt ??= this.time;
+      const over = d.ballNearAt != null && this.time > d.ballNearAt + DOWNFIELD.shedTime;
+      if (over || (gap < DOWNFIELD.engage && p.blockOn === d.id && this.time - p.blockAt > DOWNFIELD.hold)) { p.blockDone = d.id; p.support = null; return this.escort(p, ref); }
+      if (gap < DOWNFIELD.engage && !(d.engaged && d.engaged !== p.id)) {
+        if (p.blockOn !== d.id) { p.blockOn = d.id; p.blockAt = this.time; }
+        this.engage(p, d); p.stalking = true;
+      }
+    }
+    p.want = this.supportWant(p, d, pick, ref);
+    return true;
+  }
+
+  // Nobody to block: get in front of the ball (sim/support.js); on a run,
+  // only once the back is through the line.
+  escort(p, ref) {
+    if (this.play.type === 'run' && !(ref.carrier && ref.carrier.z > this.spot + DOWNFIELD.through)) return false;
+    const want = this.escortWant(p, ref);
+    if (!want) return false;
+    p.want = want;
     return true;
   }
 
@@ -1344,6 +1376,12 @@ export class Simulation {
   // as the defender saw it, that he can reach in time; or, when he cannot get
   // there, a chase that keeps him inside the carrier.
   pursueAngle(d, seen, cap, edge, leverage) {
+    // Coming to balance in front of the runner (sim/pursuit.js).
+    const plan = this.closing(d, seen);
+    if (plan.gather) {
+      d.aim = { x: plan.x + seen.vx * GATHER.lead, z: plan.z + seen.vz * GATHER.lead };
+      return seekWant(d, d.aim, cap * plan.gather, cap * plan.gather);
+    }
     let aim = null;
     for (let t = d.latency; t <= d.latency + PURSUIT.horizon + 1e-9; t += PURSUIT.step) {
       const q = carrierPath(seen, t);
@@ -1713,7 +1751,8 @@ export class Simulation {
     const edge = advantage * (TACKLE.square + (1 - TACKLE.square) * behind);
     // Just cut or juked: the man was set for where the runner was going.
     const sinceMove = this.time - c.lastMoveAt;
-    const shaken = sinceMove < TACKLE.shakeTime && angle > 60 * DEG ? TACKLE.shaken : 0;
+    // (A tackler who has come to balance rides most of it out: sim/pursuit.js.)
+    const shaken = sinceMove < TACKLE.shakeTime && angle > 60 * DEG ? TACKLE.shaken * (1 - this.balance(d)) : 0;
     // Overrun: the runner's move left a man who came in hot, across or head
     // on, on a line that no longer points at him.
     const overrun = sinceMove < TACKLE.overrunTime && ds > cs + 1 && angle > 70 * DEG && closing < ds * Math.cos(TACKLE.missAngle) ? TACKLE.overrun : 0;
@@ -1863,4 +1902,4 @@ export class Simulation {
 
   drainEvents() { return this.events.splice(0); }
 }
-Object.assign(Simulation.prototype, defense, coverage, protection, running);
+Object.assign(Simulation.prototype, defense, coverage, protection, running, support, pursuit);

@@ -216,13 +216,16 @@ export const protection = {
     this.byId.R.pickup = null;
     if (!run) this.trackLaunch();
     if (this.time < GET_OFF.ol) return;
-    if (this.inPocket()) { this.protect(dt); return; }
+    // The receivers off the ball take the most dangerous man they can cut
+    // off (sim/support.js): with a pass in the air to somebody else, after a
+    // catch and on a scramble past the line.
+    if (this.inPocket()) { this.protect(dt); if (this.phase === 'air') this.planReceiverSupport(); return; }
     if (run) { this.runBlocking(dt); return; }
     for (const p of this.players) p.lock = null;
     this.readTheBall();
     const assigned = this.assignBlocks();
+    this.planReceiverSupport();
     for (const o of this.line) {
-      if (run && o.id === this.play.pullingGuard && this.pullBlock(o)) continue;
       const d = assigned.get(o.id);
       if (!d) continue;
       if (dist(o, d) < 1.55 && this.time < d.shed + (run ? 0.9 : 0) && d.action !== 'stumble') this.engage(o, d);
@@ -1030,19 +1033,6 @@ export const protection = {
     return { x: px + roll * ((this.skill.contain ?? 1) + SCRAMBLE.width), z: pz + ahead };
   },
 
-  // A gap scheme pulls its backside guard behind the line before he leads
-  // through the called gap. The other four linemen cover his vacated matchup.
-  pullBlock(o) {
-    if ((o.pullStage || 0) >= 2) return false;
-    const side = this.config.flip ? -1 : 1, lane = this.play.lane * side;
-    o.pullStage ||= 0;
-    const target = o.pullStage === 0 ? { x: o.start.x, z: this.spot - 1.9 } : { x: lane, z: this.spot - 1.9 };
-    if (dist(o, target) < 0.65 || this.time > (o.pullStage === 0 ? 0.65 : 1.9)) o.pullStage++;
-    if (o.pullStage >= 2) return false;
-    o.want = seekWant(o, target, speedCap(o, 0.9));
-    return true;
-  },
-
   // A blocked defender comes off his block when the ball carrier gets close:
   // SHED_TIME to disengage, so a back hitting the hole cleanly is past him,
   // and one dancing beside the block is not.
@@ -1061,7 +1051,6 @@ export const protection = {
   assignBlocks() {
     const pairs = [];
     for (const o of this.line) for (const d of this.defense) {
-      if (this.play.type === 'run' && o.id === this.play.pullingGuard && (o.pullStage || 0) < 2) continue;
       pairs.push({ o, d, cost: dist(o, d) - (o.assignment === d.id ? 1.5 : 0) });
     }
     pairs.sort((a, b) => a.cost - b.cost || a.o.number - b.o.number || a.d.number - b.d.number);
