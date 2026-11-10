@@ -441,7 +441,7 @@ export function glove({ low = false } = {}) {
   const parts = [];
   // Wrist band, the back of the hand with its knuckle ridge, and the palm.
   parts.push(loft([
-    { y: 0.014, w: 0.028, d: 0.031 }, { y: -0.012, w: 0.026, d: 0.032 },
+    { y: 0.016, w: 0.0335, d: 0.0345 }, { y: -0.012, w: 0.029, d: 0.034 },
     { y: -0.04, w: 0.021, d: 0.042, n: 2.4 }, { y: -0.075, w: 0.019, d: 0.048, x: 0.001, n: 2.8 },
     { y: -0.098, w: 0.0185, d: 0.049, x: 0.003, n: 3 }, { y: -0.111, w: 0.013, d: 0.046, x: 0.006, n: 3 },
   ], { radial: 10, subdiv: 1 }));
@@ -497,7 +497,8 @@ export function cleat({ low = false } = {}) {
   sole.rotateX(Math.PI / 2);
   shadeBy(sole, () => 0.1);
   // Baked shading: darker down by the sole, a darker tongue under the laces.
-  shadeBy(upper, (x, y, z) => (0.82 + 0.18 * smoothstep(-0.08, -0.04, y)) * (Math.abs(x) < 0.014 && z > 0.02 && z < 0.12 && y > -0.045 ? 0.55 : 1));
+  // The toe cap and the heel counter are a shade off the quarter panels.
+  shadeBy(upper, (x, y, z) => (0.82 + 0.18 * smoothstep(-0.08, -0.04, y)) * (Math.abs(x) < 0.014 && z > 0.02 && z < 0.12 && y > -0.045 ? 0.55 : 1) * (z > 0.155 || z < -0.045 ? 0.86 : 1));
   if (low) return mergeGeometries([upper, sole]);
   // The padded collar around the ankle.
   const collar = loft([
@@ -507,8 +508,17 @@ export function cleat({ low = false } = {}) {
   return g;
 }
 
+// The dark small parts of a cleat: the studs under the outsole and the laces
+// across the instep.
 export function cleatStuds() {
   const parts = [];
+  for (const [z, y] of [[0.026, -0.006], [0.044, -0.014], [0.062, -0.021], [0.08, -0.027], [0.098, -0.032]]) {
+    const lace = new THREE.BoxGeometry(0.036, 0.004, 0.0055, 2, 1, 1), p = lace.attributes.position;
+    for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - 7 * p.getX(i) ** 2);
+    lace.computeVertexNormals();
+    lace.rotateX(0.42); lace.translate(0, y, z);
+    parts.push(lace);
+  }
   for (const [x, z] of [[0.024, 0.165], [-0.024, 0.165], [0.03, 0.105], [-0.03, 0.105], [0, 0.2], [0.02, -0.045], [-0.02, -0.045]]) {
     const s = new THREE.CylinderGeometry(0.0075, 0.0045, 0.011, 5, 1);
     s.translate(x, -0.0925, z);
