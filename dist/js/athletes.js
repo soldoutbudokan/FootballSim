@@ -42,7 +42,7 @@ export class Athletes {
     this.animators = new Map();
     const atlas = this.materials.atlas;
     players.forEach((spec, i) => {
-      const cell = { offset: atlas.offsets.get(spec.id), scale: atlas.scale, white: atlas.white };
+      const cell = { offset: atlas.offsets.get(spec.id), scale: atlas.scale, white: atlas.white, shared: atlas.shared };
       const rig = new Rig(this.squad, spec, i, geometry, cell, low);
       this.rigs.set(spec.id, rig);
       this.animators.set(spec.id, new Animator(rig, spec));
@@ -65,6 +65,7 @@ export class Athletes {
   setQuality(profile) {
     // Small parts (towels, tape, belts, chin straps) are skipped on the lowest tier.
     this.squad.setDetail(profile.detail !== false);
+    this.squad.setFabric(profile.detail !== false);
     this.markers.setQuality(profile);
     this.lodDistance = LOD_DISTANCE[profile.id] ?? Infinity;
     this.lodBand = LOD_HYSTERESIS[profile.id] ?? 2;
@@ -179,7 +180,8 @@ export class Athletes {
       }
     });
     for (const t of textures) t.dispose();
-    this.squad.bones.texture.dispose();   // shader uniform, not a material property
+    this.squad.bones.texture.dispose();   // shader uniforms, not material properties
+    this.materials.detail?.dispose();
   }
 
   // After the whistle with no carrier (an interception) the simulation keeps

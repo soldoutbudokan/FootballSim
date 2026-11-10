@@ -37,9 +37,7 @@ export async function captureModels(page) {
     ];
     const materials = createMaterials(specs), squad = new Squad(scene, specs.length, materials);
     const full = createGeometries(), low = createGeometries({ low: true });
-    const rigs = specs.map((spec, i) => new Rig(squad, spec, i, full, {
-      offset: materials.atlas.offsets.get(spec.id), scale: materials.atlas.scale, white: materials.atlas.white,
-    }, low));
+    const rigs = specs.map((spec, i) => new Rig(squad, spec, i, full, { ...materials.atlas, offset: materials.atlas.offsets.get(spec.id) }, low));
     squad.finish();
     rigs.forEach((rig, i) => {
       const pose = new Pose(), d = rig.dims;
