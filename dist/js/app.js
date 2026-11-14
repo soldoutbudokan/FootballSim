@@ -81,6 +81,8 @@ const AUDIBLES_PER_PAGE = 8;
 // (the playbook is open and its time is paid when it closes) and the plays
 // on the call sheet.
 let practiceMode = 'drive', seenSerial = -1, finalShown = false, huddling = false;
+// The phase the HUD last drew, so the snap and the whistle show at once.
+let hudPhase = null;
 let sheetPlays = [], sheetKey = '';
 const keys = new Set();
 const touch = { x: 0, z: 0, sprint: false };
@@ -911,6 +913,7 @@ function playerState(p, pre) {
 
 function renderHUD() {
   const phase = sim.phase, pre = phase === 'presnap', dead = phase === 'dead', live = !pre && !dead;
+  hudPhase = phase;
   const g = game(), kick = !!sim.kick;
   const run = sim.play.type === 'run';
   const passing = phase === 'live' && !run && !sim.crossedLine && !sim.scripted;
@@ -1444,6 +1447,10 @@ function frame(now) {
     for (const event of sim.drainEvents()) audio.event(event);
     // A comeback lines up, takes a penalty or ends without a key press.
     if (sim.serial !== seenSerial) syncPlay();
+    // The HUD refreshes ten times a second, but a change of phase (the
+    // snap, the whistle) shows on the frame it happens: the result banner
+    // is up with the whistle, not a tenth of a second after it.
+    if (sim.phase !== hudPhase) renderHUD();
     for (const text of sim.drainNotices()) toast(text);
     showFinal(false);
   }
