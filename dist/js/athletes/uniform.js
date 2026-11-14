@@ -47,6 +47,8 @@ export function accessoriesFor(spec, index) {
     towel: spec.role === 'qb' || spec.role === 'rb' || (spec.role === 'wr' && h3 < 0.4),
     // A back plate hanging below the pads on some skill players.
     backPlate: skilled && h3 > 0.45,
+    // A sweatband on the biceps of some skill players.
+    band: skilled && (h3 * 3.7) % 1 > 0.55 ? (h < 0.5 ? '#ecebe6' : TEAM.navy) : null,
   };
 }
 
@@ -125,6 +127,15 @@ function canvas(w, h) {
 // package, with room to spare.
 
 export const ATLAS = { cols: 4, rows: 8, cellW: 512, cellH: 256, pad: 4 };
+// Cells are painted at `ATLAS.scale` times that size: 2 (a 4096 px atlas)
+// keeps the numerals, nameplates and seams crisp in close-ups.
+let PX = 1;
+
+// Invented surnames for the nameplates, picked by the player's id.
+const SURNAMES = ['HOLLIS', 'BRANDT', 'OKAFOR', 'MERCER', 'DELANEY', 'VOSS', 'TILLMAN', 'REYES', 'KOWALSKI', 'BANKS', 'STROUD', 'AMADI', 'LINDQVIST', 'PRUITT', 'CASTELLO', 'WHITAKER', 'NAKASHIMA', 'DUPREE', 'HARGROVE', 'ODUYA', 'FENWICK', 'SALAZAR', 'MCALLEN', 'TRASK', 'BOYETTE', 'IRONS', 'KEALOHA', 'RADFORD', 'SUMNER', 'ABARA', 'COLTER', 'VANCE'];
+export function surnameFor(spec, index = 0) {
+  return SURNAMES[(Math.floor(hashString(spec.id + '#' + spec.number) * 997) + index * 7) % SURNAMES.length];
+}
 
 // Regions [x, y, w, h] as fractions of a cell inside its padding, y up.
 export const REGIONS = {
@@ -146,7 +157,7 @@ const TORSO = { around: 1.36, span: 0.435 }, SLEEVE = { around: 0.62, span: 0.29
 // region's own 0..1 coordinates (v up), `bleed` paints a little past the
 // region's edge so filtering never picks up a neighbour.
 function painter(ctx, x0, y0, name) {
-  const { cellW, cellH, pad } = ATLAS, [rx, ry, rw, rh] = REGIONS[name];
+  const cellW = ATLAS.cellW * PX, cellH = ATLAS.cellH * PX, pad = ATLAS.pad * PX, [rx, ry, rw, rh] = REGIONS[name];
   const X = x0 + pad + rx * (cellW - 2 * pad), W = rw * (cellW - 2 * pad);
   const H = rh * (cellH - 2 * pad), Y = y0 + pad + (1 - ry - rh) * (cellH - 2 * pad);
   return {
@@ -159,8 +170,8 @@ function painter(ctx, x0, y0, name) {
   };
 }
 
-function paintJersey(ctx, x0, y0, spec) {
-  const { cellW, cellH } = ATLAS, look = jerseyFor(spec);
+function paintJersey(ctx, x0, y0, spec, index = 0) {
+  const cellW = ATLAS.cellW * PX, cellH = ATLAS.cellH * PX, look = jerseyFor(spec);
   const shade = look.light ? 'rgba(24,38,56,' : 'rgba(0,0,0,', tintTo = look.light ? 'rgba(255,255,255,' : 'rgba(255,255,255,';
   ctx.fillStyle = look.jersey;
   ctx.fillRect(x0, y0, cellW, cellH);
@@ -179,9 +190,9 @@ function paintJersey(ctx, x0, y0, spec) {
   // middle of the body, and bunched where the jersey goes into the belt.
   const fold = (u0, v0, u1, v1, width, strength) => {
     ctx.lineCap = 'round';
-    for (const [dy, color, k] of [[0, shade, 1], [-width * 0.55, tintTo, look.light ? 0 : 0.5]]) {
+    for (const [dy, color, k] of [[0, shade, 1], [-width * 0.55 * PX, tintTo, look.light ? 0 : 0.5]]) {
       for (const w of [1, 0.55]) {
-        ctx.strokeStyle = color + (strength * k * 0.5) + ')'; ctx.lineWidth = width * w;
+        ctx.strokeStyle = color + (strength * k * 0.5) + ')'; ctx.lineWidth = width * w * PX;
         ctx.beginPath(); ctx.moveTo(t.x(u0), t.y(v0) + dy);
         ctx.quadraticCurveTo(t.x((u0 + u1) / 2), t.y(Math.min(v0, v1) - 0.04) + dy, t.x(u1), t.y(v1) + dy); ctx.stroke();
       }
@@ -215,15 +226,36 @@ function paintJersey(ctx, x0, y0, spec) {
   // Numbers: front and back.
   // Big enough to read from the game camera; one thin twill border, so the
   // fill stays bold when the texture is minified.
-  const outlines = [[look.outline, look.light ? 0.75 : 0.6]];
-  for (const [u, v, height] of [[0.75, 0.42, 0.19], [0.25, 0.45, 0.265]]) {
+  // A silver twill border is set off from the fill by a keyline of the
+  // jersey's own colour, so the edge of the numeral stays sharp.
+  const keyed = look.outline === TEAM.silver;
+  const outlines = keyed ? [[look.outline, 0.95], [look.jersey, 0.4]] : [[look.outline, 0.7]];
+  for (const [u, v, height] of [[0.75, 0.42, 0.19], [0.25, 0.43, 0.225]]) {
     drawNumber(ctx, spec.number, t.x(u), t.y(v), pxV * height, look.number, squeeze, outlines);
   }
+  // Nameplate across the back of the pads: a sewn-on strip with the surname
+  // in condensed block capitals.
+  {
+    const name = surnameFor(spec, index), h = pxV * 0.036, cx = t.x(0.25), cy = t.y(0.842);
+    ctx.save();
+    ctx.translate(cx, cy); ctx.scale(squeeze, 1);
+    ctx.font = `700 ${h * 1.38}px "Barlow Condensed", "Arial Narrow", Arial, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    try { ctx.letterSpacing = (h * 0.14) + 'px'; } catch { /* older canvases */ }
+    const half = ctx.measureText(name).width / 2 + h * 0.5;
+    ctx.fillStyle = shade + '0.12)'; ctx.fillRect(-half, -h * 0.78, half * 2, h * 1.56);
+    ctx.strokeStyle = shade + '0.3)'; ctx.lineWidth = Math.max(1, PX); ctx.strokeRect(-half, -h * 0.78, half * 2, h * 1.56);
+    ctx.fillStyle = look.number; ctx.fillText(name, 0, h * 0.06);
+    ctx.restore();
+  }
+  // Seams: down both sides of the chest and back panels, and the stitched
+  // hem of the collar.
+  for (const u of [0.25, 0.75]) for (const e of [-0.155, 0.155]) t.rect(u + e - 0.0012, 0.02, u + e + 0.0012, 0.735, shade + '0.14)');
   // Sleeves: the number on the shoulder cap and two stripes above the hem.
   // On the left sleeve u runs from front to back, on the right back to front.
   for (const name of ['sleeveL', 'sleeveR']) {
     const s = painter(ctx, x0, y0, name), sqz = (s.W / SLEEVE.around) / (s.H / SLEEVE.span);
-    drawNumber(ctx, spec.number, s.x(0.5), s.y(0.64), s.H / SLEEVE.span * 0.095, look.number, sqz, [[look.outline, 0.9]]);
+    drawNumber(ctx, spec.number, s.x(0.5), s.y(0.64), s.H / SLEEVE.span * 0.095, look.number, sqz, keyed ? [[look.outline, 1.0], [look.jersey, 0.42]] : [[look.outline, 0.9]]);
     s.rect(-0.02, 0.30, 1.02, 0.315, shade + '0.25)');
     const stripe = look.light ? TEAM.navy : look.jersey === TEAM.red ? TEAM.numberLight : TEAM.silver;
     s.rect(-0.02, 0.07, 1.02, 0.13, stripe); s.rect(-0.02, 0.17, 1.02, 0.23, stripe);
@@ -233,7 +265,7 @@ function paintJersey(ctx, x0, y0, spec) {
 
 // The shared cell: white, the pant leg, the hips and the sock.
 function paintShared(ctx, x0, y0) {
-  const { cellW, cellH } = ATLAS;
+  const cellW = ATLAS.cellW * PX, cellH = ATLAS.cellH * PX;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(x0, y0, cellW, cellH);
   const stripes = (p, at, k = 1) => {
@@ -245,39 +277,71 @@ function paintShared(ctx, x0, y0) {
   // Leg: u = 0 and 1 are the outside of the leg; v = 0 the cuff below the
   // knee, v = 1 the hip.
   const leg = painter(ctx, x0, y0, 'leg');
-  leg.rect(0, 0, 1, 1, TEAM.pants, 5);
+  leg.rect(0, 0, 1, 1, TEAM.pants, 5 * PX);
   stripes(leg, [0, 1]);
   leg.rect(-0.03, 0, 1.03, 0.03, 'rgba(0,0,0,0.3)');                    // hem
+  // Panel seams: the inseam, and the pockets of the thigh and knee pads on
+  // the front of the leg (u = 0.25 is the front, 0.5 the inside).
+  const dark = 'rgba(28,34,44,', lite = 'rgba(255,255,255,';
+  leg.rect(0.497, 0, 0.503, 1, dark + '0.3)');
+  leg.rect(0.746, 0, 0.754, 1, dark + '0.1)');
+  const pocket = (u0, v0, u1, v1, r) => {
+    const x = leg.x(u0), y = leg.y(v1), w = leg.x(u1) - x, h = leg.y(v0) - y;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r * PX);
+    ctx.fillStyle = lite + '0.04)'; ctx.fill();
+    ctx.strokeStyle = dark + '0.1)'; ctx.lineWidth = 1.5 * PX; ctx.stroke();
+  };
+  pocket(0.14, 0.52, 0.36, 0.78, 16);
+  pocket(0.16, 0.11, 0.34, 0.24, 12);
+  // The elastic cuff below the knee.
+  leg.rect(-0.03, 0.03, 1.03, 0.036, lite + '0.1)');
   // Hips: the stripes run on up both sides to the waist; a laced fly.
   const hips = painter(ctx, x0, y0, 'hips');
-  hips.rect(0, 0, 1, 1, TEAM.pants, 5);
+  hips.rect(0, 0, 1, 1, TEAM.pants, 5 * PX);
   stripes(hips, [0, 0.5, 1], 0.6);
   hips.rect(0.245, 0.55, 0.255, 0.9, 'rgba(30,38,50,0.4)');
   for (let i = 0; i < 4; i++) hips.rect(0.235, 0.6 + i * 0.07, 0.265, 0.615 + i * 0.07, 'rgba(240,240,240,0.8)');
+  // The waistband seam and the seat seam down the back.
+  hips.rect(0, 0.9, 1, 0.908, 'rgba(28,34,44,0.22)');
+  hips.rect(0.747, 0.05, 0.753, 0.9, 'rgba(28,34,44,0.2)');
   // Sock: v = 1 below the knee, v = 0 at the ankle. Navy with two silver
   // hoops over a white lower leg.
   const sock = painter(ctx, x0, y0, 'sock');
-  sock.rect(0, 0, 1, 1, TEAM.white, 5);
+  sock.rect(0, 0, 1, 1, TEAM.white, 5 * PX);
   sock.rect(-0.2, 0.46, 1.2, 1.05, TEAM.sock);
   sock.rect(-0.2, 0.56, 1.2, 0.6, TEAM.silver); sock.rect(-0.2, 0.64, 1.2, 0.68, TEAM.silver);
 }
 
-export function buildJerseyAtlas(players) {
-  const { cols, rows, cellW, cellH, pad } = ATLAS;
+export function buildJerseyAtlas(players, { scale: px = 2 } = {}) {
+  const { cols, rows } = ATLAS;
   if (players.length >= cols * rows) throw new Error('Jersey atlas holds ' + (cols * rows - 1) + ' players');
+  const cellW = ATLAS.cellW * px, cellH = ATLAS.cellH * px, pad = ATLAS.pad * px;
   const c = canvas(cols * cellW, rows * cellH), ctx = c.getContext('2d');
   const origin = (x0, y0) => [(x0 + pad) / c.width, 1 - (y0 + cellH - pad) / c.height];
   const offsets = new Map();
-  players.forEach((spec, i) => {
-    const x0 = (i % cols) * cellW, y0 = Math.floor(i / cols) * cellH;
-    paintJersey(ctx, x0, y0, spec);
-    offsets.set(spec.id, origin(x0, y0));
-  });
   const last = cols * rows - 1, sx = (last % cols) * cellW, sy = Math.floor(last / cols) * cellH;
-  paintShared(ctx, sx, sy);
+  const paint = () => {
+    PX = px;
+    players.forEach((spec, i) => {
+      const x0 = (i % cols) * cellW, y0 = Math.floor(i / cols) * cellH;
+      ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, cellW, cellH); ctx.clip();
+      paintJersey(ctx, x0, y0, spec, i);
+      ctx.restore();
+      offsets.set(spec.id, origin(x0, y0));
+    });
+    paintShared(ctx, sx, sy);
+    PX = 1;
+  };
+  paint();
   const texture = new THREE.CanvasTexture(c);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
+  texture.anisotropy = 8;
+  // The nameplates are set in the interface's condensed face; if it was not
+  // loaded yet they were painted in a fallback, so paint again once it is.
+  const face = '700 20px "Barlow Condensed"';
+  if (typeof document !== 'undefined' && document.fonts?.load && !document.fonts.check(face)) {
+    document.fonts.load(face).then(found => { if (found.length) { paint(); texture.needsUpdate = true; } }).catch(() => {});
+  }
   const scale = [(cellW - 2 * pad) / c.width, (cellH - 2 * pad) / c.height], shared = origin(sx, sy);
   const [wx, wy, ww, wh] = REGIONS.white;
   const white = [shared[0] + (wx + ww / 2) * scale[0], shared[1] + (wy + wh / 2) * scale[1]];
@@ -293,7 +357,8 @@ export function buildJerseyAtlas(players) {
 // bottom left is white (facemask, strap and visor take vertex colours),
 // bottom right is the dark padding and edge trim.
 function helmetTexture() {
-  const S = 512, c = canvas(S, S), ctx = c.getContext('2d');
+  const S = 512, c = canvas(S * 2, S * 2), ctx = c.getContext('2d');
+  ctx.scale(2, 2);
   const R = phi => 0.5 * phi / 152 * S, at = (thetaDeg, phiDeg) => {
     const th = thetaDeg * Math.PI / 180;
     return [S / 2 + R(phiDeg) * Math.sin(th), S / 2 - R(phiDeg) * Math.cos(th)];
@@ -336,7 +401,7 @@ function helmetTexture() {
   ctx.fillStyle = '#0b0d11'; ctx.fillRect(S - 56, S - 56, 56, 56);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   return t;
 }
 
@@ -484,7 +549,7 @@ function leatherNormal() {
 // Roughness, metalness and sheen per kind of surface; baked per vertex because
 // the squad's cloth, skin, rubber and metal share one material.
 export const SURFACE = {
-  cloth: [0.74, 0, 0.22], pants: [0.46, 0, 0.3], belt: [0.5, 0, 0], sock: [0.86, 0, 0.2], skin: [0.6, 0, 0.12],
+  cloth: [0.74, 0, 0.22], pants: [0.56, 0, 0.3], belt: [0.5, 0, 0], sock: [0.86, 0, 0.2], skin: [0.6, 0, 0.12],
   sleeve: [0.55, 0, 0.3], glove: [0.6, 0, 0.1], grip: [0.82, 0, 0], cleat: [0.36, 0, 0], sole: [0.6, 0, 0], tape: [0.9, 0, 0.15], towel: [1, 0, 0.3],
   collar: [0.85, 0, 0.2], plate: [0.45, 0, 0],
   shell: [0.2, 0.08, 0], padding: [0.9, 0, 0], facemask: [0.36, 0.55, 0], strap: [0.5, 0, 0], visor: [0.05, 0.85, 0],
@@ -495,8 +560,8 @@ export const SURFACE = {
 // their numbers and the striped pants and socks; the detail array carries the
 // weave of each fabric), one clear-coated material for the helmets, and the
 // ball.
-export function createMaterials(players) {
-  const atlas = buildJerseyAtlas(players);
+export function createMaterials(players, { atlasScale = 2 } = {}) {
+  const atlas = buildJerseyAtlas(players, { scale: atlasScale });
   return {
     atlas,
     detail: detailTexture(),

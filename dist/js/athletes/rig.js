@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { loft, mounds, angleBetween, helmetShell, helmetHardware, chinStrap, helmetVisor, glove, cleat, cleatStuds, athleteFace, faceDetails, HELMET_UV } from './geometry.js';
+import { loft, mounds, angleBetween, shadeBy, helmetShell, helmetHardware, chinStrap, helmetVisor, glove, cleat, cleatStuds, athleteFace, faceDetails, HELMET_UV } from './geometry.js';
 import { solveTwoBone } from './ik.js';
 import { eulerQuat, SPINE_SPLIT } from './pose.js';
 import { hashString, SIDES, smoothstep } from './math.js';
@@ -199,8 +199,9 @@ export function createGeometries({ low = false } = {}) {
     // The seat of the pants, from the crotch up to the waistband, with the
     // glutes and a hip pad on each side under the cloth.
     pelvis: loft([
-      { y: -0.065, w: 0.04, d: 0.045, z: -0.008 }, { y: -0.045, w: 0.16, d: 0.088, z: -0.009 }, { y: 0.0, w: 0.222, d: 0.12, z: -0.014 },
-      { y: 0.04, w: 0.219, d: 0.13, z: -0.014 }, { y: 0.1, w: 0.201, d: 0.126, z: -0.006 }, { y: 0.15, w: 0.186, d: 0.124, z: -0.002 },
+      { y: -0.078, w: 0.03, d: 0.04, z: -0.004 }, { y: -0.056, w: 0.092, d: 0.074, z: -0.006 }, { y: -0.02, w: 0.166, d: 0.104, z: -0.01 },
+      { y: 0.02, w: 0.205, d: 0.122, z: -0.014 }, { y: 0.06, w: 0.211, d: 0.129, z: -0.013 },
+      { y: 0.1, w: 0.2, d: 0.126, z: -0.006 }, { y: 0.15, w: 0.186, d: 0.124, z: -0.002 },
       { y: 0.166, w: 0.168, d: 0.112 },
     ], {
       ...L(20, 2), ao: AO.pelvis,
@@ -227,9 +228,9 @@ export function createGeometries({ low = false } = {}) {
     chest: loft([
       { y: -0.06, w: 0.188, d: 0.131, n: 2.1 }, { y: 0.03, w: 0.21, d: 0.15, n: 2.1 },
       { y: 0.11, w: 0.232, d: 0.158, n: 2.2 }, { y: 0.17, w: 0.248, d: 0.164, n: 2.3 },
-      { y: 0.23, w: 0.268, d: 0.152, n: 2.2 }, { y: 0.285, w: 0.276, d: 0.136, n: 2.2 },
-      { y: 0.32, w: 0.262, d: 0.122, n: 2.3 }, { y: 0.34, w: 0.222, d: 0.11, n: 2.3 },
-      { y: 0.355, w: 0.15, d: 0.1, n: 2.2 }, { y: 0.372, w: 0.1, d: 0.084 },
+      { y: 0.23, w: 0.264, d: 0.154, n: 2.2 }, { y: 0.275, w: 0.264, d: 0.143, n: 2.15 },
+      { y: 0.305, w: 0.247, d: 0.131, n: 2.1 }, { y: 0.328, w: 0.214, d: 0.118, n: 2.1 },
+      { y: 0.348, w: 0.166, d: 0.104, n: 2.1 }, { y: 0.362, w: 0.124, d: 0.092 }, { y: 0.374, w: 0.1, d: 0.084 },
     ], {
       ...L(24, 2), capBottom: false, flipU: true, ao: AO.chest,
       sculpt: (y, t) => {
@@ -250,14 +251,14 @@ export function createGeometries({ low = false } = {}) {
     // the cuff below the knee; it is skinned across the knee so it bends as
     // one piece. Quadriceps to the front and outside, hamstrings behind.
     leg: loft([
-      { y: 0.065, w: 0.06, d: 0.07 }, { y: 0.0, w: 0.08, d: 0.094 }, { y: -0.05, w: 0.1, d: 0.113, z: 0.002 },
-      { y: -0.105, w: 0.111, d: 0.122, z: 0.003 }, { y: -0.2, w: 0.106, d: 0.116, z: 0.006 },
-      { y: -0.3, w: 0.086, d: 0.092, z: 0.005 }, { y: -0.39, w: 0.072, d: 0.077, z: 0.002 },
+      { y: 0.075, w: 0.07, d: 0.084 }, { y: 0.02, w: 0.096, d: 0.108, x: -0.004 }, { y: -0.04, w: 0.106, d: 0.118, x: -0.004, z: 0.002 },
+      { y: -0.105, w: 0.108, d: 0.121, x: -0.002, z: 0.003 }, { y: -0.2, w: 0.103, d: 0.115, z: 0.006 },
+      { y: -0.3, w: 0.089, d: 0.095, z: 0.005 }, { y: -0.39, w: 0.075, d: 0.08, z: 0.002 },
       { y: -0.45, w: 0.066, d: 0.073, z: 0.008 }, { y: -0.5, w: 0.064, d: 0.072, z: 0.011 },
       { y: -0.545, w: 0.058, d: 0.062, z: 0.004 }, { y: -0.566, w: 0.056, d: 0.058 },
       { y: -0.574, w: 0.046, d: 0.047 },
     ], {
-      ...L(16, 2), ao: AO.leg,
+      ...L(20, 2), ao: AO.leg,
       sculpt: mounds([
         { y: -0.2, t: FRONT - 0.15, sy: 0.085, st: 0.5, a: 0.011, flat: 0.7 },   // thigh pad
         { y: -0.27, t: OUT + 0.35, sy: 0.1, st: 0.45, a: 0.006 },               // outer quad
@@ -275,7 +276,7 @@ export function createGeometries({ low = false } = {}) {
       { y: -0.25, w: 0.054, d: 0.06, z: -0.01 }, { y: -0.33, w: 0.043, d: 0.047, z: -0.004 }, { y: -0.4, w: 0.036, d: 0.04 },
       { y: -0.45, w: 0.034, d: 0.04 }, { y: -0.5, w: 0.034, d: 0.041 },
     ], {
-      ...L(10, 2), capTop: false, capBottom: false, ao: AO.sock,
+      ...L(14, 2), capTop: false, capBottom: false, ao: AO.sock,
       sculpt: mounds([
         { y: -0.16, t: BACK - 0.6, sy: 0.06, st: 0.5, a: 0.006 }, { y: -0.18, t: BACK + 0.5, sy: 0.05, st: 0.45, a: 0.004 },
         { y: -0.3, t: FRONT, sy: 0.12, st: 0.3, a: 0.003 },
@@ -284,9 +285,9 @@ export function createGeometries({ low = false } = {}) {
     // Upper arm: biceps to the front (-Z), triceps behind.
     upperArm: loft([
       { y: 0.05, w: 0.064, d: 0.066 }, { y: -0.02, w: 0.077, d: 0.082 }, { y: -0.12, w: 0.075, d: 0.085, z: -0.003 },
-      { y: -0.21, w: 0.068, d: 0.078, z: -0.004 }, { y: -0.3, w: 0.055, d: 0.06, z: -0.001 }, { y: -0.36, w: 0.049, d: 0.052 }, { y: -0.4, w: 0.042, d: 0.044 },
+      { y: -0.21, w: 0.07, d: 0.08, z: -0.004 }, { y: -0.3, w: 0.059, d: 0.064, z: -0.001 }, { y: -0.36, w: 0.052, d: 0.055 }, { y: -0.4, w: 0.045, d: 0.047 },
     ], {
-      ...L(10, 2), capTop: false, capBottom: false, ao: AO.upperArm,
+      ...L(14, 2), capTop: false, capBottom: false, ao: AO.upperArm,
       sculpt: mounds([
         { y: -0.2, t: BACK, sy: 0.06, st: 0.6, a: 0.007 },       // -Z is the front of the arm: the biceps
         { y: -0.15, t: FRONT - 0.2, sy: 0.07, st: 0.5, a: 0.006 }, // triceps
@@ -296,22 +297,38 @@ export function createGeometries({ low = false } = {}) {
     // The shoulder-pad cap under the jersey, and the tight sleeve that ends
     // on the biceps. The cap sits out over the deltoid, away from the neck.
     sleeve: loft([
-      { y: 0.09, w: 0.034, d: 0.054, x: -0.008, z: -0.004 }, { y: 0.068, w: 0.076, d: 0.09, x: -0.008, z: -0.006, n: 2.3 },
-      { y: 0.022, w: 0.099, d: 0.114, x: -0.007, z: -0.008, n: 2.4 }, { y: -0.035, w: 0.103, d: 0.116, x: -0.005, z: -0.008, n: 2.4 },
-      { y: -0.08, w: 0.097, d: 0.106, x: -0.003, z: -0.005, n: 2.3 }, { y: -0.103, w: 0.089, d: 0.095 },
+      { y: 0.066, w: 0.03, d: 0.05, x: -0.004, z: -0.004 }, { y: 0.052, w: 0.07, d: 0.088, x: -0.006, z: -0.006, n: 2.1 },
+      { y: 0.016, w: 0.097, d: 0.113, x: -0.007, z: -0.008, n: 2.2 }, { y: -0.035, w: 0.103, d: 0.116, x: -0.005, z: -0.008, n: 2.25 },
+      { y: -0.08, w: 0.097, d: 0.106, x: -0.003, z: -0.005, n: 2.2 }, { y: -0.103, w: 0.089, d: 0.095 },
       { y: -0.15, w: 0.085, d: 0.092, z: -0.002 }, { y: -0.196, w: 0.081, d: 0.087, z: -0.003 }, { y: -0.203, w: 0.072, d: 0.077, z: -0.003 },
-    ], { ...L(14, 2), capBottom: false, ao: AO.sleeve }),
+    ], { ...L(18, 2), capBottom: false, ao: AO.sleeve }),
     // Forearm: full below the elbow, tapering to a narrow wrist.
     forearm: loft([
-      { y: 0.035, w: 0.044, d: 0.046 }, { y: -0.012, w: 0.052, d: 0.053, z: -0.002 },
-      { y: -0.07, w: 0.062, d: 0.062, z: -0.005 }, { y: -0.13, w: 0.058, d: 0.056, z: -0.004 },
-      { y: -0.2, w: 0.047, d: 0.044 }, { y: -0.27, w: 0.035, d: 0.032, z: 0.002 },
+      { y: 0.035, w: 0.047, d: 0.049 }, { y: -0.012, w: 0.055, d: 0.056, z: -0.002 },
+      { y: -0.07, w: 0.065, d: 0.065, z: -0.005 }, { y: -0.13, w: 0.06, d: 0.058, z: -0.004 },
+      { y: -0.2, w: 0.049, d: 0.046 }, { y: -0.27, w: 0.035, d: 0.032, z: 0.002 },
       { y: -0.33, w: 0.03, d: 0.027, z: 0.002 }, { y: -0.36, w: 0.03, d: 0.026 },
     ], {
-      ...L(10, 2), capTop: false, capBottom: false, ao: AO.forearm,
+      ...L(14, 2), capTop: false, capBottom: false, ao: AO.forearm,
       sculpt: mounds([{ y: -0.08, t: OUT + 2.6, sy: 0.06, st: 0.6, a: 0.005 }, { y: -0.1, t: BACK, sy: 0.07, st: 0.5, a: 0.003 }]),
     }),
-    tape: loft([{ y: -0.25, w: 0.04, d: 0.036 }, { y: -0.29, w: 0.037, d: 0.0335 }, { y: -0.34, w: 0.0345, d: 0.031 }], { ...L(10, 1), capTop: false, capBottom: false }),
+    // A sweatband around the biceps, below the sleeve.
+    band: loft([{ y: -0.232, w: 0.074, d: 0.087, z: -0.004 }, { y: -0.247, w: 0.0735, d: 0.086, z: -0.004 }, { y: -0.262, w: 0.07, d: 0.081, z: -0.003 }], { ...L(14, 1), capTop: false, capBottom: false }),
+    // The back plate hanging from the shoulder pads over the small of the
+    // back: a padded shell, curved to the body and narrower at the bottom.
+    backPlate: (() => {
+      const g = new THREE.BoxGeometry(0.2, 0.15, 0.014, 6, 4, 1), p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), y = p.getY(i), taper = 1 - 0.28 * smoothstep(0.02, -0.075, y);
+        const round = Math.abs(y) > 0.07 ? 0.9 : 1;
+        p.setX(i, x * taper * round);
+        p.setZ(i, p.getZ(i) + 2.6 * (x * taper) ** 2 - (p.getZ(i) < 0 ? 0.004 * Math.cos(x * 15) * Math.cos(y * 20) : 0));
+      }
+      g.computeVertexNormals();
+      // Darker grooves between its four pads.
+      return shadeBy(g, (x, y) => (Math.abs(x) < 0.006 || Math.abs(y + 0.005) < 0.004 ? 0.6 : 1));
+    })(),
+    tape: loft([{ y: -0.25, w: 0.042, d: 0.038 }, { y: -0.29, w: 0.038, d: 0.0345 }, { y: -0.34, w: 0.0345, d: 0.031 }], { ...L(14, 1), capTop: false, capBottom: false }),
     glove: glove({ low }),
     cleat: cleat({ low }),
     studs: cleatStuds(),
@@ -479,6 +496,7 @@ export class Rig {
     body('chest', geometry.chest, { scale: [torso, k, depth], surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.36 * torso, 0.432, 0.55), uv: region('torso'), blend: [['abdomen', 0.1]] });
     body('chest', geometry.collar, { scale: [torso ** 0.6, k, depth ** 0.6], color: trim, surface: SURFACE.collar, grain: grain(GRAIN.rib, 0.66, 0.04, 0.8), uv: plain, detail: true });
     body('chest', geometry.neck, { scale: [torso ** 0.6, k, depth ** 0.6], color: look.skin, surface: SURFACE.skin, grain: grain(GRAIN.skin, 0.48, 0.17, 0.3), uv: plain, blend: [['head', 0.05]] });
+    if (look.backPlate) body('abdomen', geometry.backPlate, { pos: [0, 0.07 * k, -(0.136 * depth * d.belly ** 0.5 + 0.012)], rot: [0.1, 0, 0], scale: [torso ** 0.6, k, 1], color: jerseyFor(this.spec).light ? TEAM.navy : '#e8e8e4', surface: SURFACE.plate, grain: [GRAIN.leather, 8, 6, 0.3], uv: plain, blend: [['chest', 0.1]], detail: true });
     // The towel tucked into the front of the pants hangs over the right thigh
     // and swings with it.
     if (look.towel) body('pelvis', geometry.towel, { pos: [-0.1 * torso, 0.125 * k, 0.128 * depth * d.belly ** 0.3], rot: [-0.1, 0.25, 0.04], color: '#ecebe6', surface: SURFACE.towel, grain: [GRAIN.weave, 3, 7, 1], uv: plain, blend: [['thigh1', 0.1]], detail: true });
@@ -508,6 +526,7 @@ export class Rig {
       body(upper, geometry.upperArm, { scale: armScale, color: armColor, surface: armSurface, grain: grain(armGrain, 0.44 * limb, 0.45, look.armSleeve ? 0.5 : 0.3), uv: plain, blend: [[fore, 0.06, { side: -1, radius: 0.035 }]] });
       body(upper, geometry.sleeve, { scale: capScale, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 0.62 * limb ** 0.7, 0.29, 0.55), uv: region(i === 0 ? 'sleeveL' : 'sleeveR', { flipU: i === 0, flipV: true }) });
       body(fore, geometry.forearm, { scale: armScale, color: armColor, surface: armSurface, grain: grain(armGrain, 0.33 * limb, 0.4, look.armSleeve ? 0.5 : 0.3), uv: plain, blend: [[upper, 0.06, { side: -1, radius: 0.035 }], [hand, 0.03]] });
+      if (look.band && !look.armSleeve) body(upper, geometry.band, { scale: armScale, color: look.band, surface: SURFACE.tape, grain: grain(GRAIN.rib, 0.46, 0.03, 0.7), uv: plain, detail: true });
       if (look.tape) body(fore, geometry.tape, { scale: armScale, color: '#ebe9e2', surface: SURFACE.tape, grain: grain(GRAIN.weave, 0.22, 0.09), uv: plain, blend: [[hand, 0.03]], detail: true });
       body(hand, geometry.glove, { scale: [s * 1.08 * limb ** 0.5, 1.06 * k, 1.08 * limb ** 0.5], color: look.glove, surface: SURFACE.glove, grain: [GRAIN.leather, 4, 5, 0.22], uv: plain, blend: [[fore, 0.03]] });
     });

@@ -237,7 +237,7 @@ function helmetEdge(theta) {
 
 // Column angles (degrees, one side): close together across the corner of the
 // face opening, where the edge turns.
-const HELMET_COLUMNS = [0, 10, 20, 29, 36, 40, 44, 48, 52, 60, 70, 82, 94, 106, 118, 130, 142, 154, 167, 180];
+const HELMET_COLUMNS = [0, 5, 10, 15, 20, 25, 30, 36, 40, 44, 48, 52, 60, 70, 82, 94, 106, 118, 130, 142, 154, 167, 180];
 const HELMET_COLUMNS_LOW = [0, 18, 36, 43, 50, 70, 95, 120, 150, 180];
 
 function helmetPoint(theta, phi, scale, out) {
@@ -275,7 +275,7 @@ function helmetUV(theta, phi, out) {
 }
 
 export function helmetShell({ low = false, inner = 0.93 } = {}) {
-  const half = low ? HELMET_COLUMNS_LOW : HELMET_COLUMNS, rows = low ? 7 : 14;
+  const half = low ? HELMET_COLUMNS_LOW : HELMET_COLUMNS, rows = low ? 7 : 20;
   // All the way round, from the back (-180) by the right side to the back.
   const ring = h => [...h.slice(1).reverse().map(d => -d), ...h].map(d => d * DEG);
   const outer = ring(half), padded = ring(half.filter((d, i) => i % 2 === 0 || i === half.length - 1));

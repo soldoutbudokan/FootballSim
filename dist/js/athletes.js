@@ -37,7 +37,10 @@ export class Athletes {
   constructor(scene, players, options = {}) {
     this.scene = scene;
     this.camera = options.camera || null;
-    this.materials = createMaterials(players);
+    // Phones and tablets keep the 2048 px jersey atlas; everything else paints
+    // it at twice the size.
+    const handheld = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 900;
+    this.materials = createMaterials(players, { atlasScale: options.atlasScale ?? (handheld ? 1 : 2) });
     const geometry = createGeometries(), low = createGeometries({ low: true });
     this.squad = new Squad(scene, players.length, this.materials);
     this.group = this.squad.group;
