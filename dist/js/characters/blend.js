@@ -42,7 +42,8 @@ export function derive(p, spec = {}, state = {}) {
 // ball carrier carries unless doing something more specific.
 export function visualAction(p, spec = {}, state = {}) {
   let action = KNOWN_ACTIONS.has(p.action) ? p.action : 'run';
-  if (state.phase === 'presnap') return 'ready';
+  // (In a hurry-up lineup, state.lining, a man is in his stance once he is set.)
+  if (state.phase === 'presnap') return !state.lining || p.action === 'ready' ? 'ready' : 'run';
   if (state.carrier && state.carrier === p.id && !HOLD_BALL.has(action) && action !== 'block') action = 'carry';
   if (action === 'run' && p.engaged != null && state.phase !== 'dead') action = 'block';
   return action;

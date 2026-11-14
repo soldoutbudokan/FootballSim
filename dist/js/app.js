@@ -5,6 +5,7 @@ import { FieldScene } from './scene.js';
 import { PACKAGES, fullSquad } from './sim/defense.js';
 import { AdaptiveGraphics, PROFILES } from './graphics.js';
 import { FieldAudio } from './audio.js';
+import { needText, kickDistance, fieldGoalOdds } from './sim/comeback.js';
 
 // FootballSim front end: title menu, broadcast HUD, dialogs and the game loop.
 // The simulation runs at a fixed 120 Hz step; rendering is throttled separately.
@@ -31,7 +32,13 @@ const DOWN_NAMES = ['', '1ST', '2ND', '3RD', '4TH'];
 // A W S D Space (plays.js PASS_KEYS): pad A, X, Y, B, RB.
 const PASS_BUTTONS = [0, 2, 3, 1, 5];
 const ARROWS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-const BAD_RESULTS = ['interception', 'sack', 'safety'];
+const BAD_RESULTS = ['interception', 'sack', 'safety', 'nogood'];
+// Comeback: dialogs that leave the clock running when it is (a play is
+// called while everybody lines up), how many plays the call sheet lists, and
+// how long the last play stays on screen before the final score.
+const LIVE_DIALOGS = ['playbook', 'audibles', 'hot-routes'];
+const SHEET_PLAYS = 6;
+const FINAL_DELAY = 2.6;
 
 // ---------- Preferences ----------
 const storage = {
@@ -40,13 +47,16 @@ const storage = {
 };
 
 function loadPrefs() {
-  const prefs = { graphics: 'auto', lighting: 'day', camera: 'game', passStyle: 'timing', fieldStrip: false, ...storage.read() };
+  const prefs = { graphics: 'auto', lighting: 'day', camera: 'game', passStyle: 'timing', fieldStrip: false, record: {}, ...storage.read() };
   // Older versions saved 'wide' and 'qb' camera ids; anything unknown falls back to the game camera.
   if (!CAMERAS.some(c => c.id === prefs.camera)) prefs.camera = 'game';
   if (!LIGHTING.some(l => l.id === prefs.lighting)) prefs.lighting = 'day';
   if (!PASS_STYLES.includes(prefs.passStyle)) prefs.passStyle = 'timing';
   if (prefs.graphics !== 'auto' && !PROFILES.some(profile => profile.id === prefs.graphics)) prefs.graphics = 'auto';
   prefs.fieldStrip = prefs.fieldStrip === true;
+  // Comebacks won, lost and sent to overtime, kept across sessions.
+  const record = prefs.record && typeof prefs.record === 'object' ? prefs.record : {};
+  prefs.record = Object.fromEntries(['win', 'loss', 'tie'].map(k => [k, Math.max(0, Math.floor(Number(record[k]) || 0))]));
   return prefs;
 }
 
@@ -66,6 +76,12 @@ let activeDialog = null, dialogReturn = null;
 let toastTimer = 0, playFilter = 'all', hotReceiver = 0, menuIndex = 0, padStickLatch = 0;
 let audiblePage = 0;
 const AUDIBLES_PER_PAGE = 8;
+// Comeback: the practice format to go back to, the last simulation reset the
+// HUD has seen, whether the final score has been shown, a huddle in progress
+// (the playbook is open and its time is paid when it closes) and the plays
+// on the call sheet.
+let practiceMode = 'drive', seenSerial = -1, finalShown = false, huddling = false;
+let sheetPlays = [], sheetKey = '';
 const keys = new Set();
 const touch = { x: 0, z: 0, sprint: false };
 const padMove = { x: 0, z: 0, sprint: false };
@@ -91,9 +107,21 @@ function fieldPosition(z) {
   return yard < 50 ? 'OWN ' + yard : yard === 50 ? 'MIDFIELD' : 'OPP ' + (100 - yard);
 }
 
-function downAndDistance() {
-  const goal = sim.spot + sim.toGo >= GOAL;
-  return DOWN_NAMES[sim.down] + ' & ' + (goal ? 'GOAL' : sim.toGo);
+// `at`: the down to name (the simulation's, or a comeback's next one).
+function downAndDistance(at = sim) {
+  if (sim.kick) return sim.kick.kind === 'xp' ? 'EXTRA POINT' : 'FIELD GOAL';
+  if (game()?.stage === 'try') return '2-POINT TRY';
+  const goal = at.spot + at.toGo >= GOAL;
+  return DOWN_NAMES[at.down] + ' & ' + (goal ? 'GOAL' : at.toGo);
+}
+
+// The comeback in progress, or null in the practice formats.
+function game() { return sim.config.mode === 'comeback' ? sim.game : null; }
+
+// A game clock rounds up: 0:01 until the last second is gone.
+function clockText(seconds) {
+  const s = Math.max(0, Math.ceil(seconds - 1e-6));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 
 // The HUD refreshes ten times a second; writing only changed values keeps style and paint work near zero.
@@ -111,6 +139,17 @@ function cameraLabel(id) { return CAMERAS.find(c => c.id === id)?.label || CAMER
 
 function fillOptions(select, options) {
   select.replaceChildren(...options.map(({ id, label }) => new Option(label, id)));
+}
+
+// One figure of a stats grid: the value over its label.
+function statCell([value, label]) {
+  const cell = document.createElement('div');
+  const strong = document.createElement('strong');
+  const span = document.createElement('span');
+  strong.textContent = String(value);
+  span.textContent = label;
+  cell.append(strong, span);
+  return cell;
 }
 
 function button(className, html, onClick) {
@@ -152,6 +191,17 @@ function setMode() {
   $('hud').hidden = inMenu;
 }
 
+// Practice from the title menu: out of a comeback left on in Settings.
+function startPractice() {
+  if (game()) leaveComeback();
+  start();
+}
+
+function leaveComeback() {
+  sim.configure({ mode: practiceMode });
+  $('practice-mode').value = practiceMode;
+}
+
 function start() {
   if (!view) return;
   inMenu = false;
@@ -166,8 +216,10 @@ function start() {
 function returnToMenu() {
   if (replay) closeReplay();
   closeAllDialogs();
-  // A rep in progress restarts from the huddle when practice resumes.
+  // A rep in progress restarts from the huddle when practice resumes; a
+  // comeback is over.
   if (!['presnap', 'dead'].includes(sim.phase)) sim.reset();
+  if (game()) leaveComeback();
   inMenu = true;
   setMode();
   clearInput();
@@ -195,15 +247,20 @@ menuItems.forEach((item, i) => {
 });
 
 // ---------- Dialogs ----------
+// A comeback's clock is running between plays: calling a play does not stop it.
+function clockLive() { return !!game()?.running && ['presnap', 'dead'].includes(sim.phase); }
+
 function openDialog(id, returnTo = null) {
   if (activeDialog) return;
   clearInput();
-  paused = true;
+  // A huddle's time is paid when it breaks, so its playbook stops the clock.
+  const live = !huddling && clockLive() && LIVE_DIALOGS.includes(id);
+  paused = !live;
   activeDialog = $(id);
   dialogReturn = returnTo;
   if (id === 'pause') renderPause();
   activeDialog.showModal();
-  audio.suspend();
+  if (!live) audio.suspend();
 }
 
 function closeDialog() {
@@ -212,6 +269,8 @@ function closeDialog() {
   activeDialog = null;
   dialogReturn = null;
   dialog.close();
+  // The huddle breaks with the play already called.
+  if (huddling) { toTheLine(); syncPlay(); }
   paused = false;
   clearInput();
   last = performance.now();
@@ -250,12 +309,15 @@ document.querySelectorAll('dialog').forEach(dialog => {
 
 // ---------- Play state ----------
 function syncPlay() {
-  view?.setPlay(sim.effectivePlay, sim.spot, sim.config.flip, sim.config.mode === 'drive' ? sim.toGo : null);
+  seenSerial = sim.serial;
+  // The line to gain: with downs to play, and not for a kick or a try.
+  const chains = sim.config.mode !== 'reps' && !sim.kick && game()?.stage !== 'try';
+  view?.setPlay(sim.effectivePlay, sim.spot, sim.config.flip, chains ? sim.toGo : null);
   $('offense').value = sim.config.offense;
-  $('random-play').setAttribute('aria-pressed', String(sim.config.offense === 'random'));
-  $('play-name').textContent = sim.play.name;
-  const flags = [sim.play.formation];
-  if (sim.config.offense === 'random') flags.push('COORDINATOR');
+  $('random-play').setAttribute('aria-pressed', String(sim.config.offense === 'random' && !game()));
+  $('play-name').textContent = sim.kick ? (sim.kick.kind === 'xp' ? 'Extra point' : 'Field goal') : sim.play.name;
+  const flags = [sim.kick ? sim.kick.distance + ' YARDS' : sim.play.formation];
+  if (sim.config.offense === 'random' && !game()) flags.push('COORDINATOR');
   if (sim.audibled) flags.push('AUDIBLE');
   if (Object.keys(sim.hotRoutes).length) flags.push('HOT ROUTE');
   $('formation').textContent = flags.join(' · ');
@@ -269,14 +331,158 @@ function syncPlay() {
 function snap() {
   if (inMenu) { start(); return; }
   if (paused || replay) return;
+  const g = game();
+  if (g?.over) { showFinal(); return; }
   if (sim.phase === 'presnap') {
-    sim.snap();
-    clearInput();
+    if (sim.snap()) clearInput();
+    else if (sim.lining) toast('Not set yet');
   } else if (sim.phase === 'dead') {
-    sim.next();
-    syncPlay();
+    if (g?.stage === 'pat') toast('Kick the extra point or go for two');
+    else { toTheLine(); syncPlay(); }
   }
   renderHUD();
+}
+
+// From the dead ball to the next down. In a comeback: the huddle that was
+// called, or no huddle while the clock runs. False if there is no next down.
+function toTheLine() {
+  if (sim.phase !== 'dead') return true;
+  if (huddling) { huddling = false; return sim.huddle(); }
+  return sim.next();
+}
+
+// ---------- Comeback ----------
+function startComeback(scenario = null) {
+  if (!view) return;
+  if (replay) closeReplay();
+  huddling = false;
+  closeAllDialogs();
+  if (!['presnap', 'dead'].includes(sim.phase)) sim.reset();
+  if (!game()) practiceMode = sim.config.mode;
+  sim.configure({ mode: 'comeback', scenario });
+  finalShown = false;
+  $('practice-mode').value = 'comeback';
+  if (inMenu) start(); else syncPlay();
+  view.firstFrame = true;
+  renderBrief();
+  openDialog('comeback-brief');
+}
+
+function renderBrief() {
+  const s = sim.game.scenario;
+  setText('brief-us', String(s.us));
+  setText('brief-them', String(s.them));
+  setText('brief-clock', clockText(s.clock));
+  setText('brief-timeouts', String(s.timeouts));
+  setText('brief-ball', fieldPosition(s.spot));
+  setText('brief-down', downAndDistance(s));
+  setText('brief-need', needText(s.deficit));
+}
+
+// The final score, once the last play has been seen (`now`: at once).
+function showFinal(now = true) {
+  const g = game();
+  if (!g?.over || replay || activeDialog?.id === 'comeback-final') return;
+  if (!now && (finalShown || (sim.phase === 'dead' && sim.deadTime < FINAL_DELAY))) return;
+  huddling = false;
+  closeAllDialogs();
+  const o = g.over;
+  if (!finalShown) { prefs.record[o.result]++; savePrefs(); }
+  finalShown = true;
+  const dialog = $('comeback-final');
+  dialog.classList.toggle('win', o.result === 'win');
+  dialog.classList.toggle('loss', o.result === 'loss');
+  setText('final-title', { win: 'Comeback', tie: 'Overtime', loss: 'Final' }[o.result]);
+  setText('final-us', String(o.us));
+  setText('final-them', String(o.them));
+  setText('final-reason', o.reason + (o.clock > 0 ? ' · ' + clockText(o.clock) + ' left' : ' · no time left'));
+  const r = prefs.record, cells = [[o.plays, 'Plays'], [o.yards, 'Yards'], [`${r.win}-${r.loss}-${r.tie}`, 'Record']];
+  $('final-stats').replaceChildren(...cells.map(statCell));
+  setHidden('final-replay', sim.phase !== 'dead' || sim.recording.length < 2);
+  openDialog('comeback-final');
+}
+
+function callTimeout() {
+  const g = game();
+  if (!g) return;
+  if (sim.timeout()) { toast('Timeout · ' + g.timeouts + ' left'); syncPlay(); }
+  else toast(g.stage !== 'drive' ? 'No timeout now' : !g.running ? 'The clock is stopped' : 'No timeouts left');
+}
+
+function callSpike() {
+  const g = game();
+  if (!g) return;
+  if (sim.spikeBall()) syncPlay();
+  else toast(g.stage === 'drive' && !g.running ? 'The clock is stopped' : 'No spike now');
+}
+
+// The field-goal unit, or the extra point after a touchdown.
+function callKick() {
+  const g = game();
+  if (!g) return;
+  const at = g.next || sim;
+  if (g.stage === 'pat' ? sim.tryKick() : sim.fieldGoal()) syncPlay();
+  else toast(g.stage === 'pat' ? 'An extra point is not enough: go for two' : g.stage !== 'drive' ? 'No kick now'
+    : g.us + 3 < g.them ? 'A field goal is not enough' : fieldGoalOdds(kickDistance(at.spot)) <= 0 ? 'Out of field-goal range' : 'No kick now');
+}
+
+function callHuddle() {
+  const g = game();
+  if (!g) return;
+  if (sim.phase !== 'dead' || g.stage !== 'drive' || !g.running) { toast(g.running ? 'Already at the line' : 'The clock is stopped: call the play'); return; }
+  huddling = true;
+  openDialog('playbook');
+}
+
+function goForTwo() {
+  if (sim.tryTwo()) { syncPlay(); toast('Two-point try from the 2'); }
+}
+
+// A play off the call sheet. With the ball dead it also sends the offense
+// to the line (without a huddle while the clock runs).
+function quickCall(id) {
+  if (!sim.setPlay(id)) return;
+  toTheLine();
+  syncPlay();
+}
+
+// The plays the coordinator would call for this down (the next one while
+// the ball is dead), likeliest first.
+function renderCallSheet(g, at) {
+  const key = [sim.phase, at.down, at.toGo, at.spot, Math.ceil(g.clock / 10), g.timeouts, g.nextCall || sim.play.id].join('|');
+  if (key === sheetKey) return;
+  sheetKey = key;
+  const called = g.nextCall || sim.play.id;
+  setText('sheet-label', sim.phase === 'dead' ? 'Next play' : 'The call');
+  setText('sheet-call', PLAYS.find(p => p.id === called)?.name || '');
+  sheetPlays = suggestedPlays(SHEET_PLAYS).slice(0, SHEET_PLAYS).map(id => PLAYS.find(p => p.id === id));
+  $('sheet-plays').replaceChildren(...sheetPlays.map((play, i) => {
+    const b = button('sheet-play', `<kbd>${i + 1}</kbd><span></span><small></small>`, () => quickCall(play.id));
+    b.querySelector('span').textContent = play.name;
+    b.querySelector('small').textContent = play.tag;
+    b.setAttribute('aria-label', 'Call ' + play.name);
+    b.setAttribute('aria-pressed', String(play.id === called));
+    return b;
+  }));
+}
+
+// The keys a comeback adds between plays. True when the key was one.
+function comebackKey(code) {
+  const g = game();
+  if (!g || replay || !['presnap', 'dead'].includes(sim.phase)) return false;
+  switch (code) {
+    case 'KeyT': callTimeout(); return true;
+    case 'KeyK': callSpike(); return true;
+    case 'KeyG': callKick(); return true;
+    case 'KeyU': callHuddle(); return true;
+  }
+  if (g.stage === 'pat') {
+    if (code === 'Digit2') { goForTwo(); return true; }
+    return false;
+  }
+  const play = g.stage === 'drive' && !sim.kick && /^Digit[1-9]$/.test(code) ? sheetPlays[Number(code.slice(-1)) - 1] : null;
+  if (play) quickCall(play.id);
+  return !!play;
 }
 
 // ---------- Passing ----------
@@ -374,6 +580,10 @@ function cycleCamera() {
 function openPlaybook() {
   if (replay) closeReplay();
   if (!inMenu && !['presnap', 'dead'].includes(sim.phase)) { toast('Call the next play after this rep'); return; }
+  const g = game();
+  if (g && (g.over || g.stage === 'pat' || sim.kick)) { toast('No play to call'); return; }
+  // With the clock running the play is called on the way to the line.
+  if (g?.running && sim.phase === 'dead') { toTheLine(); syncPlay(); }
   openDialog('playbook');
 }
 
@@ -496,20 +706,13 @@ function passerRating(s) {
 // Three rows: the passing line, the passing results, then the whole session.
 function renderPause() {
   const s = sim.stats, rating = passerRating(s);
+  setText('restart', game() ? 'Restart situation' : 'Reset rep');
   const items = [
     [`${s.completions}/${s.attempts}`, 'Comp / Att'], [s.passing, 'Pass yards'], [rating === null ? '–' : rating.toFixed(1), 'Passer rating'],
     [s.passTd, 'Pass TD'], [s.ints, 'Interceptions'], [s.sacks, 'Sacks'],
     [s.rushing, 'Rush yards'], [s.td, 'Touchdowns'], [s.reps, 'Reps'],
   ];
-  $('session-stats').replaceChildren(...items.map(([value, label]) => {
-    const cell = document.createElement('div');
-    const strong = document.createElement('strong');
-    const span = document.createElement('span');
-    strong.textContent = String(value);
-    span.textContent = label;
-    cell.append(strong, span);
-    return cell;
-  }));
+  $('session-stats').replaceChildren(...items.map(statCell));
   $('pause-system').textContent = [$('quality-label').textContent, fps ? fps + ' FPS' : '', $('input-device').textContent].filter(Boolean).join(' · ');
 }
 
@@ -542,6 +745,7 @@ function replayFrame(frames, time) {
 
 function openReplay() {
   if (sim.phase !== 'dead' || sim.recording.length < 2) return;
+  if (game()?.running) { toast('The clock is running'); return; }
   clearInput();
   // One frame every 0.05 s, the last ones after the whistle (the simulation clock has stopped there).
   replay = { time: 0, playing: true, frames: sim.recording.slice(), duration: (sim.recording.length - 1) * .05 };
@@ -633,8 +837,8 @@ function matchesFilter(play) {
 }
 
 function choosePlay(id) {
-  if (sim.phase === 'dead') sim.next();
-  sim.selectPlay(id);
+  // (A comeback with no next down: the play is not called.)
+  if (toTheLine()) sim.selectPlay(id);
   syncPlay();
   closeAllDialogs();
   if (inMenu) start();
@@ -643,21 +847,23 @@ function choosePlay(id) {
 // The plays the coordinator favours for this down, distance and spot: about
 // SUGGESTED of them, shared out over his play classes by how much of the
 // call each class gets, his likeliest in each (the book's order on a tie).
+// In a comeback he reads the clock too, and the next down while the ball
+// is dead. Returns the play ids, likeliest first.
 const SUGGESTED = 6;
-function suggestedPlays() {
-  const w = playWeights({ down: sim.down, toGo: sim.toGo, spot: sim.spot, mode: sim.config.mode });
+function suggestedPlays(count = SUGGESTED) {
+  const w = playWeights(game() ? sim.situation(sim.phase === 'dead') : { down: sim.down, toGo: sim.toGo, spot: sim.spot, mode: sim.config.mode });
   const byClass = {};
   PLAYS.forEach((p, i) => (byClass[profilePlay(p).cls] ||= []).push(i));
-  const out = new Set();
+  const out = [];
   for (const list of Object.values(byClass)) {
     const share = list.reduce((a, i) => a + w[i], 0);
-    list.sort((a, b) => w[b] - w[a] || a - b).slice(0, Math.round(share * SUGGESTED)).forEach(i => out.add(PLAYS[i].id));
+    out.push(...list.sort((a, b) => w[b] - w[a] || a - b).slice(0, Math.round(share * count)));
   }
-  return out;
+  return out.sort((a, b) => w[b] - w[a] || a - b).map(i => PLAYS[i].id);
 }
 
 function renderPlaybook() {
-  const suggested = suggestedPlays();
+  const suggested = new Set(suggestedPlays());
   const cards = PLAYS.filter(matchesFilter).map(play => {
     const current = play.id === sim.play.id;
     const badges = (suggested.has(play.id) ? '<span class="play-suggested">Suggested</span>' : '') + (current ? '<span class="play-current">Current</span>' : '');
@@ -695,6 +901,7 @@ const DEAD_STATES = { tackle: 'DOWN', sack: 'DOWN', safety: 'DOWN', out: 'OUT OF
 function playerState(p, pre) {
   const phase = pre ? 'presnap' : sim.phase;
   if (phase === 'dead') return p.action === 'down' ? 'DOWN' : DEAD_STATES[sim.result?.kind] || 'WHISTLE';
+  if (sim.kick && phase !== 'presnap') return phase === 'air' ? 'KICK AWAY' : 'KICKING';
   if (PHASE_STATES[phase]) return PHASE_STATES[phase];
   if (ACTION_STATES[p.action]) return ACTION_STATES[p.action];
   if (sim.crossedLine && p.id === 'QB') return 'RUN ONLY';
@@ -704,39 +911,47 @@ function playerState(p, pre) {
 
 function renderHUD() {
   const phase = sim.phase, pre = phase === 'presnap', dead = phase === 'dead', live = !pre && !dead;
+  const g = game(), kick = !!sim.kick;
   const run = sim.play.type === 'run';
-  const passing = phase === 'live' && !run && !sim.crossedLine;
-  const drive = sim.config.mode === 'drive';
+  const passing = phase === 'live' && !run && !sim.crossedLine && !sim.scripted;
+  const drive = sim.config.mode !== 'reps';
   const body = document.body.classList;
   body.toggle('playing', live);
   body.toggle('presnap', pre);
   body.toggle('dead', dead);
   body.toggle('replaying', !!replay);
   body.toggle('drive-mode', drive);
+  body.toggle('comeback-mode', !!g);
 
-  // Score bug: practice shows field position and rep; drive mode shows down and distance.
-  const goal = sim.spot + sim.toGo >= GOAL;
+  // Score bug: practice shows field position and rep; drive mode shows down
+  // and distance; a comeback adds the score, the clock and the timeouts, and
+  // names the next down while the ball is dead.
+  const at = (dead && g?.next) || sim;
+  const goal = at.spot + at.toGo >= GOAL;
   setHidden('practice-label', drive);
   setHidden('rep-cell', drive);
   setHidden('down-distance', !drive);
-  setHidden('to-go-cell', !drive);
-  setText('down-distance', downAndDistance());
-  setText('drive-detail', goal ? 'GOAL TO GO' : sim.toGo + ' YDS TO GO');
-  setText('field-position', fieldPosition(sim.spot));
+  setHidden('to-go-cell', !drive || !!g);
+  setText('down-distance', g?.over ? 'FINAL' : g?.stage === 'pat' ? 'TOUCHDOWN' : downAndDistance(at));
+  setText('drive-detail', goal ? 'GOAL TO GO' : at.toGo + ' YDS TO GO');
+  setText('field-position', fieldPosition(at.spot));
   setText('rep-number', String(sim.stats.reps + (pre ? 1 : 0)).padStart(2, '0'));
   // The personnel and the family ("Nickel · Cover 3"), hidden before the snap on a random call.
   setText('coverage-label', sim.config.coverage === 'random' && pre ? 'Disguised' : `${(PACKAGES[sim.personnel] || PACKAGES.base).name} · ${COVERAGES[sim.coverage].label}`);
+  renderGame(g, at, pre, dead);
 
   // Play call card and actions.
-  setHidden('presnap-adjustments', !pre || !!replay);
+  setHidden('presnap-adjustments', !pre || !!replay || kick);
   if ($('hot-routes-open').disabled !== run) {
     $('hot-routes-open').disabled = run;
     $('hot-routes-open').title = run ? 'Call a pass play to set hot routes' : 'Hot routes · H';
   }
-  setHidden('read-tip', !pre);
-  setHidden('snap', !pre);
+  setHidden('read-tip', !pre || kick);
+  setHidden('snap', !pre || kick || !!g?.over);
+  if ($('snap').disabled !== (pre && !sim.ready)) $('snap').disabled = pre && !sim.ready;
+  setText('snap-label', sim.lining ? 'Lining up' : sim.spikeCall ? 'Spike' : 'Snap');
   setHidden('throw-away', !passing);
-  setHidden('targets', (!pre && !passing) || run || !!replay);
+  setHidden('targets', (!pre && !passing) || run || !!replay || kick);
   setHidden('result', !dead || !!replay);
   setHidden('touch-controls', !isTouch || !live || !!replay);
   setHidden('minimap', !prefs.fieldStrip || !!replay);
@@ -752,13 +967,16 @@ function renderHUD() {
 }
 
 function renderResult(r, drive) {
-  const touchdown = r.kind === 'touchdown';
-  const bad = BAD_RESULTS.includes(r.kind) || (drive && sim.down === 4 && !r.firstDown && !touchdown);
-  const good = touchdown || (drive && r.firstDown && !bad);
+  const g = game(), kicked = r.kind === 'fieldgoal' || r.kind === 'nogood', tried = r.conversion !== undefined;
+  const touchdown = r.kind === 'touchdown' && !tried;
+  const bad = BAD_RESULTS.includes(r.kind) || r.conversion === false || (drive && !kicked && !tried && sim.down === 4 && !r.firstDown && !touchdown);
+  const good = touchdown || r.kind === 'fieldgoal' || r.conversion === true || (drive && r.firstDown && !bad);
   let tag = 'REP ' + String(sim.stats.reps).padStart(2, '0') + ' · ' + fieldPosition(sim.spot);
   if (drive) {
     tag = downAndDistance() + ' · ' + fieldPosition(sim.spot);
     if (touchdown) tag = 'SCORE';
+    else if (tried) tag = '2-POINT TRY';
+    else if (kicked) tag = downAndDistance();
     else if (r.kind === 'interception') tag = 'TURNOVER';
     else if (r.firstDown) tag = 'FIRST DOWN';
     else if (sim.down === 4) tag = 'TURNOVER ON DOWNS';
@@ -766,11 +984,72 @@ function renderResult(r, drive) {
   const banner = $('result');
   banner.classList.toggle('good', good);
   banner.classList.toggle('bad', bad && !good);
-  setText('result-yards', r.yards > 0 ? '+' + r.yards : r.yards < 0 ? '−' + Math.abs(r.yards) : '0');
+  banner.classList.toggle('live', !!g?.running);
+  // A kick shows how far it was.
+  setText('result-yards', kicked ? String(r.distance) : r.yards > 0 ? '+' + r.yards : r.yards < 0 ? '−' + Math.abs(r.yards) : '0');
   setText('result-tag', tag);
   setText('result-title', r.label);
-  setText('result-detail', r.time.toFixed(1) + ' SEC · ' + sim.stats.completions + '/' + sim.stats.attempts + ' PASSING');
+  setText('result-detail', g ? comebackDetail(g) : r.time.toFixed(1) + ' SEC · ' + sim.stats.completions + '/' + sim.stats.attempts + ' PASSING');
 }
+
+// The line under a comeback result: what the clock is doing, or what is left to decide.
+const STOPPED = { incomplete: 'INCOMPLETE', out: 'OUT OF BOUNDS', spike: 'SPIKE', timeout: 'TIMEOUT', warning: 'TWO-MINUTE WARNING', penalty: 'PENALTY', score: 'SCORE' };
+function comebackDetail(g) {
+  if (g.over) return g.over.reason;
+  if (g.stage === 'pat') return g.us === g.them ? 'TIED · KICK IT TO WIN' : g.us + 1 === g.them ? 'DOWN ONE · KICK TO TIE OR GO FOR TWO TO WIN' : 'DOWN TWO · GO FOR TWO TO TIE';
+  return g.running ? 'CLOCK RUNNING · ' + clockText(g.clock) : 'CLOCK STOPPED' + (STOPPED[g.stopped] ? ' · ' + STOPPED[g.stopped] : '');
+}
+
+// The comeback's share of the HUD: score, clocks, the kick from here, the
+// call sheet and the buttons that change with the clock.
+function renderGame(g, at, pre, dead) {
+  for (const id of ['score-cell', 'clock-cell', 'timeouts-cell']) setHidden(id, !g);
+  const between = pre || dead, drive = g?.stage === 'drive', running = !!g?.running && between;
+  const kickable = drive && !sim.kick && g.us + 3 >= g.them, distance = kickDistance(at.spot), odds = fieldGoalOdds(distance);
+  const playClock = running && g.playClock !== null;
+  setHidden('play-clock-cell', !playClock);
+  setHidden('kick-cell', !kickable);
+  setHidden('call-sheet', !drive || !between || !!replay || !!sim.kick);
+  setHidden('line-actions', !drive || !pre || !!replay || !!sim.kick);
+  // After the whistle: no huddle (or simply the next down), a huddle, a
+  // timeout, a spike, a kick; after a touchdown, the try.
+  const pat = g?.stage === 'pat';
+  setHidden('next', pat);
+  setText('next-label', !g ? 'Next rep' : g.over ? 'Final score' : running ? 'No huddle' : 'To the line');
+  setHidden('cb-huddle', !(drive && running && dead));
+  setHidden('cb-timeout', !(drive && running && dead));
+  setHidden('cb-spike', !(drive && running && dead));
+  setHidden('cb-kick', !(pat ? g.us + 1 >= g.them : kickable && odds > 0 && dead));
+  setHidden('cb-two', !pat);
+  setHidden('replay-open', !!g && (running || pat));
+  setHidden('result-playbook', !!g && !drive);
+  if (!g) return;
+
+  setText('score-us', String(g.us));
+  setText('score-them', String(g.them));
+  setText('game-clock', clockText(g.clock));
+  $('clock-cell').classList.toggle('running', g.running);
+  $('clock-cell').classList.toggle('urgent', g.running && g.clock <= 30);
+  setText('timeouts-left', '●'.repeat(g.timeouts) + '○'.repeat(3 - g.timeouts));
+  if (playClock) {
+    setText('play-clock', ':' + String(Math.max(0, Math.ceil(g.playClock))).padStart(2, '0'));
+    $('play-clock').classList.toggle('urgent', g.playClock <= 10);
+  }
+  if (kickable) setText('kick-info', odds > 0 ? `${distance} yd · ${Math.round(odds * 100)}%` : 'Out of range');
+  const timeoutText = `Timeout · ${g.timeouts}`;
+  for (const id of ['cb-timeout', 'line-timeout']) {
+    setText2($(id).querySelector('span'), timeoutText);
+    if ($(id).disabled !== g.timeouts < 1) $(id).disabled = g.timeouts < 1;
+  }
+  setText2($('cb-kick').querySelector('span'), pat ? 'Extra point' : `Field goal · ${distance}`);
+  setText2($('line-kick').querySelector('span'), `Field goal · ${distance}`);
+  setHidden('line-timeout', !running);
+  setHidden('line-spike', !running);
+  setHidden('line-kick', !(kickable && odds > 0));
+  if (drive && between && !sim.kick) renderCallSheet(g, at);
+}
+
+function setText2(el, value) { if (el.textContent !== value) el.textContent = value; }
 
 // The field strip: the whole field drawn left to right with the line of scrimmage and line to gain.
 function drawFieldStrip(state) {
@@ -792,7 +1071,7 @@ function drawFieldStrip(state) {
   }
   const line = (z, color, width) => { c.strokeStyle = color; c.lineWidth = width; c.beginPath(); c.moveTo(toX(z), 0); c.lineTo(toX(z), h); c.stroke(); };
   line(state.spot, '#c9ccd1', 3);
-  if (sim.config.mode === 'drive') line(Math.min(GOAL, state.spot + sim.toGo), '#e3b23c', 3);
+  if (sim.config.mode !== 'reps') line(Math.min(GOAL, state.spot + sim.toGo), '#e3b23c', 3);
   for (const p of state.players) {
     const offense = sim.byId[p.id]?.team === 'offense';
     c.fillStyle = p.id === state.carrier ? '#e3b23c' : offense ? '#f4f2ec' : '#7f93ad';
@@ -803,7 +1082,7 @@ function drawFieldStrip(state) {
 }
 
 function positionMarkers(state) {
-  const visible = !inMenu && !replay && ['presnap', 'live'].includes(state.phase) && sim.play.type !== 'run' && !sim.crossedLine;
+  const visible = !inMenu && !replay && ['presnap', 'live'].includes(state.phase) && sim.play.type !== 'run' && !sim.crossedLine && !sim.kick;
   for (const id of RECEIVERS) {
     const el = markers[id];
     const p = visible && state.players.find(q => q.id === id);
@@ -876,7 +1155,18 @@ function buildSettings() {
   $('field-strip').onchange = () => { prefs.fieldStrip = $('field-strip').value === 'on'; savePrefs(); renderHUD(); };
 }
 
-$('start').onclick = start;
+$('start').onclick = startPractice;
+$('menu-comeback').onclick = () => startComeback();
+$('brief-another').onclick = () => { sim.startComeback(); syncPlay(); renderBrief(); };
+$('final-next').onclick = () => startComeback();
+$('final-retry').onclick = () => startComeback(sim.game.scenario);
+$('final-replay').onclick = () => { closeAllDialogs(); openReplay(); };
+$('final-menu').onclick = returnToMenu;
+$('cb-huddle').onclick = callHuddle;
+$('cb-timeout').onclick = $('line-timeout').onclick = callTimeout;
+$('cb-spike').onclick = $('line-spike').onclick = callSpike;
+$('cb-kick').onclick = $('line-kick').onclick = callKick;
+$('cb-two').onclick = goForTwo;
 $('menu-playbook').onclick = openPlaybook;
 $('menu-settings').onclick = () => openDialog('settings');
 $('menu-controls').onclick = () => openDialog('help');
@@ -897,7 +1187,11 @@ $('play-formation-filter').onchange = renderPlaybook;
 $('hot-route-reset').onclick = () => applyHotRoute('default');
 $('pause-button').onclick = togglePause;
 $('resume').onclick = closeAllDialogs;
-$('restart').onclick = () => { sim.reset(); syncPlay(); closeAllDialogs(); };
+// A comeback has no second try at a down: the situation starts over.
+$('restart').onclick = () => {
+  if (game()) { startComeback(sim.game.scenario); return; }
+  sim.reset(); syncPlay(); closeAllDialogs();
+};
 $('pause-settings').onclick = () => swapDialog('settings', 'pause');
 $('pause-controls').onclick = () => swapDialog('help', 'pause');
 $('quit-menu').onclick = returnToMenu;
@@ -932,25 +1226,37 @@ document.querySelectorAll('[data-filter]').forEach(b => {
   };
 });
 $('flip-play').onchange = () => {
-  if (sim.phase === 'dead') sim.next();
+  toTheLine();
   sim.config.flip = $('flip-play').checked;
-  sim.reset();
+  if (sim.phase === 'presnap') sim.reset();
   syncPlay();
 };
 $('apply-settings').onclick = () => {
   if (replay) closeReplay();
+  const mode = $('practice-mode').value;
   sim.reset();
+  if (mode !== 'comeback') practiceMode = mode;
+  else if (!game()) practiceMode = sim.config.mode;
   sim.configure({
     offense: $('offense').value, coverage: $('coverage').value, difficulty: $('difficulty').value,
-    mode: $('practice-mode').value, spot: Number($('spot').value),
+    mode, spot: Number($('spot').value),
   });
+  finalShown = false;
   syncPlay();
+  // A comeback starts with its situation; from the title screen it starts the game.
+  if (mode === 'comeback') {
+    closeAllDialogs();
+    if (inMenu) start();
+    renderBrief();
+    openDialog('comeback-brief');
+    return;
+  }
   closeDialog();
   if (!inMenu) toast('Settings applied');
 };
 
 // ---------- Keyboard ----------
-const GAME_KEYS = ['Space', 'Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyB', 'KeyC', 'KeyH', 'KeyZ', 'KeyP', 'Escape', 'KeyX', 'KeyR', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'ShiftLeft', 'ShiftRight'];
+const GAME_KEYS = ['Space', 'Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyB', 'KeyC', 'KeyH', 'KeyZ', 'KeyP', 'Escape', 'KeyX', 'KeyR', 'KeyT', 'KeyK', 'KeyG', 'KeyU', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'ShiftLeft', 'ShiftRight'];
 // The receiver a key throws to on this rep: A W S D Space by slot, or the
 // unlisted 1-5 by receiver order. -1 for any other key.
 function passReceiver(code) {
@@ -999,6 +1305,8 @@ function gameKey(e) {
     if (sim.time >= 0.28) beginCharge(passReceiver(e.code));
     return;
   }
+  // A comeback's clock calls and its call sheet, between plays.
+  if (comebackKey(e.code)) return;
   switch (e.code) {
     case 'Space': case 'Enter': snap(); break;
     case 'Escape': case 'KeyP': togglePause(); break;
@@ -1028,9 +1336,17 @@ window.addEventListener('keyup', e => {
   if (receiver >= 0) releaseCharge(receiver);
   keys.delete(e.code);
 });
+// Leaving the window pauses the game, a comeback's running clock included
+// (a play being called with the clock running is not a pause).
+function pauseAway() {
+  if (!started || paused || inMenu) return;
+  closeAllDialogs();
+  openDialog('pause');
+}
+
 window.addEventListener('blur', () => {
   clearInput();
-  if (started && !paused && !inMenu) openDialog('pause');
+  pauseAway();
 });
 
 // ---------- Touch ----------
@@ -1077,7 +1393,11 @@ function onPadPress(i) {
     else if (i === 0) activateMenu();
     return;
   }
-  if (i === 0 && (sim.phase === 'presnap' || sim.phase === 'dead')) snap();
+  // A comeback between plays: Y timeout, X spike, LB kick, B huddle.
+  const between = sim.phase === 'presnap' || sim.phase === 'dead';
+  const call = game() && between ? { 3: callTimeout, 2: callSpike, 4: callKick, 1: callHuddle }[i] : null;
+  if (call) call();
+  else if (i === 0 && between) snap();
   else if (PASS_BUTTONS.includes(i)) beginCharge(slotReceiver(PASS_BUTTONS.indexOf(i)));
   else if (i === 8) cycleCamera();
   else if (i === 14) sim.juke(-1);
@@ -1122,6 +1442,10 @@ function frame(now) {
     accumulator += dt;
     while (accumulator >= STEP) { sim.step(STEP, movement()); accumulator -= STEP; }
     for (const event of sim.drainEvents()) audio.event(event);
+    // A comeback lines up, takes a penalty or ends without a key press.
+    if (sim.serial !== seenSerial) syncPlay();
+    for (const text of sim.drainNotices()) toast(text);
+    showFinal(false);
   }
   if (replay && replay.playing) {
     replay.time = Math.min(replay.duration, replay.time + dt * .5);
@@ -1141,7 +1465,7 @@ function frame(now) {
     state = replayFrame(replay.frames, replay.time);
     $('replay-scrub').value = String(replay.time / replay.duration * 1000);
   }
-  view.render(state, renderDelta, { menu: inMenu, showArt, replay: !!replay });
+  view.render(state, renderDelta, { menu: inMenu, showArt: showArt && !sim.kick, replay: !!replay });
   graphics.sample(renderDelta * 1000, !inMenu && !replay, ['presnap', 'dead'].includes(sim.phase));
   positionMarkers(state);
   updatePassMeter(state, now);
@@ -1169,7 +1493,7 @@ document.addEventListener('visibilitychange', () => {
     cancelAnimationFrame(frameId);
     clearInput();
     audio.suspend();
-    if (started && !paused && !inMenu) openDialog('pause');
+    pauseAway();
   } else {
     last = performance.now();
     lastRender = last;
@@ -1199,7 +1523,7 @@ try {
   $('input-device').textContent = isTouch ? 'Touch' : 'Keyboard and mouse';
   frameId = requestAnimationFrame(frame);
   if (debug) {
-    window.footballsim = { sim, view, graphics, start, snap, get paused() { return paused; }, get replay() { return replay; } };
+    window.footballsim = { sim, view, graphics, start, snap, comeback: startComeback, get paused() { return paused; }, get replay() { return replay; } };
   }
 } catch (error) {
   console.error(error);

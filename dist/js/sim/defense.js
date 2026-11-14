@@ -141,6 +141,9 @@ const PERSONNEL = { wr: 6.8, te: 9, goal: 5, run: 0.35, pass: 0.3 };
 // spread set) never calls the coverages that need depth behind them: no
 // pole runner, no quarters.
 const CRAMPED = ['tampa2', 'cover4', 'cover6'];
+// The packages a no-huddle offense can catch on the field for another down
+// (the short-yardage and goal-line units always get on and off).
+const NO_HUDDLE = ['base', 'nickel', 'dime'];
 // The spots in the base 4-3, in the order the players line up (and draw
 // their jitter).
 const SPOTS = DEFENSE.map(p => p.id);
@@ -161,12 +164,14 @@ function detached(lay) {
 }
 // The package that matches the offense: by formation, down and distance and
 // field position.
-function matchPackage(lay, down, toGo, togoal, short) {
+// `late`: the two-minute defense (a comeback's last drive, sim/comeback.js)
+// moves up one like 3rd and long, whatever the down.
+function matchPackage(lay, down, toGo, togoal, short, late = false) {
   const wide = detached(lay);
   if (togoal <= PERSONNEL.goal) return wide >= 4 ? 'nickel' : 'goal';
   if (short) return wide >= 4 ? 'nickel' : wide === 3 ? 'base' : 'heavy';
   const pkg = wide >= 4 ? 'dime' : wide === 3 ? 'nickel' : 'base';
-  if (down >= 3 && toGo >= 7) return pkg === 'base' ? 'nickel' : 'dime';
+  if (late || (down >= 3 && toGo >= 7)) return pkg === 'base' ? 'nickel' : 'dime';
   return pkg;
 }
 // Defensive line spacing, left to right with the strength on the right
@@ -232,6 +237,10 @@ const FIELD = {
   red: { cover3: 1.3, cover1: 1.3, cover2: 1.2, tampa2: 0.8, cover4: 0.9, cover6: 0.6, man: 1.8, blitz: 1.4, firezone: 1.1, creeper: 0.7 },
   backed: { cover3: 1.2, cover1: 1.1, cover2: 0.9, tampa2: 0.8, cover4: 0.9, cover6: 0.9, man: 0.9, blitz: 1.3, firezone: 1.3, creeper: 1.1 },
 };
+// The two-minute defense, outside the red zone: the offense has to throw
+// and the clock is on the defense's side, so the deep shells and the
+// rush-four pressures rise and man without help and the all-out blitz fall.
+const LATE = { cover3: 0.9, cover1: 0.7, cover2: 1.3, tampa2: 1.4, cover4: 1.4, cover6: 1.3, man: 1.3, blitz: 0.6, firezone: 0.8, creeper: 1.1 };
 // Formation fits: quarters against two by two, Cover 6 and a sky rotation
 // against trips, match and banjo calls against a bunch, pressure or six in
 // coverage against empty, a loaded box against the tight sets.
@@ -919,14 +928,14 @@ function tendencies(scout, formationId, weight) {
 function familyWeights(skill, sim, tend, pkg = 'base') {
   const can = PACKAGES[pkg]?.families, near = 110 - sim.spot <= PERSONNEL.goal && pkg !== 'base';
   const menu = (MENUS[skill.menu] || MENUS.pro).filter(f => (!can || can.includes(f)) && !(near && CRAMPED.includes(f))), toGo = sim.toGo, togoal = 110 - sim.spot, floor = FLOOR / menu.length;
-  const downs = sim.config.mode === 'drive' || sim.down > 1 || toGo < 10
+  const downs = sim.config.mode !== 'reps' || sim.down > 1 || toGo < 10
     ? (toGo <= 2 && (sim.down > 1 || togoal <= 2) ? DOWNS.short : sim.down >= 3 && toGo >= 7 ? DOWNS.long : sim.down >= 3 && toGo >= 3 ? DOWNS.medium : sim.down === 2 && toGo >= 8 ? DOWNS.second : null)
     : null;
   const field = togoal <= 5 ? FIELD.goal : togoal <= 20 ? FIELD.red : sim.spot <= 20 ? FIELD.backed : null;
-  const fit = FITS[sim.play.formationId] || {};
+  const fit = FITS[sim.play.formationId] || {}, late = sim.game?.stage === 'drive' && togoal > RED_ZONE ? LATE : null;
   const w = {};
   for (const f of menu) {
-    let v = BASE[f] * ((downs?.[f] ?? 1) * (field?.[f] ?? 1) * (fit[f] ?? 1)) ** skill.situ;
+    let v = BASE[f] * ((downs?.[f] ?? 1) * (field?.[f] ?? 1) * (fit[f] ?? 1) * (late?.[f] ?? 1)) ** skill.situ;
     // The scouting report: the box against a running offense, two deep
     // safeties against deep completions, press and man against a quick
     // game, pressure against a quarterback who holds the ball, fewer
@@ -1005,11 +1014,14 @@ export const defense = {
     // fixed coverage the package cannot play is played from the base. A
     // package named in the config (`personnel`, a PACKAGES key) is played
     // every rep.
-    const ideal = matchPackage(readFormation(formationFor(this.play)), this.down, this.toGo, togoal, short);
+    const ideal = matchPackage(readFormation(formationFor(this.play)), this.down, this.toGo, togoal, short, this.game?.stage === 'drive');
     let match = skill.situ ** 2;
     if (ideal === 'nickel' || ideal === 'dime') match *= 1 - PERSONNEL.run * Math.max(0, tend.runBias);
     let pkg = u[14] < match ? ideal : 'base';
     if (ideal === 'base' && !short && u[14] < PERSONNEL.pass * Math.max(0, -tend.runBias)) pkg = 'nickel';
+    // Against a no-huddle offense nobody can come on: the base, nickel or
+    // dime that played the last down plays this one.
+    if (this.game?.noSub && NO_HUDDLE.includes(this.personnel) && NO_HUDDLE.includes(pkg)) pkg = this.personnel;
     if (PACKAGES[this.config.personnel]) pkg = this.config.personnel;
     if (fixed && PACKAGES[pkg].families && !PACKAGES[pkg].families.includes(asked)) pkg = 'base';
     const weights = familyWeights(skill, this, tend, pkg);

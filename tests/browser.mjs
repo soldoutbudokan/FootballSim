@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { PLAYS, ROUTE_COLORS, RECEIVERS, formationFor, passKey, readParts, readText } from '../dist/js/plays.js';
+import { fieldGoalOdds, kickDistance, needText } from '../dist/js/sim/comeback.js';
 import { captureModels } from './model-screenshots.mjs';
 
 const url = process.env.TEST_URL || 'http://127.0.0.1:8000';
@@ -29,7 +30,7 @@ const game = fn => page.evaluate(fn);
 const sim = expression => page.evaluate(`window.footballsim.sim.${expression}`);
 const visible = selector => page.locator(selector).isVisible();
 const shot = name => page.screenshot({ path: `test-results/${name}.png` });
-const waitFor = (fn, timeout = 60000) => page.waitForFunction(fn, {}, { timeout });
+const waitFor = (fn, timeout = 60000, arg = {}) => page.waitForFunction(fn, arg, { timeout });
 const activeMenuItem = () => game(() => document.querySelector('.menu-item.is-active')?.id);
 
 try {
@@ -50,7 +51,10 @@ try {
   // Title menu: keyboard navigation, fullscreen, then Practice.
   assert.equal(await activeMenuItem(), 'start');
   await page.keyboard.press('ArrowDown');
+  assert.equal(await activeMenuItem(), 'menu-comeback');
+  await page.keyboard.press('ArrowDown');
   assert.equal(await activeMenuItem(), 'menu-playbook');
+  await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
   assert.equal(await activeMenuItem(), 'start');
   await page.keyboard.press('f');
@@ -315,9 +319,110 @@ try {
   assert.equal(await visible('#welcome'), false);
   assert.equal(await sim('phase'), 'presnap');
 
+  // Fourth-quarter comeback, from the title menu: a random situation first.
+  await page.keyboard.press('Escape');
+  await page.locator('#quit-menu').click();
+  await page.getByRole('button', { name: 'Comeback', exact: true }).click();
+  assert.equal(await visible('#comeback-brief'), true);
+  assert.equal(await sim('config.mode'), 'comeback');
+  const random = await sim('game.scenario');
+  assert.equal(await page.locator('#brief-need').innerText(), needText(random.deficit));
+  assert.equal(Number(await page.locator('#brief-them').innerText()) - Number(await page.locator('#brief-us').innerText()), random.deficit);
+  // Then a known one: two behind at the opponent's 30 with 1:30 and two timeouts.
+  await game(() => window.footballsim.comeback({ deficit: 2, clock: 90, timeouts: 2, spot: 80, down: 1, toGo: 10 }));
+  const text = selector => page.locator(selector).innerText();
+  assert.deepEqual([await text('#brief-clock'), await text('#brief-timeouts'), await text('#brief-ball'), await text('#brief-down')], ['1:30', '2', 'OPP 30', '1ST & 10']);
+  assert.equal(await text('#brief-need'), needText(2));
+  await shot('12-comeback-brief');
+  await page.getByRole('button', { name: 'Start the drive', exact: true }).click();
+  await waitFor(() => !window.footballsim.paused);
+  assert.equal(await sim('phase'), 'presnap');
+  assert.deepEqual([await text('#game-clock'), await text('#timeouts-left'), await text('#down-distance'), await text('#field-position')], ['1:30', '●●○', '1ST & 10', 'OPP 30']);
+  assert.equal(Number(await text('#score-them')) - Number(await text('#score-us')), 2);
+  assert.equal(await text('#kick-info'), `47 YD · ${Math.round(fieldGoalOdds(kickDistance(80)) * 100)}%`);
+  assert.equal(await visible('#call-sheet'), true);
+  assert.equal(await visible('#line-timeout'), false, 'the clock is stopped: nothing to stop');
+  // The clock starts with the snap and runs on after a tackle in bounds.
+  const tackled = async yards => {
+    await page.keyboard.press('Space');
+    await waitFor(() => window.footballsim.sim.time > .5);
+    await page.evaluate(y => window.footballsim.sim.finish('Tackled', y, 'tackle'), yards);
+    await waitFor(() => document.getElementById('result').hidden === false);
+  };
+  await tackled(6);
+  assert.equal(await sim('game.running'), true);
+  assert.equal(await text('#next-label'), 'NO HUDDLE');
+  assert.deepEqual([await visible('#cb-huddle'), await visible('#cb-timeout'), await visible('#cb-spike'), await visible('#cb-kick'), await visible('#replay-open')], [true, true, true, true, false]);
+  assert.deepEqual([await text('#down-distance'), await text('#field-position')], ['2ND & 4', 'OPP 24'], 'the next down while the ball is dead');
+  const running = await sim('game.clock');
+  await waitFor(c => window.footballsim.sim.game.clock < c - .5, 60000, running);
+  await shot('13-comeback-clock-running');
+  // No huddle: everybody runs to the line, the snap waits, and plays are called on the way.
+  await page.keyboard.press('Space');
+  assert.equal(await sim('phase'), 'presnap');
+  assert.equal(await sim('lining !== null'), true);
+  assert.equal(await page.locator('#snap').isDisabled(), true);
+  assert.equal(await text('#snap-label'), 'LINING UP');
+  await page.keyboard.press('Space');
+  assert.equal(await sim('phase'), 'presnap', 'no snap before everybody is set');
+  const second = await page.locator('.sheet-play').nth(1).getAttribute('aria-label');
+  await page.keyboard.press('2');
+  assert.equal('Call ' + await sim('play.name'), second);
+  assert.equal(await sim('lining !== null'), true);
+  // The playbook does not stop a running clock.
+  await page.keyboard.press('b');
+  assert.equal(await visible('#playbook'), true);
+  assert.equal(await game(() => window.footballsim.paused), false);
+  await page.keyboard.press('Escape');
+  await shot('14-comeback-lineup');
+  // (The rest of the run to the line is stepped here rather than waited for:
+  // a software renderer plays seven seconds of it in slow motion.)
+  const forward = until => page.evaluate(until => {
+    const s = window.footballsim.sim, done = { ready: () => s.ready, over: () => s.game.over && (s.phase !== 'dead' || s.deadTime > 3) }[until];
+    for (let i = 0; i < 6000 && !done(); i++) s.step(1 / 120);
+  }, until);
+  await forward('ready');
+  await waitFor(() => window.footballsim.sim.ready && !document.getElementById('snap').disabled, 120000);
+  assert.equal(await page.locator('#snap').isDisabled(), false);
+  assert.equal(await game(() => window.footballsim.sim.players.every(p => p.x === p.start.x && p.z === p.start.z)), true);
+  assert.equal(await visible('#line-spike'), true);
+  // A spike stops the clock and costs the down.
+  await page.keyboard.press('k');
+  await waitFor(() => window.footballsim.sim.result?.spike === true);
+  assert.deepEqual([await sim('game.running'), await sim('game.stopped'), await sim('game.next.down')], [false, 'spike', 3]);
+  await waitFor(() => document.getElementById('next-label').textContent === 'To the line');
+  await page.keyboard.press('Space');
+  assert.equal(await sim('ready'), true, 'with the clock stopped the offense is simply at the line');
+  // A timeout after the next tackle, then the field goal that wins it.
+  await tackled(3);
+  await page.keyboard.press('t');
+  assert.deepEqual([await sim('game.running'), await sim('game.timeouts'), await sim('game.stopped')], [false, 1, 'timeout']);
+  const stopped = await sim('game.clock');
+  await page.waitForTimeout(400);
+  assert.equal(await sim('game.clock'), stopped);
+  await page.keyboard.press('g');
+  assert.equal(await sim('kick.kind'), 'fg');
+  assert.equal(await sim('kick.distance'), 38);
+  await game(() => { window.footballsim.sim.kick.good = true; });
+  await waitFor(() => window.footballsim.sim.phase !== 'presnap', 120000);
+  await forward('over');
+  await waitFor(() => window.footballsim.sim.game.over !== null, 120000);
+  assert.equal(await sim('game.over.result'), 'win');
+  await page.waitForSelector('#comeback-final[open]', { timeout: 120000 });
+  assert.equal(await text('#final-title'), 'COMEBACK');
+  assert.equal(Number(await text('#final-us')) - Number(await text('#final-them')), 1);
+  assert.match(await text('#final-reason'), /Field goal from 38 yards/);
+  assert.equal(await game(() => JSON.parse(localStorage.getItem('footballsim.preferences.v1')).record.win), 1);
+  await shot('15-comeback-final');
+  // The main menu leaves the comeback for the practice format it came from.
+  await page.locator('#final-menu').click();
+  assert.equal(await visible('#welcome'), true);
+  assert.equal(await sim('config.mode'), 'reps');
+  assert.equal(await sim('game'), null);
+
   await captureModels(page);
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: render, title menu, camera fallback and cycling, random defaults, play selection, pass keys and labels, passing, the checkdown key, handoff, replay, pause and passer rating, Move the chains, hot routes, audibles, fullscreen, settings, mobile layout, return to menu.');
+  console.log('Browser checks passed: render, title menu, camera fallback and cycling, random defaults, play selection, pass keys and labels, passing, the checkdown key, handoff, replay, pause and passer rating, Move the chains, hot routes, audibles, fullscreen, settings, mobile layout, return to menu, the fourth-quarter comeback.');
 } catch (error) {
   console.error('Browser state at failure:', await page.evaluate(() => ({
     phase: window.footballsim?.sim.phase, time: window.footballsim?.sim.time, paused: window.footballsim?.paused,

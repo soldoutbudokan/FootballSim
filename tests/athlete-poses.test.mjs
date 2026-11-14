@@ -271,3 +271,53 @@ poseTest('a replay that jumps into a pile shows the same pile as playing up to i
   }
   assert.ok(checked >= 3, `piles checked: ${checked}`);
 });
+
+poseTest('a hurry-up lineup: the pile gets up, everybody runs to the line and takes his stance as he arrives', () => {
+  // A comeback's no-huddle lineup (sim/comeback.js) is the dead ball carried
+  // on, not the pre-snap stillness.
+  const sim = new Simulation(3, { mode: 'comeback', difficulty: 'pro', offense: 'mesh', scenario: { deficit: 3, clock: 90, timeouts: 2, spot: 50 } });
+  const athletes = new Athletes(new THREE.Scene(), sim.players, { camera: new THREE.PerspectiveCamera(46, 1.6, 0.1, 500) });
+  athletes.setQuality({ id: 'high' });
+  athletes.update(sim.snapshot(), 1 / 60);
+  const frame = () => { const s = sim.snapshot(); athletes.update(s, 1 / 60); return s; };
+  const run = (seconds, input, each = () => {}) => { for (let i = 0; i < seconds / STEP; i++) { sim.step(STEP, input); if (i % 2) each(frame()); } };
+  sim.snap();
+  run(1.8);
+  sim.requestThrow('X', 'touch');
+  for (let i = 0; sim.phase !== 'dead'; i++) { sim.step(STEP, { z: 1, sprint: true }); if (i % 2) frame(); }
+  assert.equal(sim.result.kind, 'tackle');
+  run(0.5);
+  const carrier = sim.carrier, action = id => athletes.animators.get(id).action, joints = id => JOINTS(athletes.rigs.get(id)).map(v => v.clone());
+  assert.equal(action(carrier), 'tackled', 'the runner is on the ground');
+  const down = joints(carrier), standing = joints('LT');
+  assert.equal(sim.hurry(), true);
+  let s = frame();
+  assert.equal(s.lining, true);
+  // Nothing starts over: the runner is still down where he was, a man standing nearby has not jumped.
+  assert.equal(action(carrier), 'tackled');
+  joints(carrier).forEach((v, j) => assert.ok(v.distanceTo(down[j]) < 0.1, `runner's ${JOINT_NAMES[j]} moved ${v.distanceTo(down[j]).toFixed(2)} yd at the start of the lineup`));
+  joints('LT').forEach((v, j) => assert.ok(v.distanceTo(standing[j]) < 0.15, `left tackle's ${JOINT_NAMES[j]} jumped ${v.distanceTo(standing[j]).toFixed(2)} yd`));
+  // The ball is on the turf at the new spot, in nobody's hands.
+  assert.ok(athletes.ball.position.y < 0.2 && Math.abs(-athletes.ball.position.z - sim.spot) < 0.1 && Math.abs(athletes.ball.position.x) < 0.1);
+  // On the way: men running upright, not frozen in their stances.
+  let running = 0, ready = 0, mixed = 0, tall = 0;
+  run(2.5, {}, f => {
+    const moving = f.players.filter(p => p.speed > 2);
+    if (moving.some(p => p.id === 'LT')) tall = Math.max(tall, athletes.rigs.get('LT').world.head.y);
+    for (const p of moving) { assert.ok(['run', 'cut'].includes(action(p.id)), p.id + ' runs to the line: ' + action(p.id)); running++; }
+    const set = f.players.filter(p => p.action === 'ready');
+    for (const p of set) if (athletes.animators.get(p.id).blend >= 1) { assert.equal(action(p.id), 'ready', p.id + ' is set'); ready++; }
+    if (moving.length && set.length) mixed++;
+  });
+  assert.ok(running > 300 && ready > 50 && mixed > 20, `running ${running}, set ${ready}, frames with both ${mixed}`);
+  assert.ok(tall > 1.6, 'a lineman on the move stands tall: ' + tall.toFixed(2));
+  run(1.5);
+  assert.notEqual(action(carrier), 'tackled', 'the runner is back on his feet');
+  // Set: the whole lineup is in its stances, the linemen down in theirs.
+  for (let i = 0; i < 2400 && sim.lining; i++) { sim.step(STEP); if (i % 2) frame(); }
+  run(0.4);
+  s = frame();
+  assert.equal(s.lining, false);
+  for (const p of s.players) assert.equal(action(p.id), 'ready', p.id);
+  assert.ok(athletes.rigs.get('LT').world.head.y < 1.45, 'the left tackle is in his three-point stance');
+});

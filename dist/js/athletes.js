@@ -118,7 +118,11 @@ export class Athletes {
 
   // Per-frame facts shared by every animator.
   frameContext(state, dt, menu) {
-    const presnap = state.phase === 'presnap';
+    // A hurry-up lineup (state.lining) is not the pre-snap stillness: the
+    // dead ball carries on (the snapshot keeps its clocks and its tackle
+    // running) while everybody runs to the line, and each man gets into his
+    // stance as he arrives.
+    const lining = !!state.lining, presnap = state.phase === 'presnap' && !lining;
     // Animation advances with simulation time so replays (half speed, paused,
     // scrubbed) stay in step with the recorded motion.
     const clock = (state.time || 0) + (state.deadTime || 0);
@@ -133,9 +137,9 @@ export class Athletes {
 
     this.byId.clear();
     for (const p of state.players) this.byId.set(p.id, p);
-    const dead = state.phase === 'dead';
+    const dead = state.phase === 'dead' || lining;
     let holderId = null;
-    if (!presnap && state.phase !== 'air') {
+    if (!presnap && !lining && state.phase !== 'air') {
       holderId = state.carrier || null;
       if (!holderId && dead) holderId = this.deadBallHolder(state);
     }
@@ -144,11 +148,14 @@ export class Athletes {
     this.ballScene.set(b.x, b.y, -b.z);
     const pocket = holderId === this.qbId && state.phase === 'live' && !!qb && qb.z < (state.spot ?? 35) + 0.3;
     const ctx = {
-      state, phase: state.phase, presnap, dead, reset,
+      state, phase: state.phase, presnap, lining, dead, reset,
       dt: animDt, realDt: Math.max(0, Math.min(dt, 0.1)), time: this.time,
       deadTime: state.deadTime || 0, spot: state.spot ?? 35, ball: b, ballScene: this.ballScene,
       byId: this.byId, rigs: this.rigs, animators: this.animators,
       holderId, carrierId: state.carrier, qbId: this.qbId,
+      // In a lineup the ball is back at the line, but the man who was tackled
+      // with it gets up as he went down, the arm that had it still tucked.
+      downedId: lining ? state.tackle?.carrier ?? null : null,
       pocket,
       // Linemen pass protect while the simulation's line protects the pocket
       // (never on a run play); otherwise they run block. A snapshot without
@@ -169,7 +176,7 @@ export class Athletes {
     // The tackle in progress (tackle.js): from the snapshot, or worked out
     // from the actions for a simulation that does not publish it.
     const record = state.tackle !== undefined ? state.tackle : inferTackle(state, clock, this.byId, this.tackleMemo);
-    ctx.tackle = tackleContext(record, state.phase, clock, this.byId, this.tackleCache);
+    ctx.tackle = tackleContext(record, lining ? 'dead' : state.phase, clock, this.byId, this.tackleCache);
     ctx.miss = holderId ? recentMiss(state, clock, holderId) : null;
     ctx.mesh = handoffMesh(ctx, this.qbId);
     ctx.threats = this.threats;

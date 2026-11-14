@@ -325,6 +325,6 @@ export class Character {
 
 // The visual action key the clock tracks (pre-snap 'ready', carrier 'carry').
 function visual(p, state) {
-  if (state.phase === 'presnap') return 'ready';
+  if (state.phase === 'presnap') return !state.lining || p.action === 'ready' ? 'ready' : 'run';
   return p.action || 'run';
 }

@@ -29,7 +29,7 @@ export function applyStance(anim, pose, p, ctx) {
   const breathe = 0.014 * Math.sin(t * 2.3 + seed * 9);
   // Chosen before the snap and kept while he holds the stance after it, so a
   // man easing off the line does not switch stances mid-hold.
-  if (ctx.presnap || ctx.reset || anim.fresh || !anim.stanceKind) anim.stanceKind = stanceKind(anim.spec, p, ctx);
+  if (ctx.presnap || ctx.lining || ctx.reset || anim.fresh || !anim.stanceKind) anim.stanceKind = stanceKind(anim.spec, p, ctx);
   const kind = anim.stanceKind;
   pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0; pose.tiltSide = 0;
   pose.head.set(0, 0, 0);

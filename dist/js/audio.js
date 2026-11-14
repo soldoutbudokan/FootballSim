@@ -121,6 +121,10 @@ const SOUNDS = {
   },
   // The ball hitting the turf and bouncing once.
   drop: a => { a.tone(150, .07, .3, 'triangle', 80); a.tone(170, .05, .16, 'triangle', 90, .16); },
+  // A place kick: the foot through the ball.
+  kick: a => { a.tone(120, .14, .5, 'sine', 50); a.burst({ duration: .06, volume: .25, type: 'lowpass', freq: 1200, end: 300 }); },
+  // The end of a comeback: two long whistles.
+  final: a => { a.tone(2200, .45, .12, 'sine', 1900, .35); a.tone(2200, .7, .12, 'sine', 1800, .9); },
   // Title menu navigation tick.
   menu: a => a.tone(660, .035, .05, 'square', 520),
 };

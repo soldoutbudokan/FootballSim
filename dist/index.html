@@ -20,6 +20,7 @@
       <p class="wordmark-sub">Practice facility</p>
       <nav class="main-menu" aria-label="Main menu">
         <button id="start" class="menu-item is-active" type="button">Practice</button>
+        <button id="menu-comeback" class="menu-item" type="button">Comeback</button>
         <button id="menu-playbook" class="menu-item" type="button">Playbook</button>
         <button id="menu-settings" class="menu-item" type="button">Settings</button>
         <button id="menu-controls" class="menu-item" type="button">Controls</button>
@@ -58,12 +59,19 @@
       <div class="bug-main">
         <span class="bug-mark" aria-hidden="true">FS</span>
         <span id="practice-label" class="bug-cell bug-label">Practice</span>
+        <span id="score-cell" class="bug-cell bug-score" hidden><small>Navy</small><b id="score-us">17</b><small>White</small><b id="score-them">20</b></span>
+        <span id="clock-cell" class="bug-cell bug-clock" hidden><small>4th</small><b id="game-clock">2:00</b></span>
+        <span id="timeouts-cell" class="bug-cell" hidden><small>T.O.</small><b id="timeouts-left">●●●</b></span>
         <strong id="down-distance" class="bug-cell bug-down" hidden>1ST &amp; 10</strong>
         <span class="bug-cell"><small>Ball on</small><b id="field-position">OWN 25</b></span>
         <span id="rep-cell" class="bug-cell"><small>Rep</small><b id="rep-number">01</b></span>
         <span id="to-go-cell" class="bug-cell" hidden><b id="drive-detail">10 YDS TO GO</b></span>
       </div>
-      <div class="bug-sub"><small>Defense</small><b id="coverage-label">Disguised</b></div>
+      <div class="bug-sub">
+        <span id="play-clock-cell" class="sub-cell" hidden><small>Play clock</small><b id="play-clock">:40</b></span>
+        <span id="kick-cell" class="sub-cell" hidden><small>Kick</small><b id="kick-info">52 yd</b></span>
+        <span class="sub-cell"><small>Defense</small><b id="coverage-label">Disguised</b></span>
+      </div>
     </div>
 
     <div id="receiver-labels" aria-hidden="true"></div>
@@ -95,9 +103,19 @@
     <div id="targets" class="targets" aria-label="Pass to a receiver"></div>
 
     <div class="snap-area">
+      <!-- Comeback: the calls a no-huddle offense makes on its way to the line. -->
+      <section id="call-sheet" class="call-sheet" aria-label="Call sheet" hidden>
+        <h3 class="sheet-head"><span id="sheet-label">Next play</span><b id="sheet-call">Mesh concept</b></h3>
+        <div id="sheet-plays" class="sheet-plays"></div>
+      </section>
       <canvas id="minimap" class="field-strip" width="480" height="84" aria-label="Field strip" hidden></canvas>
+      <div id="line-actions" class="line-actions" hidden>
+        <button id="line-timeout" class="ghost-button" type="button" aria-label="Timeout"><kbd>T</kbd><span>Timeout</span></button>
+        <button id="line-spike" class="ghost-button" type="button" aria-label="Spike the ball"><kbd>K</kbd>Spike</button>
+        <button id="line-kick" class="ghost-button" type="button" aria-label="Field goal"><kbd>G</kbd><span>Field goal</span></button>
+      </div>
       <button id="throw-away" class="ghost-button" type="button" aria-label="Throw away" hidden><kbd>X</kbd>Throw away</button>
-      <button id="snap" class="snap-button" type="button" aria-label="Snap ball"><kbd>Space</kbd>Snap</button>
+      <button id="snap" class="snap-button" type="button" aria-label="Snap ball"><kbd>Space</kbd><span id="snap-label">Snap</span></button>
     </div>
 
     <div id="control-strip" class="button-legend" aria-hidden="true">
@@ -118,7 +136,12 @@
         </div>
       </div>
       <div class="result-actions">
-        <button id="next" class="banner-button primary" type="button" aria-label="Next rep"><kbd>Space</kbd>Next rep</button>
+        <button id="next" class="banner-button primary" type="button" aria-label="Next rep"><kbd>Space</kbd><span id="next-label">Next rep</span></button>
+        <button id="cb-huddle" class="banner-button" type="button" aria-label="Huddle" hidden><kbd>U</kbd>Huddle</button>
+        <button id="cb-timeout" class="banner-button" type="button" aria-label="Timeout" hidden><kbd>T</kbd><span>Timeout</span></button>
+        <button id="cb-spike" class="banner-button" type="button" aria-label="Spike the ball" hidden><kbd>K</kbd>Spike</button>
+        <button id="cb-kick" class="banner-button" type="button" aria-label="Field goal" hidden><kbd>G</kbd><span>Field goal</span></button>
+        <button id="cb-two" class="banner-button" type="button" aria-label="Go for two" hidden><kbd>2</kbd>Go for two</button>
         <button id="replay-open" class="banner-button" type="button" aria-label="Replay"><kbd>R</kbd>Replay</button>
         <button id="result-playbook" class="banner-button" type="button" aria-label="Call play"><kbd>B</kbd>Call play</button>
       </div>
@@ -208,7 +231,7 @@
         <label class="field"><span>Defense</span><select id="coverage"><option value="random">Random every rep</option><option value="cover3">Cover 3</option><option value="cover1">Cover 1</option><option value="cover2">Cover 2</option><option value="tampa2">Tampa 2</option><option value="cover4">Cover 4 quarters</option><option value="cover6">Cover 6</option><option value="man">2-man</option><option value="blitz">Cover 0 blitz</option><option value="firezone">Fire zone</option><option value="creeper">Sim pressure</option></select></label>
         <label class="field"><span>Difficulty</span><select id="difficulty"><option value="rookie">Rookie</option><option value="pro">Pro</option><option value="allpro" selected>All-pro</option></select></label>
         <p class="difficulty-note">Higher levels play smarter, not faster: better calls and disguises, run fits that leave no gap open, rushers who read the blocker and coverage that reads routes and the ball sooner. Bodies, blocks, tackling and your own players are the same at every level.</p>
-        <label class="field"><span>Format</span><select id="practice-mode"><option value="reps">Repeat the spot</option><option value="drive" selected>Move the chains</option></select></label>
+        <label class="field"><span>Format</span><select id="practice-mode"><option value="reps">Repeat the spot</option><option value="drive" selected>Move the chains</option><option value="comeback">Fourth-quarter comeback</option></select></label>
         <label class="field"><span>Starting spot</span><select id="spot"><option value="35">Own 25</option><option value="60">Midfield</option><option value="90">Opponent 20</option><option value="100">Opponent 10</option></select></label>
       </fieldset>
       <fieldset>
@@ -263,6 +286,7 @@
           <div><dt><kbd>D-pad</kbd></dt><dd>Juke left, right</dd></div>
           <div><dt><kbd>Back</kbd></dt><dd>Camera</dd></div>
           <div><dt><kbd>Start</kbd></dt><dd>Pause</dd></div>
+          <div><dt><kbd>Y</kbd><kbd>X</kbd><kbd>LB</kbd><kbd>B</kbd></dt><dd>Comeback: timeout, spike, kick, huddle</dd></div>
         </dl>
         <h3 class="section-label">Touch</h3>
         <dl class="bindings">
@@ -286,6 +310,16 @@
           <li>Run plays hand off automatically</li>
           <li>Play action needs about one second before the throw</li>
         </ul>
+        <h3 class="section-label">Comeback, between plays</h3>
+        <dl class="bindings">
+          <div><dt><kbd>Space</kbd></dt><dd>No huddle, to the line</dd></div>
+          <div><dt><kbd>1</kbd>–<kbd>6</kbd></dt><dd>Call a play from the sheet</dd></div>
+          <div><dt><kbd>U</kbd></dt><dd>Huddle</dd></div>
+          <div><dt><kbd>T</kbd></dt><dd>Timeout</dd></div>
+          <div><dt><kbd>K</kbd></dt><dd>Spike the ball</dd></div>
+          <div><dt><kbd>G</kbd></dt><dd>Field goal, extra point</dd></div>
+          <div><dt><kbd>2</kbd></dt><dd>Go for two, after a touchdown</dd></div>
+        </dl>
       </section>
     </div>
   </dialog>
@@ -302,6 +336,36 @@
     <h3 class="section-label">Session</h3>
     <div id="session-stats" class="session-stats"></div>
     <p id="pause-system" class="pause-system"></p>
+  </dialog>
+
+  <dialog id="comeback-brief" class="modal modal-narrow situation" aria-labelledby="brief-title">
+    <header class="modal-head"><h2 id="brief-title">Fourth quarter</h2></header>
+    <div class="situation-score"><span>Navy</span><b id="brief-us">17</b><i>–</i><b id="brief-them">20</b><span>White</span></div>
+    <div class="session-stats situation-stats">
+      <div><strong id="brief-clock">1:12</strong><span>Clock</span></div>
+      <div><strong id="brief-timeouts">2</strong><span>Timeouts</span></div>
+      <div><strong id="brief-ball">OWN 28</strong><span>Ball on</span></div>
+    </div>
+    <p id="brief-down" class="situation-line">1ST &amp; 10</p>
+    <p id="brief-need" class="situation-need">A field goal ties it. A touchdown wins it.</p>
+    <p class="pause-system">You call every play. The clock runs after a tackle in bounds: go to the line without a huddle, use a timeout or spike it.</p>
+    <footer class="modal-foot">
+      <button id="brief-another" class="secondary-button" type="button">Another situation</button>
+      <button id="brief-start" class="primary-button" type="button" data-close>Start the drive</button>
+    </footer>
+  </dialog>
+
+  <dialog id="comeback-final" class="modal modal-narrow situation" aria-labelledby="final-title">
+    <header class="modal-head"><h2 id="final-title">Final</h2></header>
+    <div class="situation-score"><span>Navy</span><b id="final-us">23</b><i>–</i><b id="final-them">20</b><span>White</span></div>
+    <p id="final-reason" class="situation-need">Field goal from 47 yards</p>
+    <div id="final-stats" class="session-stats situation-stats"></div>
+    <div class="list-menu">
+      <button id="final-next" class="list-item" type="button">Next situation</button>
+      <button id="final-retry" class="list-item" type="button">Try this one again</button>
+      <button id="final-replay" class="list-item" type="button">Watch the last play</button>
+      <button id="final-menu" class="list-item" type="button">Main menu</button>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

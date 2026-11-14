@@ -7,6 +7,7 @@ import { callPlay } from './sim/offense.js';
 import { running } from './sim/run.js';
 import { support, SUPPORT } from './sim/support.js';
 import { pursuit, GATHER } from './sim/pursuit.js';
+import { comeback } from './sim/comeback.js';
 
 // Units are yards and seconds. +z points downfield (own end line z = 0, goal
 // lines at z = 10 and z = 110) and +x is the offense's right. A heading is
@@ -529,26 +530,42 @@ export class Simulation {
     this.spot = clamp(Number(this.config.spot) || 35, 11, 105);
     this.down = 1; this.toGo = Math.min(10, GOAL - this.spot);
     this.play = PLAYS[0]; this.events = [];
-    this.reset(true);
+    // The fourth-quarter comeback (sim/comeback.js): the game around the
+    // downs, null in the practice modes. `serial` counts the resets, so the
+    // front end can tell when the simulation has lined up again by itself.
+    this.game = null; this.lining = null; this.kick = null; this.spike = null; this.spikeCall = false; this.serial = 0;
+    const { scenario, ...config } = this.config;
+    this.config = config;
+    if (config.mode === 'comeback') this.startComeback(scenario); else this.reset(true);
   }
 
   configure(options) {
     if (this.phase !== 'presnap' && this.phase !== 'dead') return false;
-    Object.assign(this.config, options);
+    const { scenario, ...config } = options;
+    Object.assign(this.config, config);
     this.config.spot = clamp(Number(this.config.spot) || 35, 11, 105);
+    // A comeback starts a new situation (`scenario`, or a random one).
+    if (this.config.mode === 'comeback') { this.startComeback(scenario); return true; }
+    this.endComeback();
     this.spot = this.config.spot; this.down = 1; this.toGo = Math.min(10, GOAL - this.spot);
     this.reset(true);
     return true;
   }
 
   selectPlay(id) {
+    // In a comeback a play is called for the down, not for the session.
+    if (this.game) return this.setPlay(id);
     if (!['presnap', 'dead'].includes(this.phase) || (id !== 'random' && !PLAYS.some(p => p.id === id))) return false;
     this.config.offense = id;
     this.reset(true);
     return true;
   }
 
-  reset(newCalls = false) {
+  // `carry`: where everybody stands when a hurry-up lineup starts
+  // (sim/comeback.js); a reset during one carries on from where they are.
+  reset(newCalls = false, carry = null) {
+    if (!carry && this.lining && this.phase === 'presnap') carry = this.bodies();
+    this.serial++; this.spike = null;
     this.phase = 'presnap'; this.time = 0; this.deadTime = 0;
     this.pass = null; this.throwIntent = null; this.result = null;
     this.handoff = false; this.crossedLine = false; this.tackler = null; this.tackle = null; this.holder = null; this.misses = [];
@@ -558,7 +575,7 @@ export class Simulation {
     this.catchAt = 0; this.possessionAt = 0; this.coverPlanAt = -1; this.coverSeen = {};
     if (newCalls) {
       // Coordinator's call (offense.js): one draw, weighted for the situation.
-      this.play = this.config.offense === 'random'
+      this.play = this.game ? this.comebackCall() : this.config.offense === 'random'
         ? callPlay({ down: this.down, toGo: this.toGo, spot: this.spot, mode: this.config.mode }, this.random())
         : PLAYS.find(p => p.id === this.config.offense) || this.play;
       this.callDefense();
@@ -566,7 +583,7 @@ export class Simulation {
     }
     this.skill = DIFFICULTY[this.config.difficulty] || DIFFICULTY.pro;
     const flip = this.config.flip;
-    const formation = formationFor(this.play);
+    const formation = this.formation() || formationFor(this.play);
     this.players = formation.map(p => createPlayer(p, 'offense', this.spot, flip));
     this.players.push(...this.alignDefense(formation).map(p => createPlayer(p, 'defense', this.spot, flip)));
     this.players.forEach(p => {
@@ -591,7 +608,13 @@ export class Simulation {
     this.dropPlan = this.planDrop();
     this.ball = { x: 0, y: BALL_REST, z: this.spot, vx: 0, vy: 0, vz: 0 };
     this.lastBall = { ...this.ball };
+    if (carry) this.placeBodies(carry);
     this.saveFrame();
+  }
+
+  // The offense can snap: lined up and set, with a down to play.
+  get ready() {
+    return this.phase === 'presnap' && !this.lining && !this.kick && !(this.game && this.game.stage !== 'drive' && this.game.stage !== 'try');
   }
 
   // +1, or -1 on a flipped play. Exact ties (a man straight over the ball,
@@ -617,14 +640,15 @@ export class Simulation {
 
   audible(id) {
     const play = PLAYS.find(p => p.id === id);
-    if (this.phase !== 'presnap' || !play) return false;
-    this.play = play; this.hotRoutes = {}; this.audibled = true;
+    if (this.phase !== 'presnap' || !play || this.kick) return false;
+    this.play = play; this.hotRoutes = {}; this.audibled = true; this.spikeCall = false;
     this.reset();
     return true;
   }
 
   snap() {
-    if (this.phase !== 'presnap') return false;
+    if (!this.ready) return false;
+    if (this.game) this.comebackSnap();
     this.phase = 'live';
     this.events.push('snap');
     this.stats.reps++;
@@ -632,7 +656,7 @@ export class Simulation {
   }
 
   requestThrow(id, style = 'bullet', lead = { x: 0, z: 0 }) {
-    if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || this.threw || this.throwIntent || this.play.type === 'run' || !RECEIVERS.includes(id) || this.time < 0.28) return false;
+    if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || this.threw || this.throwIntent || this.play.type === 'run' || !RECEIVERS.includes(id) || this.time < 0.28 || this.scripted) return false;
     if (this.play.type === 'pa' && this.faking()) return false;
     this.throwIntent = {
       id, style: ['bullet', 'touch', 'lob'].includes(style) ? style : 'bullet',
@@ -655,8 +679,11 @@ export class Simulation {
     return this.faking() && !this.qbSteered && !!this.dropPlan?.mesh;
   }
 
+  // A spike or a kick is running: the play is out of the player's hands.
+  get scripted() { return !!(this.spike || this.kick); }
+
   throwAway() {
-    if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || this.threw || this.play.type === 'run' || this.time < 0.3) return false;
+    if (this.phase !== 'live' || this.carrier !== 'QB' || this.crossedLine || this.threw || this.play.type === 'run' || this.time < 0.3 || this.scripted) return false;
     this.stats.attempts++; this.threw = true;
     this.finish('Thrown away', 0, 'incomplete');
     return true;
@@ -827,7 +854,7 @@ export class Simulation {
   // costs speed and a little stamina, but nothing ever refuses one for being
   // tired.
   juke(direction = 1) {
-    if (!['live', 'run'].includes(this.phase) || this.jukeCooldown > 0) return false;
+    if (!['live', 'run'].includes(this.phase) || this.jukeCooldown > 0 || this.scripted) return false;
     const p = this.byId[this.carrier];
     if (!p || p.juke || (this.play.type === 'run' && !this.handoff)) return false;
     const speed = Math.hypot(p.vx, p.vz);
@@ -860,10 +887,18 @@ export class Simulation {
 
   // ---------------------------------------------------------------------------
   step(dt, input = {}) {
+    // A comeback's clock runs between plays too, and its lineup moves.
+    if (this.game) this.tickGame(dt);
     if (this.phase === 'presnap') return;
     this.jukeCooldown = Math.max(0, this.jukeCooldown - dt);
     if (this.phase === 'dead') { this.stepDead(dt); return; }
     this.time += dt;
+    if (this.scripted) this.stepScripted(dt); else this.stepPlay(dt, input);
+    this.recordClock += dt;
+    if (this.recordClock >= 0.05) { this.recordClock -= 0.05; this.saveFrame(); }
+  }
+
+  stepPlay(dt, input) {
     this.tickActions(dt);
     if (this.phase !== 'tackle') this.planController(input);
     this.planBlocking(dt);
@@ -886,8 +921,6 @@ export class Simulation {
     if (this.phase === 'air') this.flyBall(dt);
     this.checkCarrier();
     if (this.time > 22 && this.phase !== 'dead') this.endRep('Rep complete', 'timeout');
-    this.recordClock += dt;
-    if (this.recordClock >= 0.05) { this.recordClock -= 0.05; this.saveFrame(); }
   }
 
   tickActions(dt) {
@@ -1299,7 +1332,7 @@ export class Simulation {
     const plan = { x: qb.start.x, depth: under ? DROP.centre : quick ? DROP.quick : DROP.gun, open: under, mesh: null, boot: 0 };
     const r = this.byId.R, first = r.route[0];
     if (this.play.type !== 'pa' || !first) return plan;
-    const next = r.route[1] || first, near = project(r.start, first, qb);
+    const next = r.route[1] || first, near = project(r.start, first, qb.start);
     const nx = near.uz, nz = -near.ux, side = -Math.sign((next.x - first.x) * nx + (next.z - first.z) * nz) || this.playSide();
     plan.mesh = { x: near.x + nx * side * FAKE.side, z: near.z + nz * side * FAKE.side };
     plan.depth = DROP.action; plan.open = false;
@@ -1530,7 +1563,7 @@ export class Simulation {
     // A receiver who has settled shows the quarterback his numbers; the man
     // the ball is thrown to looks it in once he is under it.
     if (p.team === 'offense' && RECEIVERS.includes(p.id) && live && p.id !== this.carrier && speed < 3) {
-      if (this.phase === 'air' && this.pass.receiver === p.id) return toward(this.ball);
+      if (this.phase === 'air' && this.pass?.receiver === p.id) return toward(this.ball);
       if (p.sitting || this.drillAt !== null) return toward(qb);
     }
     if (p.team === 'defense' && !p.turned && live) return toward(qb);
@@ -1673,6 +1706,23 @@ export class Simulation {
   }
 
   restBall(x, z) { Object.assign(this.ball, { x, y: BALL_REST, z, vx: 0, vy: 0, vz: 0 }); }
+
+  // The ball leaves `from` to pass through `to` `time` s later.
+  launchBall(from, to, time) {
+    const v = flightVelocity(from, to, time);
+    this.ball = { ...from, vx: v.x, vy: v.y, vz: v.z };
+  }
+
+  // A ball nobody holds, one step on: true once it is down, at rest on the
+  // turf (a kick may come down anywhere behind the end line).
+  dropBall(dt) {
+    const b = this.ball;
+    if (!(b.vx || b.vy || b.vz || b.y > BALL_REST)) return true;
+    b.x += b.vx * dt; b.z += b.vz * dt; b.y += b.vy * dt - 0.5 * GRAVITY * dt * dt; b.vy -= GRAVITY * dt;
+    if (b.y > BALL_REST) return false;
+    this.restBall(clamp(b.x, -32, 32), clamp(b.z, -2, this.kick ? 150 : 122));
+    return true;
+  }
 
   // ---------------------------------------------------------------------------
   // Scoring, sidelines and tackling.
@@ -1855,12 +1905,8 @@ export class Simulation {
       p.cutting = false;
       this.turnBody(p, dt);
     }
-    const b = this.ball, holder = this.byId[this.carrier || this.holder];
-    if (holder) this.holdBall(holder);
-    else if (b.vx || b.vy || b.vz || b.y > BALL_REST) {
-      b.x += b.vx * dt; b.z += b.vz * dt; b.y += b.vy * dt - 0.5 * GRAVITY * dt * dt; b.vy -= GRAVITY * dt;
-      if (b.y <= BALL_REST) this.restBall(clamp(b.x, -32, 32), clamp(b.z, -2, 122));
-    }
+    const holder = this.byId[this.carrier || this.holder];
+    if (holder) this.holdBall(holder); else this.dropBall(dt);
   }
 
   finish(label, yards, kind) {
@@ -1873,12 +1919,15 @@ export class Simulation {
     if (this.completed && kind === 'touchdown') this.stats.passTd++;
     else if (!this.threw && kind !== 'sack') this.stats.rushing += gain;
     this.events.push(kind === 'touchdown' ? 'touchdown' : 'whistle');
-    this.noteResult(this.result);
+    // A spike or a kick tells the defense nothing about the offense.
+    if (!this.scripted) this.noteResult(this.result);
+    if (this.game) this.afterPlay(this.result);
     this.saveFrame();
   }
 
   next() {
     if (this.phase !== 'dead') return false;
+    if (this.game) return this.nextDown();
     if (this.config.mode === 'drive') {
       const r = this.result;
       if (['touchdown', 'interception', 'safety'].includes(r.kind) || (this.down === 4 && !r.firstDown)) {
@@ -1894,14 +1943,19 @@ export class Simulation {
   }
 
   snapshot() {
+    // A hurry-up lineup (sim/comeback.js) is the dead ball carried on: the
+    // same clocks and the same tackle, so nobody's motion starts over while
+    // the men in the pile get up and everybody runs to the line.
+    const L = this.lining;
     return {
-      phase: this.phase, time: this.time, deadTime: this.deadTime, carrier: this.carrier, selected: this.selected, spot: this.spot,
+      phase: this.phase, time: L ? L.time : this.time, deadTime: L ? L.deadTime : this.deadTime, carrier: this.carrier, selected: this.selected, spot: this.spot,
+      lining: !!L,
       // The line is in pass protection (never on a run play).
       pocket: this.inPocket(),
       // For the animation: the tackle in progress (or the one that ended the
       // rep) and the last few missed tackles.
-      tackle: this.tackle ? { tackler: this.tackle.tackler, carrier: this.carrier, at: this.tackle.at, sack: this.tackle.sack, ...this.tackle.hit, helpers: this.tackle.joined.slice() } : null,
-      misses: this.misses.slice(),
+      tackle: L ? L.tackle : this.tackle ? { tackler: this.tackle.tackler, carrier: this.carrier, at: this.tackle.at, sack: this.tackle.sack, ...this.tackle.hit, helpers: this.tackle.joined.slice() } : null,
+      misses: L ? L.misses : this.misses.slice(),
       ball: { ...this.ball },
       players: this.players.map(p => ({
         id: p.id, x: p.x, z: p.z, vx: p.vx, vz: p.vz, facing: p.facing,
@@ -1919,4 +1973,4 @@ export class Simulation {
 
   drainEvents() { return this.events.splice(0); }
 }
-Object.assign(Simulation.prototype, defense, coverage, protection, running, support, pursuit);
+Object.assign(Simulation.prototype, defense, coverage, protection, running, support, pursuit, comeback);

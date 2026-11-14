@@ -249,7 +249,7 @@ export function knockedDown(anim, pose, u, rising) {
 // The ball carrier (or a sacked quarterback).
 export function tackled(anim, pose, age, data, p, ctx) {
   const tk = ctx.tackle, d = anim.dims, k = d.k;
-  const arm = ctx.holderId === p.id ? carryArm(anim, p) : -1;
+  const arm = ctx.holderId === p.id || ctx.downedId === p.id ? carryArm(anim, p) : -1;
   if (!tk) {                                  // wrapped with no record: just fight for yards
     pose.pelvis.y -= 0.16; pose.hips.x = 0.36; pose.spine.x = 0.32;
     if (arm >= 0) cover(pose, arm);

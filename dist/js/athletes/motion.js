@@ -171,7 +171,8 @@ export class Animator {
   }
 
   resolveAction(p, ctx, teleport = false) {
-    if (ctx.presnap) return 'ready';
+    // Before the snap, and set on his spot in a hurry-up lineup.
+    if (ctx.presnap || (ctx.lining && p.action === 'ready')) return 'ready';
     // In a tackle (the runner, the tackler, the second man in) until he is
     // back on his feet after the whistle.
     const role = tackleRole(this, p, ctx.tackle);

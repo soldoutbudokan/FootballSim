@@ -65,6 +65,21 @@ const FIELD = {
   red: { run: 1.1, quick: 1.2, mid: 1.0, shot: 0.4, pa: 1.0 },
   backed: { run: 1.3, quick: 1.2, mid: 0.9, shot: 0.5, pa: 0.5 },
 };
+// The two-minute offense. A comeback (sim/comeback.js) passes `hurry`: the
+// seconds left, the timeouts left and the yards still needed (to field-goal
+// range when three points are enough, else to the goal line). Class
+// multipliers by how the clock stands against the yards, a timeout counting
+// as PACE.timeout s: `drill`, on pace, throws almost every down and keeps the
+// fakes in the bag; `chase`, with under PACE.chase s for each yard still
+// needed and more than PACE.near yd to go, goes down the field; `heave`,
+// with PACE.heave s or less and more than PACE.far yd to go, is the last
+// play or two: shots only.
+const TEMPO = {
+  drill: { run: 0.2, quick: 1.0, mid: 1.3, shot: 1.1, pa: 0.25 },
+  chase: { run: 0.05, quick: 0.5, mid: 1.2, shot: 2.4, pa: 0.1 },
+  heave: { run: 0, quick: 0.05, mid: 0.4, shot: 5, pa: 0 },
+};
+const PACE = { chase: 0.9, near: 12, heave: 8, far: 25, timeout: 10 };
 // Fit within a class:
 // On 3rd and 4th down a pass needs routes that get there (STICKS): with
 // `need` of them (`needLong` from 15 yd to go) it fits in full, with fewer
@@ -152,14 +167,17 @@ export function routesThere(play, d) {
 
 // The situation as the coordinator reads it. Repeat-the-spot reps are a
 // 1st and 10 (or goal) every time, and only the red zone counts there.
-export function readSituation({ down = 1, toGo = 10, spot = 35, mode = 'drive' } = {}) {
-  const togoal = GOAL - spot, reps = mode !== 'drive';
+// `tempo` (TEMPO) is set only with a clock to beat.
+export function readSituation({ down = 1, toGo = 10, spot = 35, mode = 'drive', hurry = null } = {}) {
+  const togoal = GOAL - spot, reps = mode === 'reps';
   if (reps) { down = 1; toGo = Math.min(10, togoal); }
   const downs = toGo <= 2 && (down > 1 || togoal <= 2) ? 'short'
     : down >= 3 && toGo >= 15 ? 'verylong' : down >= 3 && toGo >= 7 ? 'long' : down >= 3 ? 'medium'
     : down === 2 && toGo >= 7 ? 'second' : 'first';
   const field = togoal <= 5 ? 'goal' : togoal <= 20 ? 'red' : !reps && spot <= 20 ? 'backed' : null;
-  return { down, toGo, togoal, spot, downs, field };
+  const tempo = !hurry ? null : hurry.clock <= PACE.heave && hurry.need > PACE.far ? 'heave'
+    : hurry.need > PACE.near && (hurry.clock + PACE.timeout * (hurry.timeouts || 0)) / hurry.need < PACE.chase ? 'chase' : 'drill';
+  return { down, toGo, togoal, spot, downs, field, tempo };
 }
 
 // One play's fit inside its class (FIT).
@@ -187,7 +205,9 @@ function fitOf(play, situ) {
 // (sums to 1).
 export function playWeights(situation, plays = PLAYS) {
   const situ = situation.downs ? situation : readSituation(situation);
-  const downs = DOWNS[situ.downs], field = FIELD[situ.field] || {};
+  const downs = DOWNS[situ.downs], field = { ...FIELD[situ.field] }, tempo = TEMPO[situ.tempo];
+  // The clock's say multiplies the field's.
+  if (tempo) for (const c of CLASSES) field[c] = (field[c] ?? 1) * tempo[c];
   const fits = plays.map(p => fitOf(p, situ));
   const share = {}, total = {};
   for (const c of CLASSES) { share[c] = downs[c] * (field[c] ?? 1); total[c] = 0; }
