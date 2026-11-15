@@ -67,6 +67,24 @@ poseTest('engaged blockers and rushers keep helmets and pads apart with the hand
   assert.ok(reached / hands > 0.85, `hands on the other body: ${reached} of ${hands}`);
 });
 
+poseTest('linemen in their stances rest a hand on the turf, on the fingertips, under a flat back', () => {
+  const r = rep(1, { offense: 'mesh', coverage: 'cover3' }), tip = new THREE.Vector3();
+  // Fingers are only posed near the camera: put it over the line.
+  r.athletes.camera.position.set(0, 3, -r.sim.spot);
+  r.athletes.update(r.sim.snapshot(), 1 / 60);
+  // Lowest fingertip of each hand (the last joint of a finger is about an inch from its tip).
+  const fingertips = (rig, i) => Math.min(...rig.digits[i].slice(1).map(({ joints }) => tip.set(0, -0.016, 0).applyMatrix4(joints[2].matrixWorld).y));
+  for (const id of ['LT', 'LG', 'RG', 'RT', 'DE1', 'DE2', 'DT1', 'DT2']) {
+    const rig = r.athletes.rigs.get(id), W = rig.world, low = [0, 1].map(i => fingertips(rig, i)), down = low[0] < low[1] ? 0 : 1;
+    assert.ok(low[down] > -0.03 && low[down] < 0.04, `${id}: fingertips at ${low[down].toFixed(3)} yd`);
+    assert.ok(W.hands[down].y > 0.08 && W.hands[down].y < 0.24, `${id}: the wrist is off the ground (${W.hands[down].y.toFixed(3)})`);
+    assert.ok(W.reachShort.hands[down] < 0.01, `${id}: the arm reaches the ground`);
+    // Shoulders about level with the hips, the head up.
+    assert.ok(Math.abs(W.chest.y - W.pelvis.y) < 0.2, `${id}: flat back (chest ${W.chest.y.toFixed(2)}, hips ${W.pelvis.y.toFixed(2)})`);
+    if (id.startsWith('DT')) assert.ok(low[1 - down] < 0.04, `${id}: both hands down`);
+  }
+});
+
 poseTest('on a pass play unengaged linemen sit in a pass set and coverage players crouch', () => {
   const set = [], cover = [];
   // Sample where a posture has blended fully in: a beaten lineman eases back

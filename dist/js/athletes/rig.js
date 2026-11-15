@@ -454,6 +454,10 @@ export class Rig {
     for (const list of [this.uppers, this.pads, this.swings]) for (const o of list) o.quaternion.copy(HALF_TURN);
     this.root.updateMatrixWorld(true);
     this.bindInverse = this.joints.map(j => j.matrixWorld.clone().invert());
+    // Finger bones come last. From far off they are not worth posing: the
+    // digits then stay flat on the hand (setFingers).
+    this.fingerBase = [BONE_INDEX.thumb1_0, BONE_INDEX.thumb1_1];
+    this.fingersOn = true;
     this.buildParts(geometry, atlas, jersey, look);
     if (lowGeometry && squad.builders.bodyLow) {
       this.level = 'Low';
@@ -474,6 +478,15 @@ export class Rig {
       reachShort: { hands: [0, 0], feet: [0, 0] },
     };
     this.chestQuat = new THREE.Quaternion();
+  }
+
+  // Whether the fingers are posed. Off, the thirty finger joints are left out
+  // of the joint tree and their bones follow the hand, flat as modelled; an
+  // athlete too far away for fingers to show is posed that way.
+  setFingers(on) {
+    if (on === this.fingersOn) return;
+    this.fingersOn = on;
+    for (let i = 0; i < 2; i++) for (const { joints } of this.digits[i]) { if (on) this.hands[i].add(joints[0]); else this.hands[i].remove(joints[0]); }
   }
 
   // Bakes one part into a squad mesh. `bone` is the bone it rides on.
@@ -780,7 +793,7 @@ export class Rig {
       this.upMids[i].quaternion.setFromAxisAngle(Y_AXIS, -twist / 2);
       // The pad cap stays put until the arm is well away from the side, then
       // tips part of the way with it (about forty degrees overhead).
-      this.pads[i].quaternion.copy(HALF_TURN).slerp(this.swings[i].quaternion, 0.35 * smoothstep(0.35, 2.2, raise));
+      this.pads[i].quaternion.copy(HALF_TURN).slerp(this.swings[i].quaternion, 0.26 * smoothstep(0.35, 2.2, raise));
 
       // The hand on the forearm: the pose's Euler angles, or turned toward
       // the attitude it asks for (aim), within a wrist's range.
@@ -809,6 +822,7 @@ export class Rig {
       // Fingers, from the hand shape. Flexion is about the hand's Z (toward
       // the palm, so mirrored on the right hand); the fan is about the palm
       // normal, the same way on both.
+      if (!this.fingersOn) continue;
       const f = pose.fingers[i], digits = this.digits[i];
       for (let n = 1; n < 5; n++) {
         const [a, b, c] = digits[n].joints, curl = f[n];
@@ -838,8 +852,15 @@ export class Rig {
       toe.updateMatrixWorld(true);
     }
 
-    const bones = this.squad.bones;
-    for (let b = 0; b < this.joints.length; b++) bones.set(this.boneBase + b, _m.multiplyMatrices(this.joints[b].matrixWorld, this.bindInverse[b]));
+    const bones = this.squad.bones, posed = this.fingersOn ? this.joints.length : this.fingerBase[0];
+    for (let b = 0; b < posed; b++) bones.set(this.boneBase + b, _m.multiplyMatrices(this.joints[b].matrixWorld, this.bindInverse[b]));
+    if (!this.fingersOn) {
+      const data = bones.data, row = this.boneBase * 16;
+      for (let i = 0; i < 2; i++) {
+        const hand = row + BONE_INDEX['hand' + i] * 16, first = row + this.fingerBase[i] * 16;
+        for (let n = 0; n < 15; n++) data.copyWithin(first + n * 16, hand, hand + 16);
+      }
+    }
 
     W.pelvis.setFromMatrixPosition(this.pelvis.matrixWorld);
     W.chest.setFromMatrixPosition(this.chest.matrixWorld);

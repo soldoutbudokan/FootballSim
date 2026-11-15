@@ -6,7 +6,7 @@ import { HAND, setHand, aimHand } from './hands.js';
 const _ball = new THREE.Vector3(), _local = new THREE.Vector3(), _s = new THREE.Vector3(), _d = new THREE.Vector3(), _m = new THREE.Matrix4();
 // Height of the wrist over the turf when the fingertips carry a stance (yards
 // for a 6 ft 2 in man).
-const WRIST_UP = 0.15;
+const WRIST_UP = 0.185;
 
 // Puts hand i down on the turf under its shoulder, the weight on spread
 // fingertips. The arm only reaches so far: the hips sink and fold until the

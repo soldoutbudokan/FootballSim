@@ -106,9 +106,12 @@ export class Athletes {
 
   update(state, dt, { menu = false } = {}) {
     const ctx = this.frameContext(state, dt, menu);
+    const eye = this.camera?.position;
     for (const p of state.players) {
       const anim = this.animators.get(p.id);
       if (!anim) continue;
+      // Fingers are posed for the men near the camera (within about 24 yd).
+      if (eye) anim.rig.setFingers(Math.hypot(p.x - eye.x, 1.1 - eye.y, -p.z - eye.z) < (anim.rig.fingersOn ? 26 : 22));
       anim.rig.apply(anim.update(p, ctx), p.x, p.z, anim.yaw);
     }
     this.squad.commit();
