@@ -2,7 +2,7 @@ import * as THREE from '../../vendor/three.module.js';
 import { loft, mounds, angleBetween, shadeBy, helmetShell, helmetHardware, chinStrap, helmetVisor, glove, digits, HAND_DIGITS, pants, PANTS, cleat, cleatStuds, athleteFace, faceDetails, HELMET_UV } from './geometry.js';
 import { solveTwoBone } from './ik.js';
 import { eulerQuat, SPINE_SPLIT } from './pose.js';
-import { hashString, SIDES, smoothstep, clamp, lerp } from './math.js';
+import { hashString, SIDES, smoothstep, clamp, lerp, bump } from './math.js';
 import { jerseyFor, accessoriesFor, TEAM, SURFACE, REGIONS, GRAIN, GRAIN_TILE } from './uniform.js';
 import { BoneTexture, SkinnedGeometryBuilder, jointWeights, chainWeights, skinnedMesh } from './skin.js';
 
@@ -134,23 +134,28 @@ export class Squad {
 // ---------------------------------------------------------------------------
 // Body types. Proportions follow a 6 ft 2 in athlete (H = 2.06 yd): head and
 // helmet about 0.135 H, shoulder-to-hip 0.31 H, hip-to-ground 0.50 H,
-// shoulder-to-wrist 0.36 H. Linemen are taller with a broader torso and more upper-leg mass.
+// shoulder-to-wrist 0.36 H. Heights (to the top of the helmet) are the
+// league's averages by position: a tackle stands a head over a corner.
+// Linemen have a broader torso, more upper-leg mass and a belly that stands
+// out past the chest plate; no two men of a position are quite the same build.
 
 export const BODY_TYPES = {
-  ol: { height: 2.12, torso: 1.29, limb: 1.24, belly: 1.2 },
-  dl: { height: 2.12, torso: 1.25, limb: 1.2, belly: 1.12 },
-  te: { height: 2.1, torso: 1.1, limb: 1.07, belly: 1.04 },
-  lb: { height: 2.07, torso: 1.1, limb: 1.07, belly: 1.03 },
-  rb: { height: 2.0, torso: 1.07, limb: 1.13, belly: 1.0 },
-  qb: { height: 2.08, torso: 1.0, limb: 1.0, belly: 1.0 },
+  ol: { height: 2.175, torso: 1.29, limb: 1.24, belly: 1.2 },
+  dl: { height: 2.135, torso: 1.25, limb: 1.2, belly: 1.12 },
+  te: { height: 2.16, torso: 1.1, limb: 1.07, belly: 1.03 },
+  lb: { height: 2.09, torso: 1.1, limb: 1.08, belly: 1.03 },
+  rb: { height: 1.995, torso: 1.07, limb: 1.13, belly: 1.0 },
+  qb: { height: 2.115, torso: 1.0, limb: 1.0, belly: 1.0 },
   wr: { height: 2.05, torso: 0.96, limb: 0.95, belly: 0.95 },
-  cb: { height: 2.01, torso: 0.95, limb: 0.95, belly: 0.94 },
-  s: { height: 2.03, torso: 0.98, limb: 0.97, belly: 0.96 },
+  cb: { height: 2.005, torso: 0.95, limb: 0.95, belly: 0.94 },
+  s: { height: 2.035, torso: 0.98, limb: 0.97, belly: 0.96 },
 };
 
 function dimensionsFor(spec) {
-  const type = BODY_TYPES[spec.role] || BODY_TYPES.wr;
-  const k = (type.height + (hashString(spec.id) - 0.5) * 0.05) / 2.06;
+  const base = BODY_TYPES[spec.role] || BODY_TYPES.wr;
+  const vary = (salt, spread) => 1 + (hashString(spec.id + salt) - 0.5) * 2 * spread;
+  const type = { ...base, torso: base.torso * vary('torso', 0.03), limb: base.limb * vary('limb', 0.03) };
+  const k = (type.height + (hashString(spec.id) - 0.5) * 0.06) / 2.06;
   return {
     ...type, k,
     hipY: 1.03 * k,            // hip joint height standing straight
@@ -251,7 +256,7 @@ export function createGeometries({ low = false } = {}) {
     ], {
       ...L(14, 2), capTop: false, capBottom: false, ao: AO.sock,
       sculpt: mounds([
-        { y: -0.16, t: BACK - 0.6, sy: 0.06, st: 0.5, a: 0.006 }, { y: -0.18, t: BACK + 0.5, sy: 0.05, st: 0.45, a: 0.004 },
+        { y: -0.15, t: BACK - 0.45, sy: 0.07, st: 0.55, a: 0.013 }, { y: -0.17, t: BACK + 0.5, sy: 0.06, st: 0.5, a: 0.009 },
         { y: -0.3, t: FRONT, sy: 0.12, st: 0.3, a: 0.003 },
       ]),
     }),
@@ -408,7 +413,7 @@ export class Rig {
       // The knee's helper turns half as far as the shin; the toes hinge at
       // the ball of the foot.
       this.kneeBones.push(joint('knee' + i, thigh, 0, -d.thigh, 0));
-      this.toes.push(joint('toe' + i, foot, 0, -0.69 * d.ankle, 1.5 * d.ankle));
+      this.toes.push(joint('toe' + i, foot, 0, -0.69 * d.ankle, 1.65 * d.ankle));
 
       // The collarbone pivots at the breastbone and carries the shoulder
       // joint; the arm itself stays a child of the chest (hand targets and
@@ -560,21 +565,30 @@ export class Rig {
     // the leg the limb's girth, measured from the hip joint.
     const waistY = _t.setFromMatrixPosition(this.abdomen.matrixWorld).y, seatUV = geometry.pants.attributes.seat;
     const hipsPanel = region('hips', { shared: true }), legPanel = region('leg', { shared: true, flipV: true });
+    // A big man's belly stands out in front, fullest at the navel, and takes
+    // the waistband and the bottom of the chest with it; everybody's back
+    // hollows above the belt.
+    const paunch = Math.max(0, d.belly - 1) * 0.42, front = z => smoothstep(-0.03, 0.07, z);
     const pantsFit = v => {
-      const leg = smoothstep(0, -0.14, v.y), across = v.x + PANTS.hip;
+      const leg = smoothstep(0, -0.14, v.y), across = v.x + PANTS.hip, ahead = front(v.z);
       const down = across <= PANTS.hip ? across * d.hipX / PANTS.hip : d.hipX + (across - PANTS.hip) * limb;
       v.x = (lerp(across * torso, down, leg) - d.hipX) / limb;
-      v.z *= lerp(hips[2], limb, leg) / limb;
+      v.z = (v.z * lerp(hips[2], limb, leg) + 0.6 * paunch * ahead * smoothstep(0, 0.15, v.y)) / limb;
     };
-    body('pelvis', geometry.belt, { scale: hips, color: TEAM.belt, surface: SURFACE.belt, grain: grain(GRAIN.leather, 1, 0.04, 0.6), uv: plain, blend: [['abdomen', 0.06]], detail: true });
+    const beltFit = v => { v.z += 0.62 * paunch * front(v.z) / hips[2]; };
+    const bellyFit = v => {
+      v.z += (paunch * front(v.z) * bump(-0.16, 0.32, v.y) + 0.012 * smoothstep(0.03, -0.07, v.z) * bump(-0.06, 0.26, v.y)) / belly[2];
+    };
+    const chestFit = v => { v.z += 0.5 * paunch * front(v.z) * (1 - smoothstep(-0.06, 0.1, v.y)) / depth; };
+    body('pelvis', geometry.belt, { scale: hips, color: TEAM.belt, surface: SURFACE.belt, grain: grain(GRAIN.leather, 1, 0.04, 0.6), uv: plain, blend: [['abdomen', 0.06]], warp: beltFit, detail: true });
     // The lower jersey takes the bottom row of the torso panel (its side
     // panels and the folds at the belt) all the way down.
     const hem = region('torso', { flipU: true });
-    body('abdomen', geometry.abdomen, { scale: belly, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.05 * torso, 0.31, 0.55), uv: u => hem(u, 0.03), blend: [['pelvis', 0.06], ['chest', 0.1]] });
+    body('abdomen', geometry.abdomen, { scale: belly, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.05 * torso, 0.31, 0.55), uv: u => hem(u, 0.03), blend: [['pelvis', 0.06], ['chest', 0.1]], warp: bellyFit });
     // The top of the yoke, out toward each shoulder, lifts with the collarbone.
     const chestY = _t.setFromMatrixPosition(this.chest.matrixWorld).y, span = d.shoulder[0];
     const yoke = (p, waist) => give(waist(p), p.x > 0 ? 'clav0' : 'clav1', 0.85 * smoothstep(0.4 * span, 0.9 * span, Math.abs(p.x)) * smoothstep(0.15 * k, 0.25 * k, p.y - chestY));
-    body('chest', geometry.chest, { scale: [torso, k, depth], surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.36 * torso, 0.432, 0.55), uv: region('torso'), blend: [['abdomen', 0.1]], weights: yoke });
+    body('chest', geometry.chest, { scale: [torso, k, depth], surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.36 * torso, 0.432, 0.55), uv: region('torso'), blend: [['abdomen', 0.1]], weights: yoke, warp: chestFit });
     body('chest', geometry.collar, { scale: [torso ** 0.6, k, depth ** 0.6], color: trim, surface: SURFACE.collar, grain: grain(GRAIN.rib, 0.66, 0.04, 0.8), uv: plain, detail: true });
     // The neck is modelled from the chest joint up; it rides the neck bone.
     body('neck', geometry.neck, { pos: [0, -NECK_BASE * d.neck, 0], scale: [torso ** 0.6, k, depth ** 0.6], color: look.skin, surface: SURFACE.skin, grain: grain(GRAIN.skin, 0.48, 0.17, 0.3), uv: plain, blend: [['chest', 0.04], ['head', 0.05]] });
@@ -599,6 +613,10 @@ export class Rig {
       const thigh = 'thigh' + i, shin = 'shin' + i, foot = 'foot' + i, upper = 'upper' + i, fore = 'fore' + i, hand = 'hand' + i;
       // Right-hand limbs are mirror images of the left.
       const legScale = [s * limb, k, limb], armScale = [s * limb, k, limb], capScale = [s * limb ** 0.7, k, limb ** 0.7];
+      // Muscle scales with the build; wrists and ankles much less.
+      const slim = limb ** -0.5, wristFit = v => { const w = lerp(1, slim, smoothstep(-0.18, -0.33, v.y)); v.x *= w; v.z *= w; };
+      const ankleFit = v => { const w = lerp(1, slim, smoothstep(-0.3, -0.46, v.y)); v.x *= w; v.z *= w; };
+      const shoe = [1.1 * limb ** 0.4, k, 1.1 * k];
       // Knee and elbow fold on one side and turn about a helper bone that
       // goes half way, so the joint keeps its girth when it is bent double.
       const knee = other => ({ bone: other, radius: 0.09, crease: { side: -1, radius: 0.03 }, helper: 'knee' + i });
@@ -613,11 +631,11 @@ export class Rig {
         return list;
       };
       body(thigh, geometry.pants, { scale: legScale, surface: SURFACE.pants, grain: grain(GRAIN.knit, 0.62 * limb, 0.64), uv: (u, v, n) => (seatUV.getX(n) >= 0 ? hipsPanel(seatUV.getX(n), seatUV.getY(n)) : legPanel(u, v)), blend: [knee(shin)], weights: hip, warp: pantsFit });
-      body(shin, geometry.sock, { scale: legScale, surface: SURFACE.sock, grain: grain(GRAIN.rib, 0.34 * limb, 0.45, 0.7), uv: region('sock', { shared: true, flipV: true }), blend: [knee(thigh), [foot, 0.05]] });
+      body(shin, geometry.sock, { scale: legScale, surface: SURFACE.sock, grain: grain(GRAIN.rib, 0.34 * limb, 0.45, 0.7), uv: region('sock', { shared: true, flipV: true }), blend: [knee(thigh), [foot, 0.05]], warp: ankleFit });
       // The shoe bends at the ball of the foot.
       const ball = { bone: 'toe' + i, radius: 0.026 * k, dir: FORWARD };
-      body(foot, geometry.cleat, { scale: [1, k, k], color: look.cleat, surface: SURFACE.cleat, grain: [GRAIN.leather, 12, 8, 0.25], uv: plain, blend: [[shin, 0.04], ball] });
-      body(foot, geometry.studs, { scale: [1, k, k], color: '#101114', surface: SURFACE.sole, uv: plain, blend: [ball], detail: true });
+      body(foot, geometry.cleat, { scale: shoe, color: look.cleat, surface: SURFACE.cleat, grain: [GRAIN.leather, 12, 8, 0.25], uv: plain, blend: [[shin, 0.04], ball] });
+      body(foot, geometry.studs, { scale: shoe, color: '#101114', surface: SURFACE.sole, uv: plain, blend: [ball], detail: true });
 
       // Shoulder to elbow, everything around the arm takes its weights from
       // one chain, so the sleeve and the arm inside it cannot part: the cap
@@ -633,9 +651,9 @@ export class Rig {
       // elbow and all the way at the wrist; tape and gloves follow the same
       // weights as the arm they wrap.
       const turn = { from: fore, to: hand, bones: [[fore, 0.2], ['foreMid' + i, 0.6], ['foreTwist' + i, 1]] };
-      body(fore, geometry.forearm, { scale: armScale, color: armColor, surface: armSurface, grain: grain(armGrain, 0.33 * limb, 0.4, look.armSleeve ? 0.5 : 0.3), uv: plain, blend: [elbow(upper), [hand, 0.03]], chain: turn });
+      body(fore, geometry.forearm, { scale: armScale, color: armColor, surface: armSurface, grain: grain(armGrain, 0.33 * limb, 0.4, look.armSleeve ? 0.5 : 0.3), uv: plain, blend: [elbow(upper), [hand, 0.03]], chain: turn, warp: wristFit });
       if (look.band && !look.armSleeve) body(upper, geometry.band, { scale: armScale, color: look.band, surface: SURFACE.tape, grain: grain(GRAIN.rib, 0.46, 0.03, 0.7), uv: plain, chain: arm, detail: true });
-      if (look.tape) body(fore, geometry.tape, { scale: armScale, color: '#ebe9e2', surface: SURFACE.tape, grain: grain(GRAIN.weave, 0.22, 0.09), uv: plain, blend: [[hand, 0.03]], chain: turn, detail: true });
+      if (look.tape) body(fore, geometry.tape, { scale: armScale, color: '#ebe9e2', surface: SURFACE.tape, grain: grain(GRAIN.weave, 0.22, 0.09), uv: plain, blend: [[hand, 0.03]], chain: turn, warp: wristFit, detail: true });
       const gloveScale = [s * gs[0], gs[1], gs[2]], glove = { scale: gloveScale, color: look.glove, surface: SURFACE.glove, grain: [GRAIN.leather, 4, 5, 0.22], uv: plain };
       body(hand, geometry.glove, { ...glove, blend: [{ bone: 'foreTwist' + i, radius: 0.03, pivot: hand, ownIsChild: true }] });
       // Each digit is rigid between its joints and shared across them. The
@@ -677,13 +695,39 @@ export class Rig {
     if (pose.neck.x || pose.neck.y || pose.neck.z) this.neck.quaternion.premultiply(eulerQuat(pose.neck, _q));
     this.head.quaternion.copy(this.neck.quaternion).invert().multiply(_qa);
 
-    // Legs: solve in the pelvis frame.
+    // Legs: solve in the pelvis frame. A body that is down lies on the turf,
+    // not in it: an ankle that would be under the ground is lifted onto it,
+    // and a knee that would be is turned upward until it clears.
     _qi.copy(this.pelvis.quaternion).invert();
+    const down = Math.abs(pose.tiltPitch) > 0.12 || Math.abs(pose.tiltRoll) > 0.12;
+    if (down) {
+      _qc.copy(this.tilt.quaternion);                                   // tilt frame -> upright
+      _vy.set(0, 1, 0).applyQuaternion(_qa.copy(_qc).invert());         // straight up, in the tilt frame
+    }
     for (let i = 0; i < 2; i++) {
-      _t.copy(pose.feet[i]).sub(pose.pelvis).applyQuaternion(_qi);
-      _pole.copy(pose.knees[i]).applyQuaternion(_qi);
+      _vx.copy(pose.feet[i]);
+      _vz.copy(pose.knees[i]);
+      if (down) {
+        const low = 0.075 * d.k - (_t.copy(_vx).applyQuaternion(_qc).y + pose.tiltLift);
+        if (low > 0) _vx.addScaledVector(_vy, low);
+        // Nor do the toes dig in: the ball of the foot stays on top too.
+        _t.set(0, -0.69 * d.ankle, 1.65 * d.ankle).applyQuaternion(eulerQuat(pose.footRot[i], _qb)).add(_vx);
+        const dig = 0.02 * d.k - (_t.applyQuaternion(_qc).y + pose.tiltLift);
+        if (dig > 0) _vx.addScaledVector(_vy, dig);
+      }
       _origin.copy(this.thighs[i].position);
-      const bend = solveTwoBone(_origin, _t, _pole, d.thigh, d.shin, this.thighs[i].quaternion, _ik);
+      let bend = 0;
+      for (let pass = 0; pass < (down ? 3 : 1); pass++) {
+        _t.copy(_vx).sub(pose.pelvis).applyQuaternion(_qi);
+        _pole.copy(_vz).applyQuaternion(_qi);
+        bend = solveTwoBone(_origin, _t, _pole, d.thigh, d.shin, this.thighs[i].quaternion, _ik);
+        if (!down) break;
+        // The knee, in the tilt frame, and its height over the turf.
+        _t.set(0, -d.thigh, 0).applyQuaternion(this.thighs[i].quaternion).add(_origin).applyQuaternion(this.pelvis.quaternion).add(pose.pelvis);
+        const low = 0.085 * d.limb - (_t.applyQuaternion(_qc).y + pose.tiltLift);
+        if (low <= 0) break;
+        _vz.normalize().addScaledVector(_vy, 0.6 + 6 * low);
+      }
       W.reachShort.feet[i] = _ik.short;
       this.shins[i].position.y = this.kneeBones[i].position.y = -d.thigh - _ik.stretch / 2;
       this.feet[i].position.y = -d.shin - _ik.stretch / 2;

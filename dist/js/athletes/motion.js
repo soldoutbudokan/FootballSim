@@ -42,9 +42,9 @@ const ROLE_STYLE = {
 };
 // The ankle over the ball of a foot whose heel has come up by `pitch`: how
 // far it rises and how far forward it moves (the ball is 0.062 k under the
-// ankle and 0.135 k ahead of it).
-const rollY = (pitch, k) => (0.062 * (Math.cos(pitch) - 1) + 0.135 * Math.sin(pitch)) * k;
-const rollZ = (pitch, k) => (0.062 * Math.sin(pitch) + 0.135 * (1 - Math.cos(pitch))) * k;
+// ankle and 0.149 k ahead of it).
+const rollY = (pitch, k) => (0.062 * (Math.cos(pitch) - 1) + 0.149 * Math.sin(pitch)) * k;
+const rollZ = (pitch, k) => (0.062 * Math.sin(pitch) + 0.149 * (1 - Math.cos(pitch))) * k;
 
 // Catmull-Rom through values v at rising times t, for u within their range.
 function spline(t, v, u) {
