@@ -84,7 +84,7 @@ function packWeights(list, bones, weights) {
 export class SkinnedGeometryBuilder {
   constructor() {
     this.position = []; this.normal = []; this.uv = []; this.color = [];
-    this.bones = []; this.weights = []; this.surface = []; this.grain = [];
+    this.bones = []; this.weights = []; this.surface = []; this.grain = []; this.fold = [];
     this.indices = []; this.detailIndices = [];
     this.vertexCount = 0;
     // Per owner (athlete index): where his triangles sit in the base and the
@@ -99,7 +99,8 @@ export class SkinnedGeometryBuilder {
   // weights(p, i) -> [[bone, share], ...] for a bind-space point (vertex i of
   //   the part), or the two-bone form [ownBone, otherBone, ownShare]
   // color: linear THREE.Color multiplied into the vertex colour (baked AO)
-  // uv: function(u, v, i) -> [u, v] remapping the part's own uv (vertex i)
+  // uv: function(u, v, i) -> [u, v] remapping the part's own uv (vertex i);
+  //   it may add the point's place in the fold map: [u, v, foldU, foldV]
   // surface: [roughness, metalness, sheen]
   // grain: [layer, tilesU, tilesV, strength] in the detail texture array
   //   (uniform.js); the part's own uv times the tile counts is its detail uv
@@ -119,8 +120,9 @@ export class SkinnedGeometryBuilder {
       _v.fromBufferAttribute(nor, i).applyMatrix3(_n).normalize();
       this.normal.push(_v.x, _v.y, _v.z);
       const u0 = uvs ? uvs.getX(i) : 0.5, v0 = uvs ? uvs.getY(i) : 0.5;
-      const [u1, v1] = uv ? uv(u0, v0, i) : [u0, v0];
-      this.uv.push(u1, v1);
+      const mapped = uv ? uv(u0, v0, i) : null;
+      this.uv.push(mapped ? mapped[0] : u0, mapped ? mapped[1] : v0);
+      if (mapped && mapped.length > 3) this.fold.push(mapped[2], mapped[3]); else this.fold.push(-1, -1);
       const ao = col ? col.getX(i) : 1, g = col ? col.getY(i) : 1, bl = col ? col.getZ(i) : 1;
       this.color.push(color.r * ao, color.g * g, color.b * bl);
       this.surface.push(surface[0], surface[1], surface[2] || 0);
@@ -145,6 +147,7 @@ export class SkinnedGeometryBuilder {
     g.setAttribute('athWeights', new THREE.Uint8BufferAttribute(this.weights, 3, true));
     g.setAttribute('athSurface', new THREE.Float32BufferAttribute(this.surface, 3));
     g.setAttribute('athDetail', new THREE.Float32BufferAttribute(this.grain, 4));
+    g.setAttribute('athFold', new THREE.Float32BufferAttribute(this.fold, 2));
     const all = this.indices.concat(this.detailIndices);
     g.setIndex(this.vertexCount > 65535 ? new THREE.Uint32BufferAttribute(all, 1) : new THREE.Uint16BufferAttribute(all, 1));
     g.userData.baseCount = this.indices.length;
@@ -250,8 +253,10 @@ export function chainWeights(a, b, bones) {
 // rubber and metal into one draw call). With a detail map (a texture array of
 // tiling micro-surfaces: mesh weave, stretch knit, skin, rib knit, grain) each
 // part also picks a layer, which bends the normal and varies the roughness
-// and the shade in the creases of the weave. `material.userData.athDetail =
-// false` (and needsUpdate) compiles the patch without it: the lowest tier.
+// and the shade in the creases of the weave. With a fold map (folds.js) the
+// cloth also takes its folds: a normal and a shade in the creases, looked up
+// at each vertex's place in that map. `material.userData.athDetail = false`
+// (and needsUpdate) compiles the patch without either: the lowest tier.
 
 // The colour, depth and distance programs all skin with this.
 const skinHeader = stride => `
@@ -278,8 +283,10 @@ mat4 athSkin() {
 const SURFACE_HEADER = `
 attribute vec3 athSurface;
 attribute vec4 athDetail;
+attribute vec2 athFold;
 varying vec3 vAthSurface;
 varying vec4 vAthDetail;
+varying vec2 vAthFold;
 `;
 
 const FRAGMENT_HEADER = `
@@ -288,8 +295,12 @@ varying vec4 vAthDetail;
 uniform vec3 athFill;
 uniform vec3 athBounce;
 uniform vec3 athRim;
+varying vec2 vAthFold;
 #ifdef ATH_DETAIL
 uniform mediump sampler2DArray athDetailMap;
+#endif
+#ifdef ATH_FOLDS
+uniform sampler2D athFoldMap;
 #endif
 `;
 
@@ -301,6 +312,11 @@ roughnessFactor = vAthSurface.x;
 vec4 athGrain = texture(athDetailMap, vec3(vAthDetail.xy, floor(vAthDetail.z + 0.5)));
 roughnessFactor = clamp(roughnessFactor + (athGrain.b - 0.5) * 0.6 * vAthDetail.w, 0.04, 1.0);
 diffuseColor.rgb *= 1.0 + (athGrain.a - 0.5) * 1.2 * vAthDetail.w;
+#endif
+#ifdef ATH_FOLDS
+// Parts with no place in the fold map carry a negative one.
+vec4 athFolds = mix(vec4(0.5, 0.5, 1.0, 1.0), texture2D(athFoldMap, max(vAthFold, 0.0)), step(0.0, vAthFold.x));
+diffuseColor.rgb *= 0.7 + 0.3 * athFolds.b;
 #endif
 `;
 
@@ -315,6 +331,17 @@ const NORMAL = `
   vec3 athTan = athQ1p * athS.x + athQ0p * athT.x, athBit = athQ1p * athS.y + athQ0p * athT.y;
   float athDet = max(dot(athTan, athTan), dot(athBit, athBit));
   vec2 athXY = (athGrain.xy * 2.0 - 1.0) * vAthDetail.w * (athDet == 0.0 ? 0.0 : inversesqrt(athDet));
+  normal = normalize(normal + athTan * athXY.x + athBit * athXY.y);
+}
+#endif
+#ifdef ATH_FOLDS
+{
+  vec3 athQ0 = dFdx(-vViewPosition), athQ1 = dFdy(-vViewPosition);
+  vec2 athS = dFdx(vAthFold), athT = dFdy(vAthFold);
+  vec3 athQ1p = cross(athQ1, normal), athQ0p = cross(normal, athQ0);
+  vec3 athTan = athQ1p * athS.x + athQ0p * athT.x, athBit = athQ1p * athS.y + athQ0p * athT.y;
+  float athDet = max(dot(athTan, athTan), dot(athBit, athBit));
+  vec2 athXY = (athFolds.xy * 2.0 - 1.0) * (athDet == 0.0 ? 0.0 : inversesqrt(athDet));
   normal = normalize(normal + athTan * athXY.x + athBit * athXY.y);
 }
 #endif
@@ -345,8 +372,9 @@ export function setCharacterLight(light) {
 }
 
 // boneTexture: BoneTexture.texture (it carries the stride of its rows).
-export function skinMaterial(material, boneTexture, { depth = false, detailMap = null } = {}) {
+export function skinMaterial(material, boneTexture, { depth = false, detailMap = null, foldMap = null } = {}) {
   const detailed = () => !!detailMap && material.userData.athDetail !== false;
+  const folded = () => !!foldMap && material.userData.athDetail !== false;
   const stride = boneTexture.userData.stride, header = skinHeader(stride);
   material.onBeforeCompile = shader => {
     shader.uniforms.athBoneTexture = { value: boneTexture };
@@ -360,12 +388,13 @@ export function skinMaterial(material, boneTexture, { depth = false, detailMap =
     // last compiled program's, so a program compiled with the detail layer
     // and reused after a plain one would otherwise never get its texture.
     if (detailMap) shader.uniforms.athDetailMap = { value: detailMap };
+    if (foldMap) shader.uniforms.athFoldMap = { value: foldMap };
     Object.assign(shader.uniforms, CHARACTER_LIGHT);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\n' + header + SURFACE_HEADER)
       .replace('#include <beginnormal_vertex>', 'mat4 athM = athSkin();\nvec3 objectNormal = normalize(mat3(athM) * normal);')
-      .replace('#include <begin_vertex>', 'vec3 transformed = (athM * vec4(position, 1.0)).xyz;\nvAthSurface = athSurface;\nvAthDetail = athDetail;');
-    shader.fragmentShader = (detailed() ? '#define ATH_DETAIL\n' : '') + shader.fragmentShader
+      .replace('#include <begin_vertex>', 'vec3 transformed = (athM * vec4(position, 1.0)).xyz;\nvAthSurface = athSurface;\nvAthDetail = athDetail;\nvAthFold = athFold;');
+    shader.fragmentShader = (detailed() ? '#define ATH_DETAIL\n' : '') + (folded() ? '#define ATH_FOLDS\n' : '') + shader.fragmentShader
       .replace('#include <common>', '#include <common>\n' + FRAGMENT_HEADER)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' + ROUGHNESS)
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = vAthSurface.y;')
@@ -373,14 +402,14 @@ export function skinMaterial(material, boneTexture, { depth = false, detailMap =
       .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n' + LIGHT)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_SHEEN\nmaterial.sheenColor *= vAthSurface.z;\n#endif');
   };
-  material.customProgramCacheKey = () => 'athlete-skin-' + stride + '-' + material.type + (depth ? '-depth' : detailed() ? '-detail' : '');
+  material.customProgramCacheKey = () => 'athlete-skin-' + stride + '-' + material.type + (depth ? '-depth' : (detailed() ? '-detail' : '') + (folded() ? '-folds' : ''));
   return material;
 }
 
 // A merged, skinned mesh ready for the scene, with shadow materials that skin
 // the same way.
-export function skinnedMesh(geometry, material, boneTexture, name, detailMap = null) {
-  const mesh = new THREE.Mesh(geometry, skinMaterial(material, boneTexture, { detailMap }));
+export function skinnedMesh(geometry, material, boneTexture, name, detailMap = null, foldMap = null) {
+  const mesh = new THREE.Mesh(geometry, skinMaterial(material, boneTexture, { detailMap, foldMap }));
   mesh.name = name;
   mesh.frustumCulled = false;
   mesh.castShadow = true;

@@ -219,6 +219,7 @@ export class Athletes {
     for (const t of textures) t.dispose();
     this.squad.bones.texture.dispose();   // shader uniforms, not material properties
     this.materials.detail?.dispose();
+    this.materials.folds?.dispose();
   }
 
   // After the whistle with no carrier (an interception) the simulation keeps

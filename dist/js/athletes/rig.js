@@ -5,6 +5,7 @@ import { eulerQuat, SPINE_SPLIT } from './pose.js';
 import { hashString, SIDES, smoothstep, clamp, lerp, bump } from './math.js';
 import { jerseyFor, accessoriesFor, TEAM, SURFACE, REGIONS, GRAIN, GRAIN_TILE } from './uniform.js';
 import { BoneTexture, SkinnedGeometryBuilder, jointWeights, chainWeights, skinnedMesh } from './skin.js';
+import { foldUV } from './folds.js';
 
 // ---------------------------------------------------------------------------
 // Skeleton. Sixty-five bones per athlete; every visible part is skinned to
@@ -67,7 +68,8 @@ export class Squad {
     const names = { body: 'athletes:bodies', helmet: 'athletes:helmets', bodyLow: 'athletes:bodies-lod1', helmetLow: 'athletes:helmets-lod1' };
     for (const [key, builder] of Object.entries(this.builders)) {
       const material = key.startsWith('body') ? this.materials.body : this.materials.helmet;
-      const mesh = skinnedMesh(builder.build(), material, t, names[key], key.startsWith('body') ? this.materials.detail || null : null);
+      const body = key.startsWith('body');
+      const mesh = skinnedMesh(builder.build(), material, t, names[key], body ? this.materials.detail || null : null, body ? this.materials.folds || null : null);
       // A material array makes the renderer (and the shadow pass) draw the
       // geometry groups, i.e. only the athletes at this mesh's level.
       mesh.material = [mesh.material];
@@ -544,8 +546,12 @@ export class Rig {
     // (u, v) of a part -> a region of this player's atlas cell, or of the
     // cell everybody shares (pants and socks).
     const region = (name, { shared = false, flipU = false, flipV = false } = {}) => {
-      const [rx, ry, rw, rh] = REGIONS[name], o = shared ? atlas.shared || atlas.offset : atlas.offset, s = atlas.scale;
-      return (u, v) => [o[0] + (rx + (flipU ? 1 - u : u) * rw) * s[0], o[1] + (ry + (flipV ? 1 - v : v) * rh) * s[1]];
+      const [rx, ry, rw, rh] = REGIONS[name], o = shared ? atlas.shared || atlas.offset : atlas.offset, s = atlas.scale, cell = shared ? 1 : 0;
+      // The same point of the cell in the atlas and in the fold map.
+      return (u, v) => {
+        const cu = rx + (flipU ? 1 - u : u) * rw, cv = ry + (flipV ? 1 - v : v) * rh;
+        return [o[0] + cu * s[0], o[1] + cv * s[1], ...foldUV(cell, cu, cv)];
+      };
     };
     // Detail tiles for a tube of this girth and length (yards).
     const grain = (layer, around, length, strength = 1) => [layer, Math.max(1, Math.round(around / GRAIN_TILE[layer])), length / GRAIN_TILE[layer], strength];

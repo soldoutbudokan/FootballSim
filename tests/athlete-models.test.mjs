@@ -9,6 +9,7 @@ const poses = THREE ? await import('../dist/js/athletes/pose.js') : {};
 const uniform = THREE ? await import('../dist/js/athletes/uniform.js') : {};
 const shapes = THREE ? await import('../dist/js/athletes/geometry.js') : {};
 const skin = THREE ? await import('../dist/js/athletes/skin.js') : {};
+const folds = THREE ? await import('../dist/js/athletes/folds.js') : {};
 
 // Share of a geometry's triangles whose winding agrees with their vertex
 // normals: an inside-out part (a mirrored limb with the wrong winding, a
@@ -189,4 +190,51 @@ modelTest('fabric detail layers are tiling, neutral on average and one per kind 
   }
   for (const [name, s] of Object.entries(uniform.SURFACE)) assert.ok(s.length === 3 && s.every(v => v >= 0 && v <= 1), `${name} surface`);
   t.dispose();
+});
+
+modelTest('the fold map is flat where there is no cloth to fold, and every part has its place in it or none', () => {
+  const data = folds.buildFoldData(), { width, height } = folds.FOLD_MAP;
+  assert.equal(data.length, width * height * 4);
+  // Mean slope and the share of pixels that carry a fold, over a panel of the uniform atlas.
+  const panel = (name, cell) => {
+    const [rx, ry, rw, rh] = uniform.REGIONS[name];
+    let bent = 0, n = 0; const sum = [0, 0];
+    for (let y = Math.round(ry * height); y < Math.round((ry + rh) * height); y++) {
+      for (let x = Math.round((cell + rx) * width / 2); x < Math.round((cell + rx + rw) * width / 2); x++) {
+        const o = (y * width + x) * 4;
+        sum[0] += data[o] - 127.5; sum[1] += data[o + 1] - 127.5; n++;
+        if (Math.abs(data[o] - 127.5) > 6 || Math.abs(data[o + 1] - 127.5) > 6) bent++;
+      }
+    }
+    return { bent: bent / n, mean: Math.hypot(sum[0], sum[1]) / n };
+  };
+  for (const [name, cell] of [['torso', 0], ['sleeveL', 0], ['sleeveR', 0], ['leg', 1], ['hips', 1]]) {
+    const { bent, mean } = panel(name, cell);
+    assert.ok(bent > 0.03 && bent < 0.6, `${name}: ${(bent * 100).toFixed(0)} % of the panel is folded`);
+    assert.ok(mean < 6, `${name}: folds do not tilt the panel as a whole (${mean.toFixed(1)})`);
+  }
+  assert.equal(panel('sock', 1).bent, 0, 'socks are ribbed, not folded');
+  assert.equal(panel('white', 1).bent, 0);
+  // Each vertex of a body carries either no place in the map or one inside it.
+  const specs = [{ id: 'qb', role: 'qb', number: 12, team: 'offense' }];
+  const materials = { body: new THREE.MeshStandardMaterial(), helmet: new THREE.MeshStandardMaterial() };
+  const squad = new model.Squad(new THREE.Scene(), 1, materials, { lod: false }), full = model.createGeometries();
+  new model.Rig(squad, specs[0], 0, full, { offset: [0, 0], scale: [1, 1], white: [0.5, 0.5] });
+  squad.finish();
+  try {
+    const f = squad.meshes.body.geometry.attributes.athFold;
+    let placed = 0;
+    for (let i = 0; i < f.count; i++) {
+      const u = f.getX(i), v = f.getY(i);
+      assert.ok((u === -1 && v === -1) || (u >= 0 && u <= 1 && v >= 0 && v <= 1), `vertex ${i}: (${u}, ${v})`);
+      if (u >= 0) placed++;
+    }
+    assert.ok(placed / f.count > 0.4, 'jersey, sleeves and pants are in the map');
+    const h = squad.meshes.helmet.geometry.attributes.athFold;
+    for (let i = 0; i < h.count; i++) assert.equal(h.getX(i), -1);
+  } finally {
+    for (const g of Object.values(full)) g.dispose();
+    for (const m of Object.values(squad.meshes)) m.geometry.dispose();
+    squad.bones.texture.dispose(); materials.body.dispose(); materials.helmet.dispose();
+  }
 });

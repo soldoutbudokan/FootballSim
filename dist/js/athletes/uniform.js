@@ -1,5 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
 import { hashString, smoothstep } from './math.js';
+import { foldTexture } from './folds.js';
 
 // Team identity (plan section 3.7): a fictional navy and silver club.
 // Offense in navy jerseys, defense in white, the quarterback in a red
@@ -565,6 +566,7 @@ export function createMaterials(players, { atlasScale = 2 } = {}) {
   return {
     atlas,
     detail: detailTexture(),
+    folds: foldTexture(),
     body: new THREE.MeshPhysicalMaterial({ name: 'athlete-body', map: atlas.texture, vertexColors: true, roughness: 1, metalness: 1, sheen: 1, sheenRoughness: 0.5, sheenColor: '#ffffff' }),
     helmet: new THREE.MeshPhysicalMaterial({ name: 'athlete-helmet', map: helmetTexture(), vertexColors: true, roughness: 1, metalness: 1, clearcoat: 1, clearcoatRoughness: 0.07 }),
     leather: new THREE.MeshStandardMaterial({ name: 'ball-leather', map: leatherTexture(), normalMap: leatherNormal(), normalScale: new THREE.Vector2(0.7, 0.7), roughness: 0.58 }),
