@@ -285,6 +285,9 @@ varying vec4 vAthDetail;
 const FRAGMENT_HEADER = `
 varying vec3 vAthSurface;
 varying vec4 vAthDetail;
+uniform vec3 athFill;
+uniform vec3 athBounce;
+uniform vec3 athRim;
 #ifdef ATH_DETAIL
 uniform mediump sampler2DArray athDetailMap;
 #endif
@@ -317,6 +320,30 @@ const NORMAL = `
 #endif
 `;
 
+// The players' own light, on top of the scene's: an outdoor scene lit by one
+// sun leaves the shadow side of a body near black, where a real one is filled
+// by the whole sky above and by the light off the grass below. A rim along
+// the edges that face away from the camera keeps a dark jersey apart from a
+// dark background. Shared by every athlete material; setCharacterLight sets
+// it for the lighting preset.
+const CHARACTER_LIGHT = { athFill: { value: new THREE.Color(0, 0, 0) }, athBounce: { value: new THREE.Color(0, 0, 0) }, athRim: { value: new THREE.Color(0, 0, 0) } };
+const LIGHT = `
+{
+  vec3 athUp = inverseTransformDirection(normal, viewMatrix);
+  reflectedLight.indirectDiffuse += mix(athBounce, athFill, athUp.y * 0.5 + 0.5) * BRDF_Lambert(material.diffuseColor);
+  float athEdge = 1.0 - saturate(dot(normal, normalize(vViewPosition)));
+  reflectedLight.indirectSpecular += athRim * athEdge * athEdge * athEdge * (0.3 + 0.7 * saturate(athUp.y + 0.6));
+}
+`;
+
+// light: { fill, bounce, rim }, each [colour, strength]; null turns it off.
+export function setCharacterLight(light) {
+  for (const [key, name] of [['fill', 'athFill'], ['bounce', 'athBounce'], ['rim', 'athRim']]) {
+    const value = CHARACTER_LIGHT[name].value;
+    if (light?.[key]) value.set(light[key][0]).multiplyScalar(light[key][1]); else value.setScalar(0);
+  }
+}
+
 // boneTexture: BoneTexture.texture (it carries the stride of its rows).
 export function skinMaterial(material, boneTexture, { depth = false, detailMap = null } = {}) {
   const detailed = () => !!detailMap && material.userData.athDetail !== false;
@@ -333,6 +360,7 @@ export function skinMaterial(material, boneTexture, { depth = false, detailMap =
     // last compiled program's, so a program compiled with the detail layer
     // and reused after a plain one would otherwise never get its texture.
     if (detailMap) shader.uniforms.athDetailMap = { value: detailMap };
+    Object.assign(shader.uniforms, CHARACTER_LIGHT);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\n' + header + SURFACE_HEADER)
       .replace('#include <beginnormal_vertex>', 'mat4 athM = athSkin();\nvec3 objectNormal = normalize(mat3(athM) * normal);')
@@ -342,6 +370,7 @@ export function skinMaterial(material, boneTexture, { depth = false, detailMap =
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' + ROUGHNESS)
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = vAthSurface.y;')
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + NORMAL)
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n' + LIGHT)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_SHEEN\nmaterial.sheenColor *= vAthSurface.z;\n#endif');
   };
   material.customProgramCacheKey = () => 'athlete-skin-' + stride + '-' + material.type + (depth ? '-depth' : detailed() ? '-detail' : '');

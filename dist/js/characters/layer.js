@@ -94,6 +94,7 @@ export class AthletesLayer {
     this.active = layer;
     this.kind = kind;
     if (this.profile) layer.setQuality(this.profile);
+    if (this.lightingPreset) layer.setLighting?.(this.lightingPreset);
   }
 
   // Pass-throughs used by debugging and the dev harness.
@@ -106,6 +107,12 @@ export class AthletesLayer {
   setQuality(profile) {
     this.profile = profile;
     this.active.setQuality(profile);
+  }
+
+  // The lighting preset, for layers that light their athletes themselves.
+  setLighting(preset) {
+    this.lightingPreset = preset;
+    this.active.setLighting?.(preset);
   }
 
   // Scene-space point at the crown of player `id`'s helmet as last rendered

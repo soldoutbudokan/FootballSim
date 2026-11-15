@@ -87,7 +87,9 @@ void main() {
     float f = max(r2 - vv, 0.0);
     sum += f * f * f * max((vn - 0.002 * z - 0.012) / (vv + 0.0004), 0.0);
   }
-  float ao = max(0.0, 1.0 - intensity * sum * 5.0 / (r2 * r2 * r2 * float(AO_SAMPLES)));
+  // Occlusion never takes more than 55 %: a hand held in front of a chest
+  // shades it, it does not leave soot on it.
+  float ao = 1.0 - min(0.55, intensity * sum * 5.0 / (r2 * r2 * r2 * float(AO_SAMPLES)));
   // Fade out with distance: far geometry is fogged, and its occlusion would shimmer.
   ao = mix(ao, 1.0, smoothstep(90.0, 220.0, z));
   gl_FragColor = vec4(ao, packDepth(z), 1.0);
@@ -322,7 +324,7 @@ export class PostPipeline {
     this.quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
     const depth = () => ({ tDepth: { value: null }, nearFar: { value: new THREE.Vector2(0.25, 2600) }, projScale: { value: new THREE.Vector2(1, 1) } });
-    this.aoMaterial = material(AO_FRAGMENT, { ...depth(), texel: { value: new THREE.Vector2() }, radius: { value: 0.7 }, intensity: { value: 1 } }, { AO_SAMPLES: 8 });
+    this.aoMaterial = material(AO_FRAGMENT, { ...depth(), texel: { value: new THREE.Vector2() }, radius: { value: 0.5 }, intensity: { value: 1 } }, { AO_SAMPLES: 8 });
     this.aoBlurMaterial = material(AO_BLUR_FRAGMENT, { tAo: { value: null }, axis: { value: new THREE.Vector2(1, 0) }, nearFar: this.aoMaterial.uniforms.nearFar });
     this.prefilterMaterial = material(BLOOM_PREFILTER_FRAGMENT, { tColor: { value: null }, texel: { value: new THREE.Vector2() }, threshold: { value: 1 }, exposure: { value: 1 } });
     this.downMaterial = material(DOWNSAMPLE_FRAGMENT, { tColor: { value: null }, texel: { value: new THREE.Vector2() } });

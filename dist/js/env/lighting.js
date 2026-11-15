@@ -9,10 +9,14 @@ import { HDRLoader } from '../../vendor/HDRLoader.js';
 // after tone mapping (post.js): contrast and saturation (1 = unchanged), the
 // tints multiplied into shadows and highlights, vignette and grain amounts,
 // bloom strength and how much of the ambient occlusion is applied.
+// `athletes` is the light the players get on top of the scene's (see
+// athletes/skin.js): sky fill from above, the bounce off the grass from
+// below and a rim along their edges, each [colour, strength].
 export const PRESETS = {
   day: {
     sun: { elevation: 38, azimuth: 276, color: '#fff0da', intensity: 3.6 },
     hemisphere: { sky: '#c6daf5', ground: '#55603a', intensity: 0.28 },
+    athletes: { fill: ['#cfe0f7', 1.0], bounce: ['#9aae6c', 0.55], rim: ['#fff4e0', 0.3] },
     environment: { source: 'hdr', intensity: 0.4 },
     exposure: 0.85,
     fog: '#a8bfd6', fogDensity: 0.0007,
@@ -29,6 +33,7 @@ export const PRESETS = {
     // fill from the darkening sky, warm haze, lights coming on indoors.
     sun: { elevation: 9, azimuth: 292, color: '#ff9a4e', intensity: 4.4 },
     hemisphere: { sky: '#959ac0', ground: '#5a4230', intensity: 0.88 },
+    athletes: { fill: ['#a7abd0', 0.5], bounce: ['#8a6a42', 0.35], rim: ['#ffb37a', 0.4] },
     environment: { source: 'sky', intensity: 0.8 },
     exposure: 1.12,
     fog: '#c98d5e', fogDensity: 0.0011,
@@ -46,6 +51,7 @@ export const PRESETS = {
     // between their pools.
     sun: { elevation: 52, azimuth: 300, color: '#e4ecff', intensity: 0.3, skyElevation: -9 },
     hemisphere: { sky: '#2b3c5c', ground: '#0b100a', intensity: 0.3 },
+    athletes: { fill: ['#5b6f96', 0.45], bounce: ['#38482c', 0.35], rim: ['#dfe8ff', 0.16] },
     environment: { source: 'sky', intensity: 1.0 },
     exposure: 1.15,
     fog: '#141d2a', fogDensity: 0.0016,

@@ -43,6 +43,7 @@ export class FieldScene {
     // The procedural athletes, swapped for skinned characters when a model is
     // published (dist/models/player.glb) or ?athletes= asks for them.
     this.athletes = new AthletesLayer(this.scene, players, { Athletes, camera: this.camera, quality: this.profile });
+    this.athletes.setLighting(this.environment.lighting.preset);
     this.projectVector = new THREE.Vector3();
     this.groundFocus = new THREE.Vector3();
     this.helmetPoint = new THREE.Vector3();
@@ -60,6 +61,7 @@ export class FieldScene {
 
   setLighting(mode) {
     this.environment.setLighting(mode);
+    this.athletes.setLighting(this.environment.lighting.preset);
     this.post?.setGrade(this.environment.grade);
   }
 

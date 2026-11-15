@@ -2,6 +2,7 @@ import * as THREE from '../vendor/three.module.js';
 import { GRAVITY } from './sim.js';
 import { smoothstep } from './athletes/math.js';
 import { Squad, Rig, createGeometries, HIDDEN } from './athletes/rig.js';
+import { setCharacterLight } from './athletes/skin.js';
 import { Animator } from './athletes/motion.js';
 import { createMaterials } from './athletes/uniform.js';
 import { Football } from './athletes/ball.js';
@@ -76,6 +77,11 @@ export class Athletes {
     this.markers.setQuality(profile);
     this.lodDistance = LOD_DISTANCE[profile.id] ?? Infinity;
     this.lodBand = LOD_HYSTERESIS[profile.id] ?? 2;
+  }
+
+  // The lighting preset's fill, bounce and rim for the players (env/lighting.js).
+  setLighting(preset) {
+    setCharacterLight(preset?.athletes || null);
   }
 
   // Full or reduced meshes per athlete, by distance from the camera; an
