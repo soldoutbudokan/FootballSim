@@ -269,6 +269,9 @@ export function tackled(anim, pose, age, data, p, ctx) {
   pose.hips.z += -tk.jx * 0.18 * jolt;
   pose.spine.x += -tk.jz * 0.42 * jolt; pose.spine.z += tk.jx * 0.34 * jolt;
   pose.head.x += -tk.jz * 0.3 * jolt; pose.head.z += tk.jx * 0.25 * jolt;
+  // He braces: shoulders up round the neck, the neck giving with the head.
+  pose.shoulders[0].x += 0.28 * jolt; pose.shoulders[1].x += 0.28 * jolt;
+  pose.neck.x += -tk.jz * 0.22 * jolt; pose.neck.z += tk.jx * 0.18 * jolt;
   if (arm >= 0) cover(pose, arm, Math.max(s, 0.001));
   pose.yaw = tk.twist * smoothstep(0.05, 0.8, u);
   // Getting up he puts the free hand down and pushes.
@@ -280,6 +283,7 @@ export function tackled(anim, pose, age, data, p, ctx) {
     const hit = Math.exp(-since / 0.07) * (0.5 + 0.5 * tk.impact);
     pose.spine.x += (tk.mode === 'supine' ? -0.1 : 0.1) * hit;
     pose.head.x += (tk.mode === 'supine' ? -0.3 : 0.3) * hit;
+    pose.neck.x += (tk.mode === 'supine' ? -0.2 : 0.2) * hit;
   }
 }
 
@@ -403,6 +407,8 @@ export function tackle(anim, pose, age, data, p, ctx) {
     pose.elbows[i].lerp(_w.set(side, -0.3, -0.1), wrap);
     pose.wrists[i].lerp(_w.set(-0.4, 0, side * 0.8), wrap);
     setHand(pose, i, HAND.SPREAD, Math.min(1, 3 * wrap)); setHand(pose, i, HAND.CLAMP, wrap);
+    // The shoulders come forward and round the man he is wrapping.
+    pose.shoulders[i].set(0.1 * wrap, 0.4 * wrap);
   }
 }
 
