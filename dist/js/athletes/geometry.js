@@ -147,13 +147,14 @@ export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom =
 // on above the hip); vertices above PANTS.split also carry `seat`, their
 // place on the hips panel of the uniform atlas (u round the whole pelvis from
 // the left side seam, v from the crotch to the waist), others (-1, -1).
-export const PANTS = { hip: 0.112, split: -0.05, crotch: -0.078, top: 0.166, legTop: 0.075, cuff: -0.574 };
+export const PANTS = { hip: 0.112, split: -0.05, crotch: -0.078, top: 0.158, waist: 0.166, legTop: 0.075, cuff: -0.574 };
 
 export function pants({ low = false } = {}) {
   const radial = low ? 12 : 28, subdiv = low ? 1 : 2, H = PANTS.hip, cols = radial + 1;
   // [y, outer edge, inner edge (both from the midline), half depth, z]
   const rows = [
-    [0.166, 0.15, -0.15, 0.103, 0], [0.15, 0.173, -0.173, 0.12, -0.002], [0.1, 0.192, -0.192, 0.126, -0.006], [0.06, 0.2026, -0.2026, 0.129, -0.013],
+    // The waistband turns in under the jersey behind the belt.
+    [PANTS.top, 0.15, -0.15, 0.103, 0], [0.14, 0.172, -0.172, 0.119, -0.003], [0.1, 0.188, -0.188, 0.124, -0.006], [0.06, 0.2026, -0.2026, 0.129, -0.013],
     [0.02, 0.207, -0.207, 0.124, -0.013], [-0.02, 0.213, -0.12, 0.12, -0.008], [PANTS.split, 0.216, -0.04, 0.119, -0.003], [PANTS.crotch, 0.218, 0.004, 0.119, 0.001],
     [-0.105, 0.22, 0.008, 0.121, 0.003], [-0.2, 0.215, 0.009, 0.115, 0.006], [-0.3, 0.201, 0.023, 0.095, 0.005], [-0.39, 0.187, 0.037, 0.08, 0.002],
     [-0.45, 0.178, 0.046, 0.073, 0.008], [-0.5, 0.176, 0.048, 0.072, 0.011], [-0.545, 0.17, 0.054, 0.062, 0.004], [-0.566, 0.168, 0.056, 0.058, 0], [PANTS.cuff, 0.158, 0.066, 0.047, 0],
@@ -166,7 +167,7 @@ export function pants({ low = false } = {}) {
     ao: (v, t) => {
       const y = PANTS.top - v * span, leg = (PANTS.legTop - y) / legSpan, front = smoothstep(-0.2, 0.6, Math.sin(t));
       return (1 - 0.26 * (1 - smoothstep(0.05, 0.3, leg)) * smoothstep(0.2, 1, -Math.cos(t)) * smoothstep(0.03, -0.02, y))
-        * (1 - 0.24 * smoothstep(0.13, 0.166, y)) * (1 - 0.3 * smoothstep(0.95, 1, leg))
+        * (1 - 0.24 * smoothstep(0.12, PANTS.top, y)) * (1 - 0.3 * smoothstep(0.95, 1, leg))
         * (1 - 0.2 * Math.exp(-(((leg - 0.74) / 0.03) ** 2)) * front) * (1 - 0.14 * Math.exp(-(((leg - 0.92) / 0.025) ** 2)) * front);
     },
     sculpt: mounds([
@@ -204,7 +205,7 @@ export function pants({ low = false } = {}) {
     uvs.set([uv.getX(from), (PANTS.legTop - y) / legSpan], to * 2);
     if (hips) {
       const around = Math.atan2(z, x + H) / (2 * Math.PI);
-      seat.set([around < -1e-6 ? around + 1 : Math.max(0, around), (y - PANTS.crotch) / (PANTS.top - PANTS.crotch)], to * 2);
+      seat.set([around < -1e-6 ? around + 1 : Math.max(0, around), (y - PANTS.crotch) / (PANTS.waist - PANTS.crotch)], to * 2);
     }
   };
   for (let i = 0; i < p.count; i++) put(i, i, i < first);

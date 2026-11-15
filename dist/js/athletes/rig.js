@@ -213,7 +213,7 @@ export function createGeometries({ low = false } = {}) {
     pants: pants({ low }),
     // The jersey is tucked in: its hem stays well inside the pants, whose top
     // edge and belt sit clearly outside it, so the two never intersect.
-    belt: loft([{ y: 0.124, w: 0.1935, d: 0.13 }, { y: 0.158, w: 0.188, d: 0.128 }], { ...L(20, 1), capTop: false, capBottom: false }),
+    belt: loft([{ y: 0.122, w: 0.197, d: 0.134 }, { y: 0.158, w: 0.192, d: 0.132 }], { ...L(20, 1), capTop: false, capBottom: false }),
     // The jersey below the pads: pulled into the belt, blousing a little over
     // it, with soft folds where it bunches at the waist.
     abdomen: loft([
@@ -256,7 +256,8 @@ export function createGeometries({ low = false } = {}) {
     ], {
       ...L(14, 2), capTop: false, capBottom: false, ao: AO.sock,
       sculpt: mounds([
-        { y: -0.15, t: BACK - 0.45, sy: 0.07, st: 0.55, a: 0.013 }, { y: -0.17, t: BACK + 0.5, sy: 0.06, st: 0.5, a: 0.009 },
+        // The calf's two heads, clear of the pant cuff above them.
+        { y: -0.2, t: BACK - 0.45, sy: 0.055, st: 0.55, a: 0.013 }, { y: -0.215, t: BACK + 0.5, sy: 0.05, st: 0.5, a: 0.009 },
         { y: -0.3, t: FRONT, sy: 0.12, st: 0.3, a: 0.003 },
       ]),
     }),
@@ -584,7 +585,11 @@ export class Rig {
     const paunch = Math.max(0, d.belly - 1) * 0.42, front = z => smoothstep(-0.03, 0.07, z);
     const pantsFit = v => {
       const leg = smoothstep(0, -0.14, v.y), across = v.x + PANTS.hip, ahead = front(v.z);
-      const down = across <= PANTS.hip ? across * d.hipX / PANTS.hip : d.hipX + (across - PANTS.hip) * limb;
+      // Inside the hip joint the cloth is measured from the midline at the
+      // crotch (the two halves must meet there) and from the joint like the
+      // rest of the leg further down, where it has to fit the sock.
+      const out = d.hipX + (across - PANTS.hip) * limb;
+      const down = across <= PANTS.hip ? lerp(across * d.hipX / PANTS.hip, out, smoothstep(-0.1, -0.24, v.y)) : out;
       v.x = (lerp(across * torso, down, leg) - d.hipX) / limb;
       v.z = (v.z * lerp(hips[2], limb, leg) + 0.6 * paunch * ahead * smoothstep(0, 0.15, v.y)) / limb;
     };
