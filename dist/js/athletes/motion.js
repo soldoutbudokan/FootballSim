@@ -40,6 +40,23 @@ const ROLE_STYLE = {
   cb: { knee: 1.08, arm: 1.05, bounce: 1.05, width: 0, crouch: 0.005, lean: 0 },
   s: { knee: 1.05, arm: 1.02, bounce: 1, width: 0.005, crouch: 0.005, lean: 0.005 },
 };
+// The ankle over the ball of a foot whose heel has come up by `pitch`: how
+// far it rises and how far forward it moves (the ball is 0.062 k under the
+// ankle and 0.135 k ahead of it).
+const rollY = (pitch, k) => (0.062 * (Math.cos(pitch) - 1) + 0.135 * Math.sin(pitch)) * k;
+const rollZ = (pitch, k) => (0.062 * Math.sin(pitch) + 0.135 * (1 - Math.cos(pitch))) * k;
+
+// Catmull-Rom through values v at rising times t, for u within their range.
+function spline(t, v, u) {
+  const n = t.length - 1;
+  if (u <= t[0]) return v[0];
+  if (u >= t[n]) return v[n];
+  let i = 0;
+  while (u > t[i + 1]) i++;
+  const a = v[Math.max(0, i - 1)], b = v[i], c = v[i + 1], e = v[Math.min(n, i + 2)], x = (u - t[i]) / (t[i + 1] - t[i]);
+  return 0.5 * (2 * b + (c - a) * x + (2 * a - 5 * b + 4 * c - e) * x * x + (3 * b - a - 3 * c + e) * x * x * x);
+}
+
 function gaitStyle(spec) {
   const base = ROLE_STYLE[spec.role] || ROLE_STYLE.wr;
   const vary = (salt, spread) => 1 + (hashString(spec.id + salt) - 0.5) * 2 * spread;
@@ -275,33 +292,57 @@ export class Animator {
     const bp = this.bp;
     const s = fract(this.cycle);
     const lateral = Math.abs(this.local.x);
-    const duty = lerp(0.62, 0.36, run) - 0.06 * sprint;
-    const reachLen = Math.min(2 * duty * this.stepLen, 1.2) * moving * (1 - 0.35 * lateral);
+    const duty = lerp(0.62, 0.36, run) - 0.1 * sprint;
+    const reachLen = Math.min(2 * duty * this.stepLen, 1.06) * moving * (1 - 0.35 * lateral);
     const style = this.style;
     const lift = (lerp(0.06, 0.27, run) + 0.22 * sprint) * style.knee * moving * (1 - 0.55 * bp) * (1 - 0.45 * lateral) * (1 - 0.5 * this.postures.set);
     // Braking hard: hips sink and sit back, the chest comes up, the feet
     // reach out ahead of him to dig in.
     const brake = clamp(-this.accel / 11, 0, 1) * smoothstep(1.2, 4, v);
-    const behind = lerp(0.1, 0.28, run) * (1 - bp);
+    // Driving out of a stance or a cut the feet strike under and behind the
+    // hips; at speed they land a little ahead.
+    const drive = clamp(this.accel / 9, 0, 0.6) * smoothstep(0.5, 3, v) * (1 - smoothstep(5.5, 8, v));
+    const behind = (lerp(0.1, 0.2, run) - 0.04 * sprint + 0.3 * drive) * (1 - bp);
     // Pass set: a base about shoulder width and low, sliding steps.
     const width = lerp(lerp(0.115, 0.07, run) + 0.13 * lateral + 0.04 * bp + style.width + 0.03 * brake, 0.27, this.postures.set);
     const dx = this.local.x, dz = this.local.y;
 
     pose.yaw = 0; pose.tiltPitch = 0; pose.tiltRoll = 0; pose.tiltLift = 0; pose.tiltFwd = 0; pose.tiltSide = 0;
+    // The stride proper belongs to running forward: a backpedal, a shuffle
+    // and a pass set step low and flat.
+    const stride = run * (1 - bp) * (1 - lateral) * (1 - this.postures.set);
+    const k = d.k, front = reachLen * (0.5 - behind) + 0.1 * brake, back = -reachLen * (0.5 + behind) + 0.1 * brake;
+    // He leaves the ground off his toes: how far the heel has come up by then,
+    // and where that puts the ankle over the ball of the foot.
+    const toeOff = (0.5 + 0.45 * stride) * moving;
+    const SWING = this.swing ||= { t: [0, 0.16, 0.38, 0.62, 0.86, 1], z: new Float32Array(6), y: new Float32Array(6), pitch: new Float32Array(6) };
+    {
+      const z = SWING.z, y = SWING.y, pt = SWING.pitch, reach = 0.08 + 0.12 * sprint;
+      // Toe-off, the foot trailing up, the heel coming through under the
+      // hip, the knee driving (thigh toward level), the shin swinging out,
+      // and the foot pawing back to land.
+      z[0] = back + rollZ(toeOff, k); z[1] = z[0] - 0.1 * stride; z[2] = -0.2 - 0.05 * sprint; z[3] = 0.26 + 0.15 * sprint; z[4] = front + reach; z[5] = front;
+      y[0] = rollY(toeOff, k); y[1] = y[0] + 0.16 * k; y[2] = (0.3 + 0.3 * sprint) * k * style.knee; y[3] = (0.25 + 0.2 * sprint) * k * style.knee; y[4] = 0.13 * k; y[5] = 0;
+      pt[0] = toeOff; pt[1] = 0.95; pt[2] = 0.75; pt[3] = -0.1; pt[4] = -0.14; pt[5] = 0.12;
+    }
     for (let i = 0; i < 2; i++) {
       const side = SIDES[i], ph = fract(s + i * 0.5), stance = ph < duty;
       let along, h, pitch;
       if (stance) {
-        const u = ph / duty, heel = smoothstep(0.5, 1, u) * run;
-        along = lerp(reachLen * (0.5 - behind), -reachLen * (0.5 + behind), u) + 0.1 * brake;
-        h = heel * 0.07; pitch = heel * 0.55;
+        // At a walk the heel strikes first, toes up, and the foot rolls flat;
+        // at speed he lands on the forefoot. From the middle of the stance
+        // the heel rises and the ball of the foot stays where it is.
+        const u = ph / duty, strike = 1 - smoothstep(0, 0.25, u);
+        along = lerp(front, back, u);
+        h = 0;
+        pitch = (0.12 * stride - 0.28 * (1 - run) * moving) * strike + toeOff * smoothstep(0.42, 1, u);
       } else {
-        // Swing: heel recovers high behind, the knee drives through, and at
-        // speed the foot reaches out and paws back just before contact.
-        const u = (ph - duty) / (1 - duty), paw = 0.14 * sprint;
-        along = lerp(-reachLen * (0.5 + behind), reachLen * (0.5 - behind) + paw, smoothstep(0.06, 0.8, u)) - paw * smoothstep(0.8, 1, u);
-        h = lift * Math.sin(Math.PI * u ** 0.85);
-        pitch = run * (u < 0.4 ? 0.55 : lerp(0.55, -0.2, (u - 0.4) / 0.6));
+        const u = (ph - duty) / (1 - duty);
+        const walkAlong = lerp(back + rollZ(toeOff, k), front, smoothstep(0.06, 0.8, u));
+        const walkPitch = u < 0.4 ? toeOff : lerp(toeOff, -0.28 * (1 - run) * moving, (u - 0.4) / 0.6);
+        along = lerp(walkAlong, spline(SWING.t, SWING.z, u), stride);
+        h = lerp(Math.max(lift * Math.sin(Math.PI * u ** 0.85), rollY(toeOff, k) * (1 - u) ** 2), spline(SWING.t, SWING.y, u), stride);
+        pitch = lerp(walkPitch, spline(SWING.t, SWING.pitch, u), stride);
       }
       const foot = pose.feet[i];
       foot.set(side * width + dx * along, d.ankle + h, dz * along);
@@ -310,23 +351,29 @@ export class Animator {
       if (stance && moving > 0.05) this.pinFoot(i, foot); else this.locks[i].active = false;
       // A planted foot the body has slid past is picked up rather than crossed.
       if (side * foot.x < 0.05) { foot.x = side * 0.05; this.locks[i].active = false; }
+      // Heel up, the ankle rides up and forward over the planted ball of the
+      // foot; toes up (a heel strike), it lifts a little over the heel.
+      if (stance) {
+        if (pitch > 0) { foot.y += rollY(pitch, k); foot.z += rollZ(pitch, k); }
+        else foot.y -= 0.08 * k * Math.sin(pitch);
+      }
       pose.footRot[i].set(pitch, side * 0.1, 0);
       pose.knees[i].set(side * 0.2, 0, 1);
     }
 
     // Pelvis: two bobs per cycle (lowest mid-stance), counter-rotating hips and
     // shoulders, forward lean from speed and acceleration, bank into turns.
-    const bob = -Math.cos(TAU * 2 * (s - duty / 2)) * lerp(0.012, 0.034, run) * moving * style.bounce;
+    const bob = -Math.cos(TAU * 2 * (s - duty / 2)) * (lerp(0.012, 0.034, run) + 0.012 * sprint) * moving * style.bounce;
     const bank = this.lean * smoothstep(1.5, 5, v);
     const accelLean = clamp(this.accel / 9, -0.3, 0.6) * smoothstep(0.5, 3, v);
     // Low and leaning when exploding out of a stance or a cut.
     const crouch = 0.025 + 0.04 * run + 0.02 * sprint + 0.15 * bp + 0.09 * Math.max(0, accelLean) + style.crouch * moving + 0.07 * brake;
     const swing = Math.cos(TAU * s) * moving;
     pose.pelvis.set(-bank * 0.1, d.hipY - crouch + bob, -0.05 * brake);
-    pose.hips.set(0.04 + 0.08 * run + 0.06 * sprint + 0.12 * accelLean + 0.22 * bp, -0.1 * run * swing, 0.035 * moving * Math.sin(TAU * s) + bank * 0.26);
+    pose.hips.set(0.03 + 0.05 * run + 0.03 * sprint + 0.12 * accelLean + 0.32 * drive + 0.22 * bp, -0.1 * run * swing, 0.035 * moving * Math.sin(TAU * s) + bank * 0.26);
     const breathe = 0.012 * Math.sin(ctx.time * 2.1 + this.seed * 7) * (1 - moving);
     // Backpedalling: chest over the knees, weight on the balls of the feet.
-    pose.spine.set(0.04 + (0.1 + style.lean) * run + 0.08 * sprint + 0.2 * accelLean + 0.3 * bp + breathe - 0.1 * brake, 0.16 * run * swing * (1 - bp), bank * 0.1);
+    pose.spine.set(0.04 + (0.06 + style.lean) * run + 0.03 * sprint + 0.2 * accelLean + 0.26 * drive + 0.3 * bp + breathe - 0.1 * brake, 0.16 * run * swing * (1 - bp), bank * 0.1);
     pose.head.set(0.04 - 0.05 * run, 0, 0);
     pose.neck.set(0, 0, 0);
 
@@ -352,7 +399,8 @@ export class Animator {
       pose.wrists[i].set(-0.1 * run, 0, 0);
       // Loose hands at a walk, a light fist at speed.
       setHand(pose, i, HAND.RELAXED); setHand(pose, i, HAND.FIST, 0.45 * run);
-      pose.aim[i] = 0; pose.toes[i] = 0; pose.shoulders[i].set(0, 0);
+      // The shoulder comes forward with the arm.
+      pose.aim[i] = 0; pose.toes[i] = 0; pose.shoulders[i].set(0.03 * run, 0.14 * w * run * (1 - bp));
     }
   }
 
