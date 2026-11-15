@@ -42,7 +42,7 @@ modelTest('full and reduced athlete geometry has finite outward surfaces within 
       }
     }
     const total = gs => Object.values(gs).reduce((n, g) => n + g.index.count / 3, 0);
-    assert.ok(total(full) < 12500, `shared full-detail parts: ${total(full)} triangles`);
+    assert.ok(total(full) < 13500, `shared full-detail parts: ${total(full)} triangles`);
     assert.ok(total(low) < total(full) * 0.4, 'reduced geometry remains substantially cheaper');
     // One athlete: the limbs count twice, one of the two facemasks is worn,
     // and the reduced level has none of the small detail parts.
@@ -51,8 +51,9 @@ modelTest('full and reduced athlete geometry has finite outward surfaces within 
     const limbs = ['pants', 'sock', 'cleat', 'upperArm', 'sleeve', 'forearm', 'glove', 'digit0', 'digit1', 'digit2', 'digit3', 'digit4'], small = ['belt', 'collar', 'tape', 'band', 'backPlate', 'studs', 'strap', 'faceDetails', 'towel'];
     const worn = total(full) + tris(full, limbs) + tris(full, ['studs', 'tape', 'band']) - tris(full, ['hardware']);
     const wornLow = total(low) + tris(low, limbs) - tris(low, ['hardware']) - tris(low, small);
-    // Jointed fingers and one-piece pants took the full level from 13,600 to 15,100.
-    assert.ok(worn < 16000 && wornLow < 3200, `triangles per athlete: ${worn} full, ${wornLow} reduced`);
+    // Jointed fingers, one-piece pants, a face and rounder limbs and torso took
+    // the full level from 13,600 to about 17,000; the reduced level is as it was.
+    assert.ok(worn < 17500 && wornLow < 3200, `triangles per athlete: ${worn} full, ${wornLow} reduced`);
   } finally { for (const g of [...Object.values(full), ...Object.values(low)]) g.dispose(); }
 });
 

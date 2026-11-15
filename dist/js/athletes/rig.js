@@ -209,21 +209,22 @@ const FRONT = Math.PI / 2, BACK = -Math.PI / 2, OUT = 0, IN = Math.PI;
 // back +Z (the bind pose turns the arms half a turn, see Rig). The right-hand
 // copies are mirrored when they are baked.
 export function createGeometries({ low = false } = {}) {
-  const L = (radial, subdiv) => (low ? { radial: Math.max(6, Math.round(radial / 2)), subdiv: 1 } : { radial, subdiv });
+  // Segments round a loft at full detail; the reduced set halves `coarse`.
+  const L = (radial, subdiv, coarse = radial) => (low ? { radial: Math.max(6, Math.round(coarse / 2)), subdiv: 1 } : { radial, subdiv });
   return {
     // The pants, one piece per side from the waistband to the cuff below
     // the knee (see geometry.js).
     pants: pants({ low }),
     // The jersey is tucked in: its hem stays well inside the pants, whose top
     // edge and belt sit clearly outside it, so the two never intersect.
-    belt: loft([{ y: 0.122, w: 0.197, d: 0.134 }, { y: 0.158, w: 0.192, d: 0.132 }], { ...L(20, 1), capTop: false, capBottom: false }),
+    belt: loft([{ y: 0.122, w: 0.197, d: 0.134 }, { y: 0.158, w: 0.192, d: 0.132 }], { ...L(28, 1, 20), capTop: false, capBottom: false }),
     // The jersey below the pads: pulled into the belt, blousing a little over
     // it, with soft folds where it bunches at the waist.
     abdomen: loft([
       { y: -0.04, w: 0.156, d: 0.104 }, { y: 0.028, w: 0.169, d: 0.116 }, { y: 0.068, w: 0.183, d: 0.128 },
       { y: 0.15, w: 0.188, d: 0.134 }, { y: 0.27, w: 0.199, d: 0.142 },
     ], {
-      ...L(20, 2), capTop: false, capBottom: false, ao: AO.abdomen,
+      ...L(28, 2, 20), capTop: false, capBottom: false, ao: AO.abdomen,
       sculpt: (y, t) => (0.0045 * Math.sin(t * 5 + y * 30 + 1.3) + 0.003 * Math.sin(t * 3 - y * 55)) * smoothstep(0.0, 0.05, y) * (1 - smoothstep(0.09, 0.2, y)),
     }),
     // The jersey over the shoulder pads: a wide, squared yoke whose edge shows
@@ -235,7 +236,7 @@ export function createGeometries({ low = false } = {}) {
       { y: 0.305, w: 0.247, d: 0.131, n: 2.1 }, { y: 0.328, w: 0.214, d: 0.118, n: 2.1 },
       { y: 0.348, w: 0.166, d: 0.104, n: 2.1 }, { y: 0.362, w: 0.124, d: 0.092 }, { y: 0.374, w: 0.1, d: 0.084 },
     ], {
-      ...L(24, 2), capBottom: false, flipU: true, ao: AO.chest,
+      ...L(30, 2, 24), capBottom: false, flipU: true, ao: AO.chest,
       sculpt: (y, t) => {
         const face = Math.abs(Math.sin(t)), plate = smoothstep(0.085, 0.12, y) * (1 - smoothstep(0.2, 0.3, y));
         // The back plate shows less than the chest plate: it would stand off
@@ -249,7 +250,7 @@ export function createGeometries({ low = false } = {}) {
     // Neck and the slope of the trapezius under the collar.
     neck: loft([
       { y: 0.3, w: 0.11, d: 0.082 }, { y: 0.35, w: 0.088, d: 0.076, z: -0.004 }, { y: 0.39, w: 0.077, d: 0.072, z: -0.004 }, { y: 0.47, w: 0.067, d: 0.067 },
-    ], { ...L(10, 1), capBottom: false, ao: AO.neck }),
+    ], { ...L(14, 1, 10), capBottom: false, ao: AO.neck }),
     // The lower leg in its sock: calf high at the back, shin to the front, a
     // slim ankle.
     sock: loft([
@@ -257,7 +258,7 @@ export function createGeometries({ low = false } = {}) {
       { y: -0.25, w: 0.054, d: 0.06, z: -0.01 }, { y: -0.33, w: 0.043, d: 0.047, z: -0.004 }, { y: -0.4, w: 0.036, d: 0.04 },
       { y: -0.45, w: 0.034, d: 0.04 }, { y: -0.5, w: 0.034, d: 0.041 },
     ], {
-      ...L(14, 2), capTop: false, capBottom: false, ao: AO.sock,
+      ...L(18, 2, 14), capTop: false, capBottom: false, ao: AO.sock,
       sculpt: mounds([
         // The calf's two heads, clear of the pant cuff above them.
         { y: -0.2, t: BACK - 0.45, sy: 0.055, st: 0.55, a: 0.013 }, { y: -0.215, t: BACK + 0.5, sy: 0.05, st: 0.5, a: 0.009 },
@@ -269,7 +270,7 @@ export function createGeometries({ low = false } = {}) {
       { y: 0.05, w: 0.064, d: 0.066 }, { y: -0.02, w: 0.077, d: 0.082 }, { y: -0.12, w: 0.075, d: 0.085, z: -0.003 },
       { y: -0.21, w: 0.07, d: 0.08, z: -0.004 }, { y: -0.3, w: 0.059, d: 0.064, z: -0.001 }, { y: -0.36, w: 0.052, d: 0.055 }, { y: -0.4, w: 0.045, d: 0.047 },
     ], {
-      ...L(14, 2), capTop: false, capBottom: false, ao: AO.upperArm,
+      ...L(18, 2, 14), capTop: false, capBottom: false, ao: AO.upperArm,
       sculpt: mounds([
         { y: -0.2, t: BACK, sy: 0.06, st: 0.6, a: 0.007 },       // -Z is the front of the arm: the biceps
         { y: -0.15, t: FRONT - 0.2, sy: 0.07, st: 0.5, a: 0.006 }, // triceps
@@ -283,7 +284,7 @@ export function createGeometries({ low = false } = {}) {
       { y: 0.016, w: 0.097, d: 0.113, x: -0.007, z: -0.008, n: 2.2 }, { y: -0.035, w: 0.103, d: 0.116, x: -0.005, z: -0.008, n: 2.25 },
       { y: -0.08, w: 0.097, d: 0.106, x: -0.003, z: -0.005, n: 2.2 }, { y: -0.103, w: 0.089, d: 0.095 },
       { y: -0.15, w: 0.085, d: 0.092, z: -0.002 }, { y: -0.196, w: 0.081, d: 0.087, z: -0.003 }, { y: -0.203, w: 0.072, d: 0.077, z: -0.003 },
-    ], { ...L(18, 2), capBottom: false, ao: AO.sleeve }),
+    ], { ...L(22, 2, 18), capBottom: false, ao: AO.sleeve }),
     // Forearm: full below the elbow, tapering to a narrow wrist.
     forearm: loft([
       { y: 0.035, w: 0.047, d: 0.049 }, { y: -0.012, w: 0.055, d: 0.056, z: -0.002 },
@@ -291,11 +292,11 @@ export function createGeometries({ low = false } = {}) {
       { y: -0.2, w: 0.049, d: 0.046 }, { y: -0.27, w: 0.035, d: 0.032, z: 0.002 },
       { y: -0.33, w: 0.03, d: 0.027, z: 0.002 }, { y: -0.36, w: 0.03, d: 0.026 },
     ], {
-      ...L(14, 2), capTop: false, capBottom: false, ao: AO.forearm,
+      ...L(18, 2, 14), capTop: false, capBottom: false, ao: AO.forearm,
       sculpt: mounds([{ y: -0.08, t: OUT + 2.6, sy: 0.06, st: 0.6, a: 0.005 }, { y: -0.1, t: BACK, sy: 0.07, st: 0.5, a: 0.003 }]),
     }),
     // A sweatband around the biceps, below the sleeve.
-    band: loft([{ y: -0.232, w: 0.074, d: 0.087, z: -0.004 }, { y: -0.247, w: 0.0735, d: 0.086, z: -0.004 }, { y: -0.262, w: 0.07, d: 0.081, z: -0.003 }], { ...L(14, 1), capTop: false, capBottom: false }),
+    band: loft([{ y: -0.232, w: 0.074, d: 0.087, z: -0.004 }, { y: -0.247, w: 0.0735, d: 0.086, z: -0.004 }, { y: -0.262, w: 0.07, d: 0.081, z: -0.003 }], { ...L(18, 1, 14), capTop: false, capBottom: false }),
     // The back plate hanging from the shoulder pads over the small of the
     // back: a padded shell, curved to the body and narrower at the bottom.
     backPlate: (() => {
@@ -310,7 +311,7 @@ export function createGeometries({ low = false } = {}) {
       // Darker grooves between its four pads.
       return shadeBy(g, (x, y) => (Math.abs(x) < 0.006 || Math.abs(y + 0.005) < 0.004 ? 0.6 : 1));
     })(),
-    tape: loft([{ y: -0.25, w: 0.042, d: 0.038 }, { y: -0.29, w: 0.038, d: 0.0345 }, { y: -0.34, w: 0.0345, d: 0.031 }], { ...L(14, 1), capTop: false, capBottom: false }),
+    tape: loft([{ y: -0.25, w: 0.042, d: 0.038 }, { y: -0.29, w: 0.038, d: 0.0345 }, { y: -0.34, w: 0.0345, d: 0.031 }], { ...L(18, 1, 14), capTop: false, capBottom: false }),
     glove: glove({ low }),
     // Thumb and fingers (digit0..digit4); the reduced hand is a mitten.
     ...(low ? {} : Object.fromEntries(digits().map((g, n) => ['digit' + n, g]))),

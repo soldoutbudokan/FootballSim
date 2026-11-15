@@ -31,7 +31,7 @@ Twenty-six procedural athletes (the offense and a defensive squad of fifteen, el
 
 - **Skeleton.** Sixty-five bones a man. Sixteen are the spine and limbs the pose solver places; the rest make them deform like a body: a neck under the head, collarbones that lift and reach with the arm, shoulder-pad caps that stay on the torso instead of swinging with the upper arm, toes, the twist of the upper arm and of the forearm spread along their length, helpers inside the elbows and knees that turn half as far (so a joint bent double keeps its girth), and three joints for every finger and thumb. A vertex follows up to four bones. Limbs ease toward straight instead of locking, the pants take one weight field around each hip, and a body that is down keeps its knees, ankles and toes on top of the turf.
 
-Each rig is driven by inverse kinematics and skinned on the GPU, one merged mesh per material for the whole squad, with a reduced level of detail for distant players. An athlete is about 14,500 triangles at full detail and 3,100 reduced. Fingers are posed for the men within about 24 yd of the camera. The squad is built once; a defender who is off the field this rep is simply not drawn.
+Each rig is driven by inverse kinematics and skinned on the GPU, one merged mesh per material for the whole squad, with a reduced level of detail for distant players. An athlete is about 16,400 triangles at full detail and 3,100 reduced. Fingers are posed for the men within about 24 yd of the camera. The squad is built once; a defender who is off the field this rep is simply not drawn.
 
 The team is a fictional navy-and-silver club: navy helmets with a silver stripe and silver chevrons, silver pants, the offense in navy practice jerseys, the defense in white, and the quarterback in the red non-contact jersey. It carries no real league or team marks.
 
@@ -267,7 +267,7 @@ Post-processing (`dist/js/env/post.js`) is tied to the same profiles; each tier 
 
 Without float render targets the game falls back to drawing straight to the canvas on every profile.
 
-"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). Reduced-detail athletes (about 3,100 instead of 14,500 triangles, no small details, mitten hands) are drawn from a second set of meshes on the same skeletons, chosen per athlete by distance from the camera. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
+"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). Reduced-detail athletes (about 3,100 instead of 16,400 triangles, no small details, mitten hands) are drawn from a second set of meshes on the same skeletons, chosen per athlete by distance from the camera. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
 
 ## Scope and realism
 
