@@ -1,6 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { SIDES, clamp, lerp, smoothstep, bump } from './math.js';
 import { carryArm } from './carry.js';
+import { HAND, setHand } from './hands.js';
 
 // Playing the ball in the air: the reach as it arrives, and what the hands
 // and body do in the half second after it gets there (a catch brought in to
@@ -61,6 +62,7 @@ export function reachForBall(anim, pose, p, ctx) {
     pose.elbows[i].lerp(_c.set(SIDES[i] * 0.9, -0.5, -0.3), w);
     // Thumbs together above the chest, little fingers together below it.
     pose.wrists[i].lerp(_c.set(lerp(-0.3, 0.45, sink), 0, SIDES[i] * lerp(0.9, -0.7, sink)), w);
+    setHand(pose, i, HAND.SPREAD, w);
   }
 }
 
@@ -103,6 +105,9 @@ export function catchBall(anim, pose, age, data, p, ctx) {
   pose.hands[i].copy(_b).lerp(_c, secure);
   pose.elbows[i].set(SIDES[i] * 0.9, -0.8, -0.35);
   pose.wrists[i].set(lerp(-0.3, 0.55, secure), 0, SIDES[i] * 0.9 * (1 - secure));
+  // The hands close on the ball as it arrives, then the carrying hand claws its point.
+  const close = smoothstep(0, 0.08, age);
+  setHand(pose, i, HAND.SPREAD); setHand(pose, i, HAND.CARRY, close);
   // Off hand covers the ball as it comes in, then returns to the run.
   _b.copy(_a); _b.x += SIDES[j] * 0.07;
   _d.set(SIDES[i] * 0.03, 0.18, 0.25);
@@ -111,6 +116,7 @@ export function catchBall(anim, pose, age, data, p, ctx) {
   pose.hands[j].copy(_b).lerp(anim.base.hands[j], release);
   pose.elbows[j].set(SIDES[j] * 0.9, -0.8, -0.3);
   pose.wrists[j].set(-0.3, 0, SIDES[j] * 0.9 * (1 - release));
+  setHand(pose, j, HAND.SPREAD, 1 - release); setHand(pose, j, HAND.CARRY, close * (1 - release));
   if (data.point) anim.lookAt(pose, data.point, 0.7 * (1 - secure));
 }
 
@@ -123,6 +129,7 @@ function swat(anim, pose, age, data) {
   pose.hands[s].copy(_b).lerp(anim.base.hands[s], back);
   pose.elbows[s].lerp(_c.set(SIDES[s] * 0.7, -0.6, -0.3), 1 - back);
   pose.wrists[s].set(-0.8 * (1 - back), 0, 0);
+  setHand(pose, s, HAND.FLAT, 1 - back);
   _b.copy(_a); _b.x += SIDES[o] * 0.1;
   pose.hands[o].copy(_b).lerp(anim.base.hands[o], smoothstep(0, 0.2, age));
   pose.spine.y += -SIDES[s] * 0.32 * swing;
@@ -144,6 +151,7 @@ function bobble(anim, pose, age, data, ctx) {
     pose.hands[i].copy(_c).lerp(anim.base.hands[i], drop);
     pose.elbows[i].lerp(_c.set(SIDES[i] * 0.9, -0.6, -0.3), 1 - drop);
     pose.wrists[i].set(-0.3 * (1 - drop), 0, SIDES[i] * 0.6 * (1 - drop));
+    setHand(pose, i, HAND.SPREAD, 1 - drop);
   }
   anim.lookAt(pose, ctx.ballScene, 0.85 * (1 - smoothstep(0.34, 0.45, age)));
   pose.spine.x += 0.1 * smoothstep(0.12, 0.4, age);
@@ -203,6 +211,7 @@ export function takeBall(anim, pose, p, ctx) {
   pose.hands[up].lerp(_c.set(-SIDES[up] * 0.1, 0.12, 0.2), m.w);
   pose.elbows[up].lerp(_c.set(SIDES[up], 0.1, -0.2), m.w);
   pose.wrists[up].lerp(_c.set(0.2, 0, 0), m.w);
+  setHand(pose, up, HAND.FLAT, m.w); setHand(pose, under, HAND.FLAT, m.w);
   pose.hands[under].lerp(_c.set(-SIDES[under] * 0.04, -0.2, 0.22), m.w);
   pose.elbows[under].lerp(_c.set(SIDES[under] * 0.8, -1, -0.3), m.w);
   pose.wrists[under].lerp(_c.set(-0.9, 0, 0), m.w);

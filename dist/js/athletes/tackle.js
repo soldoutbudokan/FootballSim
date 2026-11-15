@@ -1,6 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { SIDES, clamp, lerp, smoothstep, bump, wrapAngle } from './math.js';
 import { carryArm, cover, legsOut, footOnGround, handOnGround } from './carry.js';
+import { HAND, setHand } from './hands.js';
 
 // Tackle choreography. One tackle is shared by everyone in it: the snapshot's
 // `tackle` record (who, when, both men's velocity going into the hit) fixes
@@ -401,6 +402,7 @@ export function tackle(anim, pose, age, data, p, ctx) {
     pose.hands[i].lerp(_b, wrap);
     pose.elbows[i].lerp(_w.set(side, -0.3, -0.1), wrap);
     pose.wrists[i].lerp(_w.set(-0.4, 0, side * 0.8), wrap);
+    setHand(pose, i, HAND.SPREAD, Math.min(1, 3 * wrap)); setHand(pose, i, HAND.CLAMP, wrap);
   }
 }
 
@@ -446,6 +448,7 @@ function assist(anim, pose, p, ctx, tk) {
     pose.hands[i].lerp(_b, w);
     pose.elbows[i].lerp(_w.set(SIDES[i] * 0.8, -0.6, -0.3), w);
     pose.wrists[i].lerp(_w.set(-0.7, 0, 0), w);
+    setHand(pose, i, HAND.CLAMP, w);
   }
   anim.lookAt(pose, C, 0.7 * hit);
 }
@@ -507,6 +510,7 @@ export function shrugOff(anim, pose, p, ctx) {
     pose.hands[side].lerp(_b, w);
     pose.elbows[side].lerp(_w.set(SIDES[side] * 0.6, -0.8, -0.2), w);
     pose.wrists[side].lerp(_w.set(-1.0, 0, 0), w);
+    setHand(pose, side, HAND.PUNCH, w);
     pose.spine.y += (lx >= 0 ? 0.25 : -0.25) * w;
     pose.head.y += (lx >= 0 ? 0.4 : -0.4) * w;
   } else {

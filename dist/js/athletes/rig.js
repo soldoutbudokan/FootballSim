@@ -377,7 +377,7 @@ const SPINE = new Set();
 const UP = [0, 1, 0], DOWN = [0, -1, 0], FORWARD = [0, 0, 1];
 // How far each finger fans out for a full spread (radians about the palm
 // normal; the thumb side is positive).
-const FAN = [0, 0.26, 0.07, -0.1, -0.28];
+const FAN = [0.5, 0.26, 0.07, -0.1, -0.28];
 
 const _q = new THREE.Quaternion(), _qi = new THREE.Quaternion(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qc = new THREE.Quaternion();
 const _t = new THREE.Vector3(), _pole = new THREE.Vector3(), _origin = new THREE.Vector3(), _u = new THREE.Vector3();
@@ -417,7 +417,7 @@ export class Rig {
     const look = this.look = accessoriesFor(spec, index);
     const { jersey } = jerseyFor(spec);
     this.headSize = 1.1 * (1 + (d.torso - 1) * 0.2);
-    this.gloveScale = [1.08 * d.limb ** 0.5, 1.06 * d.k, 1.08 * d.limb ** 0.5];
+    this.gloveScale = [1.13 * d.limb ** 0.5, 1.13 * d.k, 1.13 * d.limb ** 0.5];
 
     const bone = this.bone = {};
     const joint = (name, parent, x = 0, y = 0, z = 0) => {
@@ -796,7 +796,7 @@ export class Rig {
       // The thumb swings across the palm about the line of the fingers, rolls
       // to face them, and curls at its three joints.
       const [a, b, c] = digits[0].joints, tc = f[6], opp = f[7];
-      a.quaternion.setFromAxisAngle(Y_AXIS, -s * 1.1 * opp).multiply(digits[0].rest)
+      a.quaternion.setFromAxisAngle(Y_AXIS, -s * 1.1 * opp).multiply(_qa.setFromAxisAngle(X_AXIS, FAN[0] * f[5])).multiply(digits[0].rest)
         .multiply(_q.setFromAxisAngle(Y_AXIS, -s * (0.5 + 0.5 * opp))).multiply(_qb.setFromAxisAngle(Z_AXIS, s * 0.45 * tc));
       b.quaternion.setFromAxisAngle(Z_AXIS, s * 0.7 * tc);
       c.quaternion.setFromAxisAngle(Z_AXIS, s * 0.9 * tc);

@@ -1,7 +1,31 @@
 import * as THREE from '../../vendor/three.module.js';
 import { SIDES } from './math.js';
+import { chestMatrix } from './pose.js';
+import { HAND, setHand, aimHand } from './hands.js';
 
-const _ball = new THREE.Vector3(), _local = new THREE.Vector3();
+const _ball = new THREE.Vector3(), _local = new THREE.Vector3(), _s = new THREE.Vector3(), _d = new THREE.Vector3(), _m = new THREE.Matrix4();
+// Height of the wrist over the turf when the fingertips carry a stance (yards
+// for a 6 ft 2 in man).
+const WRIST_UP = 0.15;
+
+// Puts hand i down on the turf under its shoulder, the weight on spread
+// fingertips. The arm only reaches so far: the hips sink and fold until the
+// shoulder is low enough, so the hand is on the ground and not hung over it.
+// Leaves the pose's chest prepared.
+function plantHand(anim, pose, i, forward = 0.03, inward = 0) {
+  const d = anim.dims, side = SIDES[i], up = WRIST_UP * d.k, reach = 0.97 * (d.upperArm + d.forearm);
+  for (let n = 0; n < 5; n++) {
+    _s.set(side * d.shoulder[0], d.shoulder[1], d.shoulder[2]).applyMatrix4(chestMatrix(pose, d, _m));
+    const high = _s.y - up - reach;
+    if (high < 0.004) break;
+    pose.pelvis.y -= 0.35 * high; pose.hips.x += 1.4 * high;
+  }
+  anim.prepareChest(pose);
+  anim.handAt(pose, i, _s.x - side * inward, up, _s.z + forward);
+  pose.wrists[i].set(0, 0, 0);
+  setHand(pose, i, HAND.TRIPOD);
+  aimHand(pose, i, _d.set(0, -0.3, -0.95).transformDirection(anim.chestInverse), _s.set(0, -0.95, 0.3).transformDirection(anim.chestInverse));
+}
 
 // Which pre-snap stance each player takes.
 function stanceKind(spec, p, ctx) {
@@ -36,23 +60,21 @@ export function applyStance(anim, pose, p, ctx) {
   for (let i = 0; i < 2; i++) { pose.footRot[i].set(0, SIDES[i] * 0.14, 0); pose.knees[i].set(SIDES[i] * 0.35, 0, 1); pose.wrists[i].set(0, 0, 0); }
   const feet = (lx, lz, rx, rz) => { pose.feet[0].set(lx, a, lz); pose.feet[1].set(rx, a, rz); };
   const elbowsOut = (x = 0.8, y = -0.6, z = -0.5) => { pose.elbows[0].set(x, y, z); pose.elbows[1].set(-x, y, z); };
-  // Hand on the ground in front of the shoulder; knuckles down.
-  const handDown = (i, x, z) => { anim.handAt(pose, i, x, 0.12 * k, z); pose.wrists[i].set(-0.9, 0, 0); };
 
   switch (kind) {
     case 'threePoint':
     case 'threePointRush': {
       const hand = anim.spec.team === 'defense' && p.x > 0 ? 0 : 1;   // outside hand for edge rushers
       const other = 1 - hand, rush = anim.spec.team === 'defense';
-      pose.pelvis.set(0, (rush ? 0.72 : 0.67) * k, -0.12);
-      pose.hips.set(rush ? 0.8 : 0.68, 0, 0);
-      pose.spine.set(0.68 + breathe, 0, 0);
+      // Back flat, hips level with the shoulders, the down arm straight under its shoulder.
+      pose.pelvis.set(0, (rush ? 0.79 : 0.77) * k, -0.14);
+      pose.hips.set(rush ? 0.98 : 0.92, 0, 0);
+      pose.spine.set(0.58 + breathe, 0, 0);
       pose.head.set(-0.08, 0, 0);
       if (hand === 1) feet(0.27, 0.04, -0.27, -0.2); else feet(0.27, -0.2, -0.27, 0.04);
       pose.footRot[hand].x = 0.3;
-      anim.prepareChest(pose);
-      handDown(hand, SIDES[hand] * 0.17, rush ? 0.58 : 0.5);
-      anim.handAt(pose, other, SIDES[other] * 0.25, 0.55 * k, 0.33);
+      plantHand(anim, pose, hand, rush ? 0.08 : 0.03, 0.04);
+      anim.handAt(pose, other, SIDES[other] * 0.25, pose.pelvis.y - 0.12 * k, 0.33);
       elbowsOut(0.8, -0.3, -0.6);
       break;
     }
@@ -63,8 +85,7 @@ export function applyStance(anim, pose, p, ctx) {
       pose.head.set(-0.12, 0, 0);
       feet(0.3, -0.06, -0.3, -0.1);
       pose.footRot[0].x = pose.footRot[1].x = 0.35;
-      anim.prepareChest(pose);
-      handDown(0, 0.19, 0.6); handDown(1, -0.19, 0.6);
+      plantHand(anim, pose, 0, 0.05); plantHand(anim, pose, 1, 0.05);
       elbowsOut(0.7, -0.2, -0.7);
       break;
     }
@@ -83,6 +104,7 @@ export function applyStance(anim, pose, p, ctx) {
       if (Math.hypot(_local.x, _local.z - 0.45) < 0.6) anim.handAt(pose, 1, _local.x - 0.02, 0.2 * k, _local.z - 0.06);
       else anim.handAt(pose, 1, -0.12, 0.2 * k, 0.5);
       pose.wrists[1].set(-0.7, 0, 0);
+      setHand(pose, 1, HAND.GRIP);
       anim.handAt(pose, 0, 0.25, 0.56 * k, 0.33);
       elbowsOut(0.8, -0.3, -0.6);
       break;
@@ -98,6 +120,7 @@ export function applyStance(anim, pose, p, ctx) {
       anim.handAt(pose, 0, 0.14, 1.27 * k, 0.38);
       anim.handAt(pose, 1, -0.14, 1.27 * k, 0.38);
       pose.wrists[0].set(-0.4, 0, -0.6); pose.wrists[1].set(-0.4, 0, 0.6);
+      setHand(pose, 0, HAND.SPREAD, 0.8); setHand(pose, 1, HAND.SPREAD, 0.8);
       elbowsOut(0.7, -1, -0.2);
       break;
     }

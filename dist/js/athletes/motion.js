@@ -4,6 +4,7 @@ import { TAU, SIDES, clamp, lerp, smoothstep, fract, damp, wrapAngle, approachAn
 import { applyStance } from './stances.js';
 import { ACTIONS, startAction, livePosture, POSTURES } from './actions.js';
 import { tackleRole } from './tackle.js';
+import { HAND, setHand } from './hands.js';
 
 // Seconds each timed action lasts in the simulation (plan section 3.4).
 // How far off downfield a lineman in his pass set may turn to face a rusher.
@@ -327,6 +328,7 @@ export class Animator {
     // Backpedalling: chest over the knees, weight on the balls of the feet.
     pose.spine.set(0.04 + (0.1 + style.lean) * run + 0.08 * sprint + 0.2 * accelLean + 0.3 * bp + breathe - 0.1 * brake, 0.16 * run * swing * (1 - bp), bank * 0.1);
     pose.head.set(0.04 - 0.05 * run, 0, 0);
+    pose.neck.set(0, 0, 0);
 
     // Arms swing against the legs, set by joint angles: shoulder flexion
     // (forward +) and elbow flexion. Sprinters pump hard with the elbows near
@@ -348,6 +350,9 @@ export class Animator {
       }
       armAngles(pose, i, d, flex, elbow, abduct, inward);
       pose.wrists[i].set(-0.1 * run, 0, 0);
+      // Loose hands at a walk, a light fist at speed.
+      setHand(pose, i, HAND.RELAXED); setHand(pose, i, HAND.FIST, 0.45 * run);
+      pose.aim[i] = 0; pose.toes[i] = 0; pose.shoulders[i].set(0, 0);
     }
   }
 

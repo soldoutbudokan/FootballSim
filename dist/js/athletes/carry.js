@@ -1,5 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
 import { SIDES, lerp } from './math.js';
+import { HAND, setHand } from './hands.js';
 
 // Small pose pieces shared by the action layer and the tackle choreography:
 // how the ball is carried, and limbs laid out on the turf.
@@ -20,6 +21,7 @@ export function tuck(pose, i, weight = 1) {
   pose.hands[i].lerp(_w.set(side * 0.105, 0.13, 0.19), weight);
   pose.elbows[i].lerp(_w.set(side * 0.9, -1, -0.45), weight);
   pose.wrists[i].lerp(_w.set(0.55, 0, 0), weight);
+  setHand(pose, i, HAND.CARRY, weight);
 }
 
 // Both arms on the ball: the carry arm tucked, the other hand clamped over
@@ -30,6 +32,7 @@ export function cover(pose, i, weight = 1) {
   pose.hands[j].lerp(_w.set(SIDES[i] * 0.035, 0.17, 0.245), weight);
   pose.elbows[j].lerp(_w.set(SIDES[j] * 0.8, -1, -0.2), weight);
   pose.wrists[j].lerp(_w.set(0.3, 0, SIDES[j] * 0.5), weight);
+  setHand(pose, j, HAND.CARRY, weight);
 }
 
 // Lying on the ground the legs stretch out along the body (feet at full leg
@@ -58,4 +61,5 @@ export function handOnGround(anim, pose, i, x, z, weight, height = 0.055) {
   pose.hands[i].lerp(anim.chestPoint(_w.x, _w.y, _w.z, _t), weight);
   pose.elbows[i].lerp(_w.set(SIDES[i], 0.3, -0.4), weight);
   pose.wrists[i].lerp(_w.set(-0.3, 0, 0), weight);
+  setHand(pose, i, HAND.FLAT, weight);
 }

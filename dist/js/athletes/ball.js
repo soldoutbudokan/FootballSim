@@ -128,8 +128,7 @@ export class Football {
     const yaw = rig.root.rotation.y;
     if (action === 'throw') {
       // Ball sits in the fingers of the right hand, nose toward the target.
-      _m.copy(rig.hands[1].matrixWorld);
-      this.target.set(-0.035, -0.085, 0.02).applyMatrix4(_m);
+      this.target.copy(W.palms[1]).addScaledVector(W.palmNormals[1], 0.078).addScaledVector(W.fingerDirs[1], 0.02);
       _e.set(-0.35, yaw, 0, 'YXZ');
       this.targetQuat.setFromEuler(_e);
     } else if (twoHands) {

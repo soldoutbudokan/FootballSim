@@ -1,6 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { TAU, SIDES, clamp, lerp, smoothstep, bump, sampleTrack, wrapAngle, damp } from './math.js';
 import { armAngles } from './pose.js';
+import { HAND, setHand } from './hands.js';
 import { carryArm, tuck, cover, legsOut } from './carry.js';
 import { tackled, tackle, tackleYaw, shrugOff, missFor, knockedDown } from './tackle.js';
 import { reachForBall, catchBall, giveBall, takeBall } from './ballskills.js';
@@ -117,6 +118,7 @@ function handsUp(pose, d, w, x = 0.14, y = 0.1, z = 0.3) {
     pose.hands[i].lerp(_w.set(SIDES[i] * x * d.torso, y, z), w);
     pose.elbows[i].lerp(_w.set(SIDES[i] * 0.45, -1, -0.35), w);
     pose.wrists[i].lerp(_w.set(-0.75, 0, 0), w);
+    setHand(pose, i, HAND.PUNCH, w);
   }
 }
 
@@ -143,6 +145,7 @@ function afterWhistle(anim, pose, p, ctx) {
         pose.hands[i].lerp(_a.set(SIDES[i] * lerp(-0.06, 0.52, sweep), -0.3 + 0.05 * sweep, 0.3 - 0.1 * sweep), w);
         pose.elbows[i].lerp(_b.set(SIDES[i], -0.6, -0.4), w);
         pose.wrists[i].lerp(_b.set(-0.4, 0, 0), w);
+        setHand(pose, i, HAND.FLAT, w);
       }
       pose.spine.x += 0.06 * w;
     }
@@ -227,6 +230,7 @@ export const POSTURES = {
       pose.hands[i].lerp(_w.set(SIDES[i] * 0.31 * d.torso, -0.2, 0.3), w);
       pose.elbows[i].lerp(_w.set(SIDES[i] * 0.7, -0.5, -0.7), w);
       pose.wrists[i].lerp(_w.set(-0.5, 0, SIDES[i] * 0.4), w);
+      setHand(pose, i, HAND.SPREAD, 0.8 * w);
     }
     const rig = ctx.rigs.get(ctx.carrierId);
     if (rig) anim.lookAt(pose, rig.world.pelvis, 0.8 * w);
@@ -341,6 +345,7 @@ export const ACTIONS = {
     pose.hands[0].set(0.075, 0.14, 0.25); pose.hands[1].set(-0.075, 0.15, 0.25);
     pose.elbows[0].set(0.9, -1, -0.1); pose.elbows[1].set(-0.9, -1, -0.1);
     pose.wrists[0].set(-0.2, 0, -0.9); pose.wrists[1].set(-0.2, 0, 0.9);
+    setHand(pose, 0, HAND.GRIP); setHand(pose, 1, HAND.GRIP);
     // Quarterbacks drop back tall, even when shuffling backwards.
     pose.spine.x = Math.min(pose.spine.x, 0.12);
     pose.hips.x = Math.min(pose.hips.x, 0.16);
@@ -375,6 +380,9 @@ export const ACTIONS = {
     pose.elbows[0].set(0.8, -0.8, -0.4);
     pose.wrists[1].set(lerp(0, -0.7, cock) + 0.6 * through, 0, 0);
     pose.wrists[0].set(-0.2, 0, -0.6);
+    // The fingers hold the ball until it leaves them, then trail open.
+    setHand(pose, 1, HAND.GRIP); setHand(pose, 1, HAND.RELAXED, smoothstep(0.22, 0.3, t));
+    setHand(pose, 0, HAND.FIST, 0.5);
     pose.head.set(0, 0, 0);
     // Legs: weight back on the plant foot, a short step at the target, the
     // weight driven over the front leg, the back foot up on its toe and
@@ -468,6 +476,7 @@ export const ACTIONS = {
       pose.hands[i].set(data.hands[i].x, data.hands[i].y + 0.015 * Math.sin(ctx.time * 9 + i * 2), data.hands[i].z);
       pose.elbows[i].set(SIDES[i] * (offense ? 0.3 : 0.65), -1, -0.15);
       pose.wrists[i].set(offense ? -1.15 : -0.8, 0, 0);
+      setHand(pose, i, offense ? HAND.PUNCH : HAND.CLAMP, offense ? 1 : 0.6);
     }
   },
 
@@ -502,6 +511,7 @@ export const ACTIONS = {
       anim.prepareChest(pose);
       pose.hands[down].lerp(anim.chestPoint(SIDES[down] * 0.32 + pose.pelvis.x, 0.07, 0.62, _a), reach);
       pose.wrists[down].set(-1.0 * reach, 0, 0);
+      setHand(pose, down, HAND.TRIPOD, reach);
     }
     // First both arms close on where the runner was: he grasps at air.
     const grasp = smoothstep(0, 0.06, age) * (1 - smoothstep(0.14, 0.32, age));
