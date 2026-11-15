@@ -8,6 +8,7 @@ const model = THREE ? await import('../dist/js/athletes/rig.js') : {};
 const poses = THREE ? await import('../dist/js/athletes/pose.js') : {};
 const uniform = THREE ? await import('../dist/js/athletes/uniform.js') : {};
 const shapes = THREE ? await import('../dist/js/athletes/geometry.js') : {};
+const skin = THREE ? await import('../dist/js/athletes/skin.js') : {};
 
 // Share of a geometry's triangles whose winding agrees with their vertex
 // normals: an inside-out part (a mirrored limb with the wrong winding, a
@@ -74,7 +75,7 @@ modelTest('all body types keep both skinning levels stable through a deep crouch
   const atlas = { offset: [0, 0], scale: [1, 1], white: [0.5, 0.5] };
   const rigs = specs.map((spec, i) => new model.Rig(squad, spec, i, full, atlas, low));
   squad.finish();
-  const vertex = new THREE.Vector3(), other = new THREE.Vector3(), a = new THREE.Matrix4(), b = new THREE.Matrix4();
+  const vertex = new THREE.Vector3();
   try {
     // Mirrored right-hand limbs are baked with their faces outwards, and
     // every vertex has a detail layer and a surface.
@@ -97,11 +98,9 @@ modelTest('all body types keep both skinning levels stable through a deep crouch
       });
       squad.commit();
       for (const mesh of Object.values(squad.meshes)) {
-        const g = mesh.geometry, p = g.attributes.position, bones = g.attributes.athBones, mix = g.attributes.athMix;
+        const g = mesh.geometry, p = g.attributes.position;
         for (let i = 0; i < p.count; i++) {
-          a.fromArray(squad.bones.data, bones.getX(i) * 16); b.fromArray(squad.bones.data, bones.getY(i) * 16);
-          vertex.fromBufferAttribute(p, i).applyMatrix4(a).multiplyScalar(mix.getX(i));
-          other.fromBufferAttribute(p, i).applyMatrix4(b).multiplyScalar(1 - mix.getX(i)); vertex.add(other);
+          skin.skinVertex(g, squad.bones.data, i, vertex);
           assert.ok(Number.isFinite(vertex.length()) && vertex.length() < 3.2, `${mesh.name} has no exploded vertices`);
           assert.ok(vertex.y > -0.15, `${mesh.name} stays above the floor in an upright/crouched pose`);
         }

@@ -1,5 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
 import { SIDES } from './math.js';
+import { HAND } from './hands.js';
 
 // A full-body pose, the common currency between the animation layer and the
 // rig. Everything is a number or a vector so two poses can be blended.
@@ -27,7 +28,25 @@ export class Pose {
     this.knees = [new THREE.Vector3(0.15, 0, 1), new THREE.Vector3(-0.15, 0, 1)];
     this.hands = [new THREE.Vector3(0.22, -0.4, 0), new THREE.Vector3(-0.22, -0.4, 0)];
     this.elbows = [new THREE.Vector3(0.3, -0.4, -1), new THREE.Vector3(-0.3, -0.4, -1)];
-    this.wrists = [new THREE.Vector3(), new THREE.Vector3()];  // hand flex, twist, roll
+    // Hand on the forearm, as Euler XYZ: x swings it in the plane of the palm
+    // (toward the thumb or the little finger), y turns the forearm over
+    // (pronation), z flexes the wrist toward the palm or the back of the hand.
+    this.wrists = [new THREE.Vector3(), new THREE.Vector3()];
+    // Extra rotation of the lower neck (pitch, yaw, roll); the head keeps the
+    // orientation `head` asks for.
+    this.neck = new THREE.Vector3();
+    // Extra bend at the ball of each foot, on top of the roll the rig gives a
+    // planted foot whose heel is up.
+    this.toes = [0, 0];
+    // Shoulder girdle, on top of what the arm's reach brings: x shrugs the
+    // shoulder up, y brings it forward (radians at the collarbone).
+    this.shoulders = [new THREE.Vector2(), new THREE.Vector2()];
+    // Hand shapes (hands.js) and, when aim > 0, the attitude asked of each
+    // hand: where the palm faces and the fingers point, in the chest frame.
+    this.fingers = [Float32Array.from(HAND.RELAXED), Float32Array.from(HAND.RELAXED)];
+    this.palm = [new THREE.Vector3(), new THREE.Vector3()];
+    this.point = [new THREE.Vector3(), new THREE.Vector3()];
+    this.aim = [0, 0];
   }
 
   copy(o) {
@@ -36,7 +55,10 @@ export class Pose {
     for (let i = 0; i < 2; i++) {
       this.feet[i].copy(o.feet[i]); this.footRot[i].copy(o.footRot[i]); this.knees[i].copy(o.knees[i]);
       this.hands[i].copy(o.hands[i]); this.elbows[i].copy(o.elbows[i]); this.wrists[i].copy(o.wrists[i]);
+      this.toes[i] = o.toes[i]; this.shoulders[i].copy(o.shoulders[i]); this.fingers[i].set(o.fingers[i]);
+      this.palm[i].copy(o.palm[i]); this.point[i].copy(o.point[i]); this.aim[i] = o.aim[i];
     }
+    this.neck.copy(o.neck);
     return this;
   }
 
@@ -51,7 +73,16 @@ export class Pose {
     for (let i = 0; i < 2; i++) {
       this.feet[i].lerp(o.feet[i], t); this.footRot[i].lerp(o.footRot[i], t); this.knees[i].lerp(o.knees[i], t);
       this.hands[i].lerp(o.hands[i], t); this.elbows[i].lerp(o.elbows[i], t); this.wrists[i].lerp(o.wrists[i], t);
+      this.toes[i] = mix(this.toes[i], o.toes[i]); this.shoulders[i].lerp(o.shoulders[i], t);
+      const f = this.fingers[i], g = o.fingers[i];
+      for (let k = 0; k < f.length; k++) f[k] = mix(f[k], g[k]);
+      // A hand that is not aimed has no attitude to blend from: it takes the
+      // other's, and the aim itself fades in.
+      if (this.aim[i] <= 0) { this.palm[i].copy(o.palm[i]); this.point[i].copy(o.point[i]); }
+      else if (o.aim[i] > 0) { this.palm[i].lerp(o.palm[i], t); this.point[i].lerp(o.point[i], t); }
+      this.aim[i] = mix(this.aim[i], o.aim[i]);
     }
+    this.neck.lerp(o.neck, t);
     return this;
   }
 }

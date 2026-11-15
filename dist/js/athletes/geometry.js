@@ -427,9 +427,27 @@ export function faceDetails() {
 // Hands and feet
 
 // Left glove: palm faces +X, thumb on the -Z side, fingers along -Y. The
-// wrist is at the origin and the fingertips about 0.18 yd below it. The four
-// fingers are separate and slightly curled, the thumb angles forward. `low`:
-// the distant-athlete mitten.
+// wrist is at the origin and the fingertips about 0.19 yd below it. The palm
+// (`glove`) and the five digits (`digits`) are separate pieces in the same
+// coordinates, modelled flat and straight: each digit bends at its own three
+// joints (rig.js), so the shape of the hand is a matter of pose. `low`: the
+// distant-athlete mitten, one piece on the hand bone.
+//
+// HAND_DIGITS: where each digit springs from the palm (its first joint), how
+// long it is and how far along it the two outer joints lie; the thumb also
+// leans out of the palm (Euler x then z).
+export const HAND_DIGITS = [
+  { name: 'thumb', base: [0.008, -0.04, -0.036], lean: [0.5, 0.32], length: 0.078, joints: [0.44, 0.78], radius: 0.0152 },
+  { name: 'index', base: [0.004, -0.106, -0.0345], length: 0.07, joints: [0.42, 0.78], radius: 0.0112 },
+  { name: 'middle', base: [0.004, -0.102, -0.0115], length: 0.079, joints: [0.42, 0.78], radius: 0.0112 },
+  { name: 'ring', base: [0.004, -0.105, 0.0115], length: 0.073, joints: [0.42, 0.78], radius: 0.0112 },
+  { name: 'pinky', base: [0.004, -0.114, 0.0345], length: 0.057, joints: [0.42, 0.78], radius: 0.0098 },
+];
+
+// The palm (+X) side of the glove is a darker grip surface; the wrist closes
+// with a darker strap.
+const gripShade = g => shadeBy(g, (x, y) => (y < -0.02 && x > 0.008 ? 0.5 : y > -0.013 ? 0.62 : 1));
+
 export function glove({ low = false } = {}) {
   if (low) {
     const hand = loft([
@@ -438,34 +456,27 @@ export function glove({ low = false } = {}) {
     ], { radial: 6, subdiv: 1 });
     return hand;
   }
-  const parts = [];
   // Wrist band, the back of the hand with its knuckle ridge, and the palm.
-  parts.push(loft([
+  return gripShade(loft([
     { y: 0.016, w: 0.0335, d: 0.0345 }, { y: -0.012, w: 0.029, d: 0.034 },
     { y: -0.04, w: 0.021, d: 0.042, n: 2.4 }, { y: -0.075, w: 0.019, d: 0.048, x: 0.001, n: 2.8 },
-    { y: -0.098, w: 0.0185, d: 0.049, x: 0.003, n: 3 }, { y: -0.111, w: 0.013, d: 0.046, x: 0.006, n: 3 },
+    { y: -0.098, w: 0.0185, d: 0.049, x: 0.003, n: 3 }, { y: -0.113, w: 0.0135, d: 0.0465, x: 0.005, n: 3 },
   ], { radial: 10, subdiv: 1 }));
-  const lengths = [0.07, 0.079, 0.073, 0.057], drop = [-0.004, 0, -0.003, -0.012];
-  lengths.forEach((L, i) => {
-    const r = i === 3 ? 0.0098 : 0.0112;
-    const f = loft([
-      { y: 0.006, w: r, d: r, x: 0.004 }, { y: -L * 0.42, w: r, d: r * 0.98, x: 0.009 },
-      { y: -L * 0.78, w: r * 0.9, d: r * 0.9, x: 0.02 }, { y: -L, w: r * 0.6, d: r * 0.62, x: 0.03 },
-    ], { radial: 5, subdiv: 1, capTop: false });
-    f.translate(0, -0.102 + drop[i], -0.0345 + i * 0.023);
-    parts.push(f);
+}
+
+// One geometry per digit of HAND_DIGITS, each with a ring on either side of
+// its joints so a knuckle folds between two rings instead of across one.
+export function digits() {
+  return HAND_DIGITS.map(({ base, lean, length: L, joints: [j1, j2], radius: r }) => {
+    const ring = (t, k, x = 0) => ({ y: -L * t, w: r * 0.92 * k, d: r * k, x });
+    const g = loft([
+      { y: 0.008, w: r * 0.9, d: r * 0.98 }, ring(0.1, 1), ring(j1 - 0.08, 0.97), ring(j1, 1.03, -0.0006), ring(j1 + 0.08, 0.95),
+      ring(j2 - 0.06, 0.89), ring(j2, 0.92, -0.0005), ring(j2 + 0.07, 0.85), ring(0.95, 0.68), ring(1, 0.36),
+    ], { radial: 6, subdiv: 1, capTop: false });
+    if (lean) { g.rotateX(lean[0]); g.rotateZ(lean[1]); }
+    g.translate(...base);
+    return gripShade(g);
   });
-  const thumb = loft([
-    { y: 0.004, w: 0.016, d: 0.017 }, { y: -0.034, w: 0.0135, d: 0.0145 },
-    { y: -0.06, w: 0.0105, d: 0.0115 }, { y: -0.074, w: 0.006, d: 0.0065 },
-  ], { radial: 6, subdiv: 1, capTop: false });
-  thumb.rotateX(0.5); thumb.rotateZ(0.32); thumb.translate(0.008, -0.04, -0.036);
-  parts.push(thumb);
-  const g = mergeGeometries(parts);
-  // The palm (+X) and the insides of the fingers are a darker grip surface;
-  // the wrist closes with a darker strap.
-  shadeBy(g, (x, y) => (y < -0.02 && x > 0.008 ? 0.5 : y > -0.013 ? 0.62 : 1));
-  return g;
 }
 
 // Cleat around the ankle joint: heel at -Z, toe at +Z, the outsole at about
@@ -482,6 +493,7 @@ export function cleat({ low = false } = {}) {
     { y: 0.02, w: 0.04, d: 0.038, z: h(-0.043), n: 2.6 },
     { y: 0.06, w: 0.043, d: 0.029, z: h(-0.051), n: 2.8 },
     { y: 0.11, w: 0.046, d: 0.022, z: h(-0.058), n: 2.8 },
+    { y: 0.135, w: 0.0455, d: 0.0195, z: h(-0.06), n: 2.8 },
     { y: 0.16, w: 0.044, d: 0.017, z: h(-0.062), n: 2.6 },
     { y: 0.2, w: 0.035, d: 0.014, z: h(-0.064), n: 2.4 },
     { y: 0.222, w: 0.015, d: 0.008, z: h(-0.067) },
@@ -491,7 +503,8 @@ export function cleat({ low = false } = {}) {
   const sole = loft([
     { y: -0.084, w: 0.02, d: 0.007, z: h(-0.08), n: 3 }, { y: -0.066, w: 0.037, d: 0.007, z: h(-0.082), n: 3 },
     { y: -0.01, w: 0.044, d: 0.007, z: h(-0.083), n: 3 }, { y: 0.06, w: 0.049, d: 0.007, z: h(-0.083), n: 3 },
-    { y: 0.12, w: 0.052, d: 0.007, z: h(-0.083), n: 3 }, { y: 0.17, w: 0.05, d: 0.007, z: h(-0.082), n: 3 },
+    { y: 0.11, w: 0.052, d: 0.007, z: h(-0.083), n: 3 }, { y: 0.135, w: 0.052, d: 0.007, z: h(-0.083), n: 3 },
+    { y: 0.16, w: 0.0505, d: 0.007, z: h(-0.082), n: 3 },
     { y: 0.21, w: 0.039, d: 0.007, z: h(-0.079), n: 3 }, { y: 0.229, w: 0.015, d: 0.005, z: h(-0.075) },
   ], low ? { radial: 4, subdiv: 1 } : { radial: 8, subdiv: 1 });
   sole.rotateX(Math.PI / 2);
