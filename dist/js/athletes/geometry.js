@@ -134,6 +134,100 @@ export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom =
 }
 
 // ---------------------------------------------------------------------------
+// Pants. One piece for the left half of the body, from the waistband over the
+// hip and the seat, down the thigh and over the knee to the cuff; the right
+// half is its mirror image. Above the crotch each ring runs round the whole
+// pelvis and is cut off flat at the midline, where the two halves meet along
+// the fly and the seat seam; below it the ring closes round the thigh. So
+// the seat runs into the leg as one surface: no shell hangs over another.
+//
+// Coordinates are the left thigh's: the hip joint at the origin, +X outward
+// (the midline is at x = -PANTS.hip), +Z forward. The uv is the leg's (u
+// round the ring from the outside seam, v from the hip to the cuff, running
+// on above the hip); vertices above PANTS.split also carry `seat`, their
+// place on the hips panel of the uniform atlas (u round the whole pelvis from
+// the left side seam, v from the crotch to the waist), others (-1, -1).
+export const PANTS = { hip: 0.112, split: -0.05, crotch: -0.078, top: 0.166, legTop: 0.075, cuff: -0.574 };
+
+export function pants({ low = false } = {}) {
+  const radial = low ? 12 : 28, subdiv = low ? 1 : 2, H = PANTS.hip, cols = radial + 1;
+  // [y, outer edge, inner edge (both from the midline), half depth, z]
+  const rows = [
+    [0.166, 0.15, -0.15, 0.103, 0], [0.15, 0.173, -0.173, 0.12, -0.002], [0.1, 0.192, -0.192, 0.126, -0.006], [0.06, 0.2026, -0.2026, 0.129, -0.013],
+    [0.02, 0.207, -0.207, 0.124, -0.013], [-0.02, 0.213, -0.12, 0.12, -0.008], [PANTS.split, 0.216, -0.04, 0.119, -0.003], [PANTS.crotch, 0.218, 0.004, 0.119, 0.001],
+    [-0.105, 0.22, 0.008, 0.121, 0.003], [-0.2, 0.215, 0.009, 0.115, 0.006], [-0.3, 0.201, 0.023, 0.095, 0.005], [-0.39, 0.187, 0.037, 0.08, 0.002],
+    [-0.45, 0.178, 0.046, 0.073, 0.008], [-0.5, 0.176, 0.048, 0.072, 0.011], [-0.545, 0.17, 0.054, 0.062, 0.004], [-0.566, 0.168, 0.056, 0.058, 0], [PANTS.cuff, 0.158, 0.066, 0.047, 0],
+  ];
+  const FRONT = Math.PI / 2, BACK = -Math.PI / 2, OUT = 0, IN = Math.PI, span = PANTS.top - PANTS.cuff, legSpan = PANTS.legTop - PANTS.cuff;
+  const g = loft(rows.map(([y, outer, inner, d, z]) => ({ y, w: (outer - inner) / 2, d, x: (outer + inner) / 2 - H, z })), {
+    radial, subdiv, capTop: false,
+    // Shaded in the crotch and inside the thigh, under the jersey at the
+    // waist, above the knee pad and at the tucked cuff.
+    ao: (v, t) => {
+      const y = PANTS.top - v * span, leg = (PANTS.legTop - y) / legSpan, front = smoothstep(-0.2, 0.6, Math.sin(t));
+      return (1 - 0.26 * (1 - smoothstep(0.05, 0.3, leg)) * smoothstep(0.2, 1, -Math.cos(t)) * smoothstep(0.03, -0.02, y))
+        * (1 - 0.24 * smoothstep(0.13, 0.166, y)) * (1 - 0.3 * smoothstep(0.95, 1, leg))
+        * (1 - 0.2 * Math.exp(-(((leg - 0.74) / 0.03) ** 2)) * front) * (1 - 0.14 * Math.exp(-(((leg - 0.92) / 0.025) ** 2)) * front);
+    },
+    sculpt: mounds([
+      { y: 0.03, t: BACK + 0.62, sy: 0.075, st: 0.5, a: 0.02 },                // glute
+      { y: 0.115, t: OUT + 0.25, sy: 0.03, st: 0.4, a: 0.006, flat: 0.6 },     // hip pad
+      { y: -0.2, t: FRONT - 0.15, sy: 0.085, st: 0.5, a: 0.013, flat: 0.7 },   // thigh pad
+      { y: -0.27, t: OUT + 0.35, sy: 0.1, st: 0.45, a: 0.006 },               // outer quad
+      { y: -0.37, t: IN - 0.5, sy: 0.04, st: 0.4, a: 0.006 },                 // teardrop above the knee
+      { y: -0.2, t: BACK, sy: 0.11, st: 0.6, a: 0.009 },                      // hamstrings
+      { y: -0.475, t: FRONT, sy: 0.036, st: 0.55, a: 0.013, flat: 0.5 },      // knee pad
+      { y: -0.47, t: BACK, sy: 0.03, st: 0.5, a: -0.006 },                    // back of the knee
+      { y: -0.562, t: 0, sy: 0.008, st: 0, a: 0.003 },                        // cuff band
+    ]),
+  });
+  const p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv, col = g.attributes.color;
+  // Cut at the midline: what would lie across it is brought onto it, and the
+  // faces that end up wholly in that plane (the wall between the two halves)
+  // are dropped. The surface meets its mirror image there, so its normals
+  // there lie in the plane.
+  const flat = new Uint8Array(p.count);
+  for (let i = 0; i < p.count; i++) {
+    if (p.getX(i) > -H) continue;
+    flat[i] = 1;
+    p.setX(i, -H);
+    const ny = n.getY(i), nz = n.getZ(i), len = Math.hypot(ny, nz);
+    if (len > 1e-4) n.setXYZ(i, 0, ny / len, nz / len); else n.setXYZ(i, 0, 0, p.getZ(i) < 0 ? -1 : 1);
+  }
+  // The ring at the split is doubled: the faces above it take the hips panel,
+  // the faces below it the leg panel.
+  const first = rows.findIndex(r => r[0] === PANTS.split) * subdiv * cols, extra = cols, total = p.count + extra;
+  const position = new Float32Array(total * 3), normal = new Float32Array(total * 3), uvs = new Float32Array(total * 2), color = new Float32Array(total * 3), seat = new Float32Array(total * 2).fill(-1);
+  const put = (to, from, hips) => {
+    const x = p.getX(from), y = p.getY(from), z = p.getZ(from);
+    position.set([x, y, z], to * 3); normal.set([n.getX(from), n.getY(from), n.getZ(from)], to * 3); color.set([col.getX(from), col.getY(from), col.getZ(from)], to * 3);
+    uvs.set([uv.getX(from), (PANTS.legTop - y) / legSpan], to * 2);
+    if (hips) {
+      const around = Math.atan2(z, x + H) / (2 * Math.PI);
+      seat.set([around < -1e-6 ? around + 1 : Math.max(0, around), (y - PANTS.crotch) / (PANTS.top - PANTS.crotch)], to * 2);
+    }
+  };
+  for (let i = 0; i < p.count; i++) put(i, i, i < first);
+  for (let j = 0; j < cols; j++) put(p.count + j, first + j, true);
+  const index = [];
+  for (let i = 0; i < g.index.count; i += 3) {
+    const tri = [g.index.getX(i), g.index.getX(i + 1), g.index.getX(i + 2)];
+    if (tri.every(v => flat[v])) continue;
+    const upper = tri.some(v => v < first);
+    index.push(...tri.map(v => (upper && v >= first && v < first + cols ? p.count + v - first : v)));
+  }
+  g.dispose();
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(position, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  out.setAttribute('color', new THREE.BufferAttribute(color, 3));
+  out.setAttribute('seat', new THREE.BufferAttribute(seat, 2));
+  out.setIndex(index);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Utilities
 
 export function mergeGeometries(list) {

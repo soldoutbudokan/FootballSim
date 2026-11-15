@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { loft, mounds, angleBetween, shadeBy, helmetShell, helmetHardware, chinStrap, helmetVisor, glove, digits, HAND_DIGITS, cleat, cleatStuds, athleteFace, faceDetails, HELMET_UV } from './geometry.js';
+import { loft, mounds, angleBetween, shadeBy, helmetShell, helmetHardware, chinStrap, helmetVisor, glove, digits, HAND_DIGITS, pants, PANTS, cleat, cleatStuds, athleteFace, faceDetails, HELMET_UV } from './geometry.js';
 import { solveTwoBone } from './ik.js';
 import { eulerQuat, SPINE_SPLIT } from './pose.js';
 import { hashString, SIDES, smoothstep, clamp, lerp } from './math.js';
@@ -179,10 +179,6 @@ const AO = {
     * (1 - 0.3 * bumpAt(v, 0.335, 0.045) * Math.abs(Math.sin(t)))
     * (1 - 0.3 * smoothstep(0.93, 1, v)),
   abdomen: (v, t) => (0.66 + 0.34 * smoothstep(0.08, 0.5, v)) * (1 - 0.1 * side(t)),
-  pelvis: (v, t) => (0.8 + 0.2 * smoothstep(0, 0.4, v)) * (1 - 0.22 * smoothstep(0.84, 1, v)) * (1 - 0.1 * bumpAt(Math.sin(t), -1, 0.25) * (1 - smoothstep(0.2, 0.5, v))),
-  // v = 0 at the hip: the crotch side is shaded, as is the cloth just above
-  // the knee pad and the tucked hem.
-  leg: (v, t) => (1 - 0.26 * (1 - smoothstep(0.05, 0.3, v)) * smoothstep(0.2, 1, -Math.cos(t))) * (1 - 0.3 * smoothstep(0.95, 1, v)) * (1 - 0.2 * bumpAt(v, 0.74, 0.03) * smoothstep(-0.2, 0.6, Math.sin(t))) * (1 - 0.14 * bumpAt(v, 0.92, 0.025) * smoothstep(-0.2, 0.6, Math.sin(t))),
   upperArm: v => 1 - 0.36 * (1 - smoothstep(0.3, 0.62, v)),       // v = 0 at the shoulder, under the sleeve
   sleeve: (v, t) => (1 - 0.3 * smoothstep(0.3, 1, Math.cos(t)) * smoothstep(0.15, 0.6, v)) * (1 - 0.18 * bumpAt(v, 0.63, 0.05)),
   neck: v => 0.5 + 0.38 * v,
@@ -207,21 +203,9 @@ const FRONT = Math.PI / 2, BACK = -Math.PI / 2, OUT = 0, IN = Math.PI;
 export function createGeometries({ low = false } = {}) {
   const L = (radial, subdiv) => (low ? { radial: Math.max(6, Math.round(radial / 2)), subdiv: 1 } : { radial, subdiv });
   return {
-    // The seat of the pants, from the crotch up to the waistband, with the
-    // glutes and a hip pad on each side under the cloth.
-    pelvis: loft([
-      { y: -0.078, w: 0.03, d: 0.04, z: -0.004 }, { y: -0.056, w: 0.092, d: 0.074, z: -0.006 }, { y: -0.02, w: 0.166, d: 0.104, z: -0.01 },
-      { y: 0.02, w: 0.205, d: 0.122, z: -0.014 }, { y: 0.06, w: 0.211, d: 0.129, z: -0.013 },
-      { y: 0.1, w: 0.2, d: 0.126, z: -0.006 }, { y: 0.15, w: 0.186, d: 0.124, z: -0.002 },
-      { y: 0.166, w: 0.168, d: 0.112 },
-    ], {
-      ...L(20, 2), ao: AO.pelvis,
-      sculpt: mounds([
-        { y: 0.035, t: BACK - 0.55, sy: 0.06, st: 0.5, a: 0.017 }, { y: 0.035, t: BACK + 0.55, sy: 0.06, st: 0.5, a: 0.017 },
-        { y: 0.02, t: BACK, sy: 0.07, st: 0.12, a: -0.008 },
-        { y: 0.115, t: OUT + 0.25, sy: 0.03, st: 0.4, a: 0.006, flat: 0.6 }, { y: 0.115, t: IN - 0.25, sy: 0.03, st: 0.4, a: 0.006, flat: 0.6 },
-      ]),
-    }),
+    // The pants, one piece per side from the waistband to the cuff below
+    // the knee (see geometry.js).
+    pants: pants({ low }),
     // The jersey is tucked in: its hem stays well inside the pants, whose top
     // edge and belt sit clearly outside it, so the two never intersect.
     belt: loft([{ y: 0.124, w: 0.1935, d: 0.13 }, { y: 0.158, w: 0.188, d: 0.128 }], { ...L(20, 1), capTop: false, capBottom: false }),
@@ -258,28 +242,6 @@ export function createGeometries({ low = false } = {}) {
     neck: loft([
       { y: 0.3, w: 0.11, d: 0.082 }, { y: 0.35, w: 0.088, d: 0.076, z: -0.004 }, { y: 0.39, w: 0.077, d: 0.072, z: -0.004 }, { y: 0.47, w: 0.067, d: 0.067 },
     ], { ...L(10, 1), capBottom: false, ao: AO.neck }),
-    // One pant leg from inside the pelvis, over the thigh and knee pads, to
-    // the cuff below the knee; it is skinned across the knee so it bends as
-    // one piece. Quadriceps to the front and outside, hamstrings behind.
-    leg: loft([
-      { y: 0.075, w: 0.07, d: 0.084 }, { y: 0.02, w: 0.096, d: 0.108, x: -0.004 }, { y: -0.04, w: 0.106, d: 0.118, x: -0.004, z: 0.002 },
-      { y: -0.105, w: 0.108, d: 0.121, x: -0.002, z: 0.003 }, { y: -0.2, w: 0.103, d: 0.115, z: 0.006 },
-      { y: -0.3, w: 0.089, d: 0.095, z: 0.005 }, { y: -0.39, w: 0.075, d: 0.08, z: 0.002 },
-      { y: -0.45, w: 0.066, d: 0.073, z: 0.008 }, { y: -0.5, w: 0.064, d: 0.072, z: 0.011 },
-      { y: -0.545, w: 0.058, d: 0.062, z: 0.004 }, { y: -0.566, w: 0.056, d: 0.058 },
-      { y: -0.574, w: 0.046, d: 0.047 },
-    ], {
-      ...L(20, 2), ao: AO.leg,
-      sculpt: mounds([
-        { y: -0.2, t: FRONT - 0.15, sy: 0.085, st: 0.5, a: 0.011, flat: 0.7 },   // thigh pad
-        { y: -0.27, t: OUT + 0.35, sy: 0.1, st: 0.45, a: 0.006 },               // outer quad
-        { y: -0.37, t: IN - 0.5, sy: 0.04, st: 0.4, a: 0.006 },                 // teardrop above the knee
-        { y: -0.2, t: BACK, sy: 0.11, st: 0.6, a: 0.008 },                      // hamstrings
-        { y: -0.475, t: FRONT, sy: 0.036, st: 0.55, a: 0.012, flat: 0.5 },      // knee pad
-        { y: -0.47, t: BACK, sy: 0.03, st: 0.5, a: -0.006 },                    // back of the knee
-        { y: -0.562, t: 0, sy: 0.008, st: 0, a: 0.003 },                        // cuff band
-      ]),
-    }),
     // The lower leg in its sock: calf high at the back, shin to the front, a
     // slim ankle.
     sock: loft([
@@ -592,9 +554,18 @@ export class Rig {
       const share = smoothstep(-lerp(0.1, 0.03, front) * k, lerp(0.08, 0.035, front) * k, below);
       return share * lerp(smoothstep(0.012, 0.07, s * p.x), 1, smoothstep(0.08 * k, 0.16 * k, below));
     };
-    const seat = (p, waist) => { const s = p.x > 0 ? 1 : -1; return give(waist(p), s > 0 ? 'thigh0' : 'thigh1', thighShare(p, s)); };
     const belly = [torso * d.belly ** 0.2, k, depth * d.belly ** 0.5];
-    body('pelvis', geometry.pelvis, { scale: hips, surface: SURFACE.pants, grain: grain(GRAIN.knit, 1.0 * torso, 0.23), uv: region('hips', { shared: true }), blend: [['abdomen', 0.06]], weights: seat });
+    // The pants are modelled on the quarterback's build. Round the pelvis
+    // they take the torso's width and depth, measured from the midline; down
+    // the leg the limb's girth, measured from the hip joint.
+    const waistY = _t.setFromMatrixPosition(this.abdomen.matrixWorld).y, seatUV = geometry.pants.attributes.seat;
+    const hipsPanel = region('hips', { shared: true }), legPanel = region('leg', { shared: true, flipV: true });
+    const pantsFit = v => {
+      const leg = smoothstep(0, -0.14, v.y), across = v.x + PANTS.hip;
+      const down = across <= PANTS.hip ? across * d.hipX / PANTS.hip : d.hipX + (across - PANTS.hip) * limb;
+      v.x = (lerp(across * torso, down, leg) - d.hipX) / limb;
+      v.z *= lerp(hips[2], limb, leg) / limb;
+    };
     body('pelvis', geometry.belt, { scale: hips, color: TEAM.belt, surface: SURFACE.belt, grain: grain(GRAIN.leather, 1, 0.04, 0.6), uv: plain, blend: [['abdomen', 0.06]], detail: true });
     // The lower jersey takes the bottom row of the torso panel (its side
     // panels and the folds at the belt) all the way down.
@@ -632,8 +603,16 @@ export class Rig {
       // goes half way, so the joint keeps its girth when it is bent double.
       const knee = other => ({ bone: other, radius: 0.09, crease: { side: -1, radius: 0.03 }, helper: 'knee' + i });
       const elbow = other => ({ bone: other, radius: 0.06, crease: { side: -1, radius: 0.035 }, helper: 'elbow' + i });
-      const hip = (p, below) => give(below(p), 'pelvis', 1 - thighShare(p, s));
-      body(thigh, geometry.leg, { scale: legScale, surface: SURFACE.pants, grain: grain(GRAIN.knit, 0.62 * limb, 0.64), uv: region('leg', { shared: true, flipV: true }), blend: [knee(shin)], weights: hip });
+      // What is not the thigh's is the pelvis's, and above the waist joint the abdomen's.
+      const hip = (p, below) => {
+        const share = thighShare(p, s), list = below(p);
+        if (share >= 1) return list;
+        for (const entry of list) entry[1] *= share;
+        const up = smoothstep(-0.06, 0.06, p.y - waistY);
+        list.push([index('pelvis'), (1 - share) * (1 - up)], [index('abdomen'), (1 - share) * up]);
+        return list;
+      };
+      body(thigh, geometry.pants, { scale: legScale, surface: SURFACE.pants, grain: grain(GRAIN.knit, 0.62 * limb, 0.64), uv: (u, v, n) => (seatUV.getX(n) >= 0 ? hipsPanel(seatUV.getX(n), seatUV.getY(n)) : legPanel(u, v)), blend: [knee(shin)], weights: hip, warp: pantsFit });
       body(shin, geometry.sock, { scale: legScale, surface: SURFACE.sock, grain: grain(GRAIN.rib, 0.34 * limb, 0.45, 0.7), uv: region('sock', { shared: true, flipV: true }), blend: [knee(thigh), [foot, 0.05]] });
       // The shoe bends at the ball of the foot.
       const ball = { bone: 'toe' + i, radius: 0.026 * k, dir: FORWARD };

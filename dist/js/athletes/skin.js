@@ -99,7 +99,7 @@ export class SkinnedGeometryBuilder {
   // weights(p, i) -> [[bone, share], ...] for a bind-space point (vertex i of
   //   the part), or the two-bone form [ownBone, otherBone, ownShare]
   // color: linear THREE.Color multiplied into the vertex colour (baked AO)
-  // uv: function(u, v) -> [u, v] remapping the part's own uv
+  // uv: function(u, v, i) -> [u, v] remapping the part's own uv (vertex i)
   // surface: [roughness, metalness, sheen]
   // grain: [layer, tilesU, tilesV, strength] in the detail texture array
   //   (uniform.js); the part's own uv times the tile counts is its detail uv
@@ -119,7 +119,7 @@ export class SkinnedGeometryBuilder {
       _v.fromBufferAttribute(nor, i).applyMatrix3(_n).normalize();
       this.normal.push(_v.x, _v.y, _v.z);
       const u0 = uvs ? uvs.getX(i) : 0.5, v0 = uvs ? uvs.getY(i) : 0.5;
-      const [u1, v1] = uv ? uv(u0, v0) : [u0, v0];
+      const [u1, v1] = uv ? uv(u0, v0, i) : [u0, v0];
       this.uv.push(u1, v1);
       const ao = col ? col.getX(i) : 1, g = col ? col.getY(i) : 1, bl = col ? col.getZ(i) : 1;
       this.color.push(color.r * ao, color.g * g, color.b * bl);
