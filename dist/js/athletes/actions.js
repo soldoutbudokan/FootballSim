@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { TAU, SIDES, clamp, lerp, smoothstep, bump, sampleTrack, wrapAngle, damp } from './math.js';
 import { armAngles } from './pose.js';
-import { HAND, setHand } from './hands.js';
+import { HAND, setHand, aimHand } from './hands.js';
 import { carryArm, tuck, cover, legsOut } from './carry.js';
 import { tackled, tackle, tackleYaw, shrugOff, missFor, knockedDown } from './tackle.js';
 import { reachForBall, catchBall, giveBall, takeBall } from './ballskills.js';
@@ -11,6 +11,7 @@ import { reachForBall, catchBall, giveBall, takeBall } from './ballskills.js';
 // in the pocket). Hand targets are in the chest frame, feet in the tilt frame.
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
+const _palm = new THREE.Vector3(), _point = new THREE.Vector3();
 const _w = new THREE.Vector3(), _perp = new THREE.Vector3();
 
 export function startAction(anim, action, data, p, ctx) {
@@ -119,6 +120,8 @@ function handsUp(pose, d, w, x = 0.14, y = 0.1, z = 0.3) {
     pose.elbows[i].lerp(_w.set(SIDES[i] * 0.45, -1, -0.35), w);
     pose.wrists[i].lerp(_w.set(-0.75, 0, 0), w);
     setHand(pose, i, HAND.PUNCH, w);
+    // Palms out to the man in front, fingers up.
+    aimHand(pose, i, _palm.set(0, 0.1, 1), _point.set(SIDES[i] * 0.2, 1, 0), 0.9 * w);
   }
 }
 
@@ -477,6 +480,7 @@ export const ACTIONS = {
       pose.elbows[i].set(SIDES[i] * (offense ? 0.3 : 0.65), -1, -0.15);
       pose.wrists[i].set(offense ? -1.15 : -0.8, 0, 0);
       setHand(pose, i, offense ? HAND.PUNCH : HAND.CLAMP, offense ? 1 : 0.6);
+      aimHand(pose, i, _palm.set(0, 0.1, 1), _point.set(SIDES[i] * 0.2, 1, 0), 0.9);
     }
   },
 

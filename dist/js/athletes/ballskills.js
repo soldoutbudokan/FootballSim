@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { SIDES, clamp, lerp, smoothstep, bump } from './math.js';
 import { carryArm } from './carry.js';
-import { HAND, setHand } from './hands.js';
+import { HAND, setHand, aimHand } from './hands.js';
 
 // Playing the ball in the air: the reach as it arrives, and what the hands
 // and body do in the half second after it gets there (a catch brought in to
@@ -10,7 +10,7 @@ import { HAND, setHand } from './hands.js';
 // to one thrown across him and looks one in over his shoulder without
 // breaking stride (the yaw limit for that is in Animator.updateYaw).
 
-const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3(), _palm = new THREE.Vector3();
 
 const JUMP_TIME = 0.2;         // seconds off the ground either side of the catch
 const JUMP = 0.38;             // highest jump, yards
@@ -56,6 +56,8 @@ export function reachForBall(anim, pose, p, ctx) {
   _a.sub(top);
   if (_a.length() > most) _a.setLength(most);
   _a.add(top);
+  // The palms face the ball as it comes in.
+  if (live && ctx.ballScene && anim.worldToChest(pose, ctx.ballScene, _palm).sub(_a).lengthSq() > 0.04) _palm.normalize(); else _palm.set(0, 0, 1);
   for (let i = 0; i < 2; i++) {
     _b.copy(_a); _b.x += SIDES[i] * 0.075;
     pose.hands[i].lerp(_b, w);
@@ -63,6 +65,7 @@ export function reachForBall(anim, pose, p, ctx) {
     // Thumbs together above the chest, little fingers together below it.
     pose.wrists[i].lerp(_c.set(lerp(-0.3, 0.45, sink), 0, SIDES[i] * lerp(0.9, -0.7, sink)), w);
     setHand(pose, i, HAND.SPREAD, w);
+    aimHand(pose, i, _palm, _c.set(SIDES[i] * 0.3, lerp(1, -1, sink), 0.1), w);
   }
 }
 
