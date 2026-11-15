@@ -477,44 +477,60 @@ export function helmetVisor({ low = false } = {}) {
   return g;
 }
 
-// A compact head with a jaw, cheekbones and brow. The face stays behind the
-// facemask; its profile is visible through the open cage on unvisored players.
+// A head with a jaw, cheekbones, a brow ridge, a nose and lips. The face
+// stays behind the facemask; it shows through the open cage on unvisored
+// players and in every close view.
 export function athleteFace({ low = false } = {}) {
+  const FRONT = Math.PI / 2;
   const head = loft([
     { y: -0.105, w: 0.035, d: 0.04, z: 0.018, n: 2.5 },
-    { y: -0.084, w: 0.057, d: 0.057, z: 0.013, n: 2.8 },
+    { y: -0.088, w: 0.054, d: 0.055, z: 0.014, n: 2.8 },
+    { y: -0.062, w: 0.064, d: 0.064, z: 0.009, n: 2.6 },
     { y: -0.04, w: 0.069, d: 0.07, z: 0.005, n: 2.5 },
     { y: 0.005, w: 0.078, d: 0.079, n: 2.1 },
     { y: 0.054, w: 0.074, d: 0.083, z: -0.005 },
     { y: 0.093, w: 0.061, d: 0.069, z: -0.011 },
     { y: 0.113, w: 0.028, d: 0.037, z: -0.011 },
   ], {
-    radial: low ? 8 : 12, subdiv: low ? 1 : 2,
-    // Eye sockets, cheekbones and the mouth, on the front of the head only.
+    radial: low ? 8 : 18, subdiv: low ? 1 : 2,
+    // On the front of the head only: eye sockets under a brow ridge,
+    // cheekbones, the muzzle and both lips, the chin, the hollow of each cheek.
     sculpt: low ? null : mounds([
-      { y: 0.022, t: Math.PI / 2 - 0.42, sy: 0.012, st: 0.2, a: -0.007 }, { y: 0.022, t: Math.PI / 2 + 0.42, sy: 0.012, st: 0.2, a: -0.007 },
-      { y: -0.012, t: Math.PI / 2 - 0.62, sy: 0.016, st: 0.24, a: 0.004 }, { y: -0.012, t: Math.PI / 2 + 0.62, sy: 0.016, st: 0.24, a: 0.004 },
-      { y: 0.045, t: Math.PI / 2, sy: 0.012, st: 0.7, a: 0.004 },
-      { y: -0.075, t: Math.PI / 2, sy: 0.014, st: 0.3, a: 0.005 },
+      { y: 0.022, t: FRONT - 0.42, sy: 0.011, st: 0.19, a: -0.008 }, { y: 0.022, t: FRONT + 0.42, sy: 0.011, st: 0.19, a: -0.008 },
+      { y: 0.04, t: FRONT - 0.4, sy: 0.008, st: 0.3, a: 0.006 }, { y: 0.04, t: FRONT + 0.4, sy: 0.008, st: 0.3, a: 0.006 },
+      { y: -0.01, t: FRONT - 0.64, sy: 0.016, st: 0.24, a: 0.005 }, { y: -0.01, t: FRONT + 0.64, sy: 0.016, st: 0.24, a: 0.005 },
+      { y: -0.045, t: FRONT, sy: 0.016, st: 0.34, a: 0.006 },
+      { y: -0.046, t: FRONT, sy: 0.0055, st: 0.26, a: 0.0035 }, { y: -0.059, t: FRONT, sy: 0.006, st: 0.22, a: 0.004 },
+      { y: -0.0525, t: FRONT, sy: 0.0022, st: 0.3, a: -0.003 },
+      { y: -0.083, t: FRONT, sy: 0.013, st: 0.28, a: 0.007 },
+      { y: -0.04, t: FRONT - 0.85, sy: 0.02, st: 0.22, a: -0.004 }, { y: -0.04, t: FRONT + 0.85, sy: 0.02, st: 0.22, a: -0.004 },
     ]),
     // The helmet shades the brow, the temples and everything behind them.
-    ao: (v, t) => (0.62 + 0.38 * smoothstep(-0.2, 0.75, Math.sin(t))) * (1 - 0.35 * smoothstep(0.6, 0.85, v)),
+    ao: (v, t) => (0.74 + 0.26 * smoothstep(-0.2, 0.75, Math.sin(t))) * (1 - 0.28 * smoothstep(0.62, 0.86, v)),
   });
   if (low) return head;
-  const nose = ellipsoid(0, -0.006, 0.08, 0.014, 0.027, 0.021, 6, 4);
-  return mergeGeometries([head, nose]);
+  // The nose: a bridge widening to the tip, with a wing either side.
+  const nose = loft([
+    { y: 0.03, w: 0.0065, d: 0.006, z: 0.074 }, { y: 0.012, w: 0.0085, d: 0.01, z: 0.079 },
+    { y: -0.008, w: 0.012, d: 0.0155, z: 0.083 }, { y: -0.019, w: 0.0135, d: 0.0165, z: 0.0835 }, { y: -0.027, w: 0.0105, d: 0.009, z: 0.079 },
+  ], { radial: 8, subdiv: 2 });
+  const wings = [-1, 1].map(s => ellipsoid(s * 0.0125, -0.02, 0.079, 0.0075, 0.007, 0.009, 6, 4));
+  return mergeGeometries([head, shadeBy(nose, (x, y) => (y < -0.022 ? 0.72 : 1)), ...wings]);
 }
 
 export function faceDetails() {
   const parts = [];
   for (const s of [-1, 1]) {
-    parts.push(tint(ellipsoid(s * 0.031, 0.036, 0.073, 0.02, 0.0045, 0.005, 6, 3), '#2a1f1a'));   // brow
-    parts.push(tint(ellipsoid(s * 0.031, 0.022, 0.0722, 0.012, 0.0046, 0.004, 6, 3), '#cfc9c0')); // eye
-    parts.push(tint(ellipsoid(s * 0.031, 0.022, 0.074, 0.0052, 0.0046, 0.003, 6, 3), '#20140d')); // iris
+    parts.push(tint(ellipsoid(s * 0.031, 0.0375, 0.0745, 0.02, 0.0042, 0.005, 6, 3), '#2a1f1a'));   // brow
+    parts.push(tint(ellipsoid(s * 0.031, 0.0215, 0.0728, 0.0125, 0.0066, 0.004, 8, 4), '#ddd7cd')); // eye
+    parts.push(tint(ellipsoid(s * 0.0305, 0.0212, 0.0748, 0.0056, 0.0056, 0.003, 8, 4), '#3a2416')); // iris
+    parts.push(tint(ellipsoid(s * 0.0305, 0.0212, 0.0762, 0.0026, 0.0026, 0.002, 6, 3), '#0c0908')); // pupil
+    parts.push(tint(ellipsoid(s * 0.031, 0.0283, 0.0734, 0.0135, 0.0016, 0.0042, 6, 3), '#2a1c16')); // the line of the upper lid
     // Eye-black strips are subdued and sit on the cheekbone, below the eye.
-    parts.push(tint(ellipsoid(s * 0.035, 0.003, 0.0765, 0.019, 0.005, 0.003, 6, 3), '#23211e'));
+    parts.push(tint(ellipsoid(s * 0.035, 0.003, 0.0775, 0.019, 0.005, 0.003, 6, 3), '#23211e'));
   }
-  parts.push(tint(ellipsoid(0, -0.052, 0.0745, 0.022, 0.0035, 0.003, 6, 3), '#5a3c33'));
+  // The line between the lips.
+  parts.push(tint(ellipsoid(0, -0.0525, 0.0762, 0.02, 0.0018, 0.003, 6, 3), '#3b2620'));
   return mergeGeometries(parts);
 }
 
