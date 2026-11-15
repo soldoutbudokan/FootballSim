@@ -283,3 +283,28 @@ rigTest('a tackle stands a head over a corner and carries a belly; no two men ar
     assert.ok(frontAt(cb, 0, 0.12) < frontAt(cb, 0.3, 0.45) - 0.02, 'the corner\'s waist is behind his');
   } finally { dispose(); }
 });
+
+rigTest('sideline staff are the athletes\' body in plain clothes: posed, baked, bare-headed under a cap', async () => {
+  const { bakeFigure, FIGURE_POSES } = await import('../dist/js/athletes/figures.js');
+  const box = new THREE.Box3(), hands = {};
+  for (const pose of FIGURE_POSES) {
+    const figure = bakeFigure(pose);
+    assert.equal(bakeFigure(pose), figure, 'a pose is baked once');
+    box.makeEmpty();
+    for (const kind of ['shirt', 'trousers', 'skin', 'shoes', 'cap', 'dark', 'white']) {
+      const g = figure[kind];
+      assert.ok(g && g.index.count > 0 && g.attributes.normal, `${pose}: ${kind}`);
+      assert.ok([...g.attributes.position.array].every(Number.isFinite), `${pose}: ${kind} is finite`);
+      g.computeBoundingBox(); box.union(g.boundingBox);
+    }
+    assert.ok(box.min.y > -0.02 && box.min.y < 0.03, `${pose}: stands on the ground (${box.min.y.toFixed(3)})`);
+    assert.ok(box.max.y > 1.9 && box.max.y < 2.12, `${pose}: about 5 ft 10 in under his cap (${box.max.y.toFixed(2)} yd)`);
+    assert.equal(!!figure.sheet, pose === 'clipboard');
+    const triangles = Object.values(figure).reduce((n, g) => n + (g ? g.index.count / 3 : 0), 0);
+    assert.ok(triangles < 5000, `${pose}: ${triangles} triangles`);
+    figure.skin.computeBoundingBox();
+    hands[pose] = figure.skin.boundingBox.min.y;
+  }
+  // The poses are different people: hands hang by the thigh at ease and are up at the hips or the chest otherwise.
+  assert.ok(hands.atEase < 0.95 && hands.armsCrossed > 1.2, `hands at ${hands.atEase.toFixed(2)} at ease, ${hands.armsCrossed.toFixed(2)} folded`);
+});

@@ -154,7 +154,8 @@ export const BODY_TYPES = {
 };
 
 function dimensionsFor(spec) {
-  const base = BODY_TYPES[spec.role] || BODY_TYPES.wr;
+  // (A spec may bring its own build: the sideline staff do.)
+  const base = spec.build || BODY_TYPES[spec.role] || BODY_TYPES.wr;
   const vary = (salt, spread) => 1 + (hashString(spec.id + salt) - 0.5) * 2 * spread;
   const type = { ...base, torso: base.torso * vary('torso', 0.03), limb: base.limb * vary('limb', 0.03) };
   const k = (type.height + (hashString(spec.id) - 0.5) * 0.06) / 2.06;
@@ -384,7 +385,9 @@ export class Rig {
     this.level = '';   // '' while baking the full meshes, 'Low' for the reduced ones
     this.boneBase = index * BONE_STRIDE;
     const d = this.dims = dimensionsFor(spec);
-    const look = this.look = accessoriesFor(spec, index);
+    // (A spec may bring its own look: the sideline staff, in figures.js, are
+    // dressed in plain colours and wear no helmet.)
+    const look = this.look = spec.look || accessoriesFor(spec, index);
     const { jersey } = jerseyFor(spec);
     this.headSize = 1.1 * (1 + (d.torso - 1) * 0.2);
     this.gloveScale = [1.13 * d.limb ** 0.5, 1.13 * d.k, 1.13 * d.limb ** 0.5];
@@ -556,6 +559,8 @@ export class Rig {
     // Detail tiles for a tube of this girth and length (yards).
     const grain = (layer, around, length, strength = 1) => [layer, Math.max(1, Math.round(around / GRAIN_TILE[layer])), length / GRAIN_TILE[layer], strength];
     const trim = jerseyFor(this.spec).trim;
+    // Staff wear plain colours, not the uniform atlas.
+    const staff = !!look.staff, dress = kind => (staff ? { color: look.dress[kind], uv: plain } : null);
     // Takes `share` of every entry of a weight list for another bone.
     const give = (list, bone, share) => {
       if (share <= 0) return list;
@@ -608,12 +613,12 @@ export class Rig {
     // The lower jersey takes the bottom row of the torso panel (its side
     // panels and the folds at the belt) all the way down.
     const hem = region('torso', { flipU: true });
-    body('abdomen', geometry.abdomen, { scale: belly, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.05 * torso, 0.31, 0.55), uv: u => hem(u, 0.03), blend: [['pelvis', 0.06], ['chest', 0.1]], warp: bellyFit });
+    body('abdomen', geometry.abdomen, { scale: belly, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.05 * torso, 0.31, 0.55), uv: u => hem(u, 0.03), blend: [['pelvis', 0.06], ['chest', 0.1]], warp: bellyFit, ...dress('shirt') });
     // The top of the yoke, out toward each shoulder, lifts with the collarbone.
     const chestY = _t.setFromMatrixPosition(this.chest.matrixWorld).y, span = d.shoulder[0];
     const yoke = (p, waist) => give(waist(p), p.x > 0 ? 'clav0' : 'clav1', 0.85 * smoothstep(0.4 * span, 0.9 * span, Math.abs(p.x)) * smoothstep(0.15 * k, 0.25 * k, p.y - chestY));
-    body('chest', geometry.chest, { scale: [torso, k, depth], surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.36 * torso, 0.432, 0.55), uv: region('torso'), blend: [['abdomen', 0.1]], weights: yoke, warp: chestFit });
-    body('chest', geometry.collar, { scale: [torso ** 0.6, k, depth ** 0.6], color: trim, surface: SURFACE.collar, grain: grain(GRAIN.rib, 0.66, 0.04, 0.8), uv: plain, detail: true });
+    body('chest', geometry.chest, { scale: [torso, k, depth], surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 1.36 * torso, 0.432, 0.55), uv: region('torso'), blend: [['abdomen', 0.1]], weights: yoke, warp: chestFit, ...dress('shirt') });
+    body('chest', geometry.collar, { scale: [torso ** 0.6, k, depth ** 0.6], color: trim, surface: SURFACE.collar, grain: grain(GRAIN.rib, 0.66, 0.04, 0.8), uv: plain, detail: true, ...dress('shirt') });
     // The neck is modelled from the chest joint up; it rides the neck bone.
     body('neck', geometry.neck, { pos: [0, -NECK_BASE * d.neck, 0], scale: [torso ** 0.6, k, depth ** 0.6], color: look.skin, surface: SURFACE.skin, grain: grain(GRAIN.skin, 0.48, 0.17, 0.3), uv: plain, blend: [['chest', 0.04], ['head', 0.05]] });
     if (look.backPlate) body('abdomen', geometry.backPlate, { pos: [0, 0.07 * k, -(0.136 * depth * d.belly ** 0.5 + 0.012)], rot: [0.1, 0, 0], scale: [torso ** 0.6, k, 1], color: jerseyFor(this.spec).light ? TEAM.navy : '#e8e8e4', surface: SURFACE.plate, grain: [GRAIN.leather, 8, 6, 0.3], uv: plain, blend: [['chest', 0.1]], detail: true });
@@ -626,20 +631,26 @@ export class Rig {
     const whiteTexel = () => HELMET_UV.white;
     body('head', geometry.face, { pos: [0, HELMET_CENTRE - 0.052, 0.022], scale: helmetScale, color: look.skin, surface: SURFACE.skin, grain: grain(GRAIN.skin, 0.5, 0.22, 0.3), uv: plain });
     body('head', geometry.faceDetails, { pos: [0, HELMET_CENTRE - 0.052, 0.022], scale: helmetScale, surface: SURFACE.skin, uv: plain, detail: true });
-    helmet('head', geometry.helmet, { pos: shell, scale: helmetScale, surface: SURFACE.shell });
-    helmet('head', look.cage ? geometry.hardwareCage : geometry.hardware, { pos: shell, scale: helmetScale, surface: SURFACE.facemask, uv: whiteTexel });
-    helmet('head', geometry.strap, { pos: shell, scale: helmetScale, color: '#e9e9e4', surface: SURFACE.strap, uv: whiteTexel, detail: true });
-    if (look.visor) helmet('head', geometry.visor, { pos: shell, scale: helmetScale, color: '#0b0f15', surface: SURFACE.visor, uv: whiteTexel });
+    if (!staff) {
+      helmet('head', geometry.helmet, { pos: shell, scale: helmetScale, surface: SURFACE.shell });
+      helmet('head', look.cage ? geometry.hardwareCage : geometry.hardware, { pos: shell, scale: helmetScale, surface: SURFACE.facemask, uv: whiteTexel });
+      helmet('head', geometry.strap, { pos: shell, scale: helmetScale, color: '#e9e9e4', surface: SURFACE.strap, uv: whiteTexel, detail: true });
+      if (look.visor) helmet('head', geometry.visor, { pos: shell, scale: helmetScale, color: '#0b0f15', surface: SURFACE.visor, uv: whiteTexel });
+    }
 
     const armColor = look.armSleeve || look.skin, armSurface = look.armSleeve ? SURFACE.sleeve : SURFACE.skin, armGrain = look.armSleeve ? GRAIN.rib : GRAIN.skin;
     const gs = this.gloveScale;
     SIDES.forEach((s, i) => {
       const thigh = 'thigh' + i, shin = 'shin' + i, foot = 'foot' + i, upper = 'upper' + i, fore = 'fore' + i, hand = 'hand' + i;
       // Right-hand limbs are mirror images of the left.
-      const legScale = [s * limb, k, limb], armScale = [s * limb, k, limb], capScale = [s * limb ** 0.7, k, limb ** 0.7];
+      // (Staff wear a polo's short sleeve, not a cap over a shoulder pad, and trousers cut straight.)
+      const cap = staff ? 0.84 * limb ** 0.7 : limb ** 0.7, loose = staff ? 1.12 : 1;
+      const legScale = [s * limb * loose, k, limb * loose], armScale = [s * limb, k, limb], capScale = [s * cap, k, cap];
       // Muscle scales with the build; wrists and ankles much less.
       const slim = limb ** -0.5, wristFit = v => { const w = lerp(1, slim, smoothstep(-0.18, -0.33, v.y)); v.x *= w; v.z *= w; };
-      const ankleFit = v => { const w = lerp(1, slim, smoothstep(-0.3, -0.46, v.y)); v.x *= w; v.z *= w; };
+      const ankleFit = staff
+        ? v => { const w = lerp(1.12, 1.5, smoothstep(-0.08, -0.46, v.y)); v.x *= w; v.z *= w; }
+        : v => { const w = lerp(1, slim, smoothstep(-0.3, -0.46, v.y)); v.x *= w; v.z *= w; };
       const shoe = [1.1 * limb ** 0.4, k, 1.1 * k];
       // Knee and elbow fold on one side and turn about a helper bone that
       // goes half way, so the joint keeps its girth when it is bent double.
@@ -654,12 +665,12 @@ export class Rig {
         list.push([index('pelvis'), (1 - share) * (1 - up)], [index('abdomen'), (1 - share) * up]);
         return list;
       };
-      body(thigh, geometry.pants, { scale: legScale, surface: SURFACE.pants, grain: grain(GRAIN.knit, 0.62 * limb, 0.64), uv: (u, v, n) => (seatUV.getX(n) >= 0 ? hipsPanel(seatUV.getX(n), seatUV.getY(n)) : legPanel(u, v)), blend: [knee(shin)], weights: hip, warp: pantsFit });
-      body(shin, geometry.sock, { scale: legScale, surface: SURFACE.sock, grain: grain(GRAIN.rib, 0.34 * limb, 0.45, 0.7), uv: region('sock', { shared: true, flipV: true }), blend: [knee(thigh), [foot, 0.05]], warp: ankleFit });
+      body(thigh, geometry.pants, { scale: legScale, surface: SURFACE.pants, grain: grain(GRAIN.knit, 0.62 * limb, 0.64), uv: (u, v, n) => (seatUV.getX(n) >= 0 ? hipsPanel(seatUV.getX(n), seatUV.getY(n)) : legPanel(u, v)), blend: [knee(shin)], weights: hip, warp: pantsFit, ...dress('trousers') });
+      body(shin, geometry.sock, { scale: legScale, surface: SURFACE.sock, grain: grain(GRAIN.rib, 0.34 * limb, 0.45, 0.7), uv: region('sock', { shared: true, flipV: true }), blend: [knee(thigh), [foot, 0.05]], warp: ankleFit, ...dress('trousers') });
       // The shoe bends at the ball of the foot.
       const ball = { bone: 'toe' + i, radius: 0.026 * k, dir: FORWARD };
       body(foot, geometry.cleat, { scale: shoe, color: look.cleat, surface: SURFACE.cleat, grain: [GRAIN.leather, 12, 8, 0.25], uv: plain, blend: [[shin, 0.04], ball] });
-      body(foot, geometry.studs, { scale: shoe, color: '#101114', surface: SURFACE.sole, uv: plain, blend: [ball], detail: true });
+      if (!staff) body(foot, geometry.studs, { scale: shoe, color: '#101114', surface: SURFACE.sole, uv: plain, blend: [ball], detail: true });
 
       // Shoulder to elbow, everything around the arm takes its weights from
       // one chain, so the sleeve and the arm inside it cannot part: the cap
@@ -667,10 +678,10 @@ export class Rig {
       // the arm's twist only builds up toward the elbow. The sleeve's tube
       // keeps clear of the biceps of the biggest builds.
       const arm = { from: upper, to: fore, bones: [['pad' + i, 0.09], ['swing' + i, 0.3], ['upMid' + i, 0.6], [upper, 0.95]] };
-      const fit = 1.05 * limb / limb ** 0.7;
+      const fit = 1.05 * limb / cap;
       const sleeveFit = fit > 1 ? v => { const w = lerp(1, fit, smoothstep(-0.05, -0.15, v.y)); v.x *= w; v.z *= w; } : null;
       body(upper, geometry.upperArm, { scale: armScale, color: armColor, surface: armSurface, grain: grain(armGrain, 0.44 * limb, 0.45, look.armSleeve ? 0.5 : 0.3), uv: plain, blend: [elbow(fore)], chain: arm });
-      body(upper, geometry.sleeve, { scale: capScale, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 0.62 * limb ** 0.7, 0.29, 0.55), uv: region(i === 0 ? 'sleeveL' : 'sleeveR', { flipU: i === 0, flipV: true }), chain: arm, warp: sleeveFit });
+      body(upper, geometry.sleeve, { scale: capScale, surface: SURFACE.cloth, grain: grain(GRAIN.mesh, 0.62 * limb ** 0.7, 0.29, 0.55), uv: region(i === 0 ? 'sleeveL' : 'sleeveR', { flipU: i === 0, flipV: true }), chain: arm, warp: sleeveFit, ...dress('shirt') });
       // Elbow to wrist the forearm turns over with the hand, a little at the
       // elbow and all the way at the wrist; tape and gloves follow the same
       // weights as the arm they wrap.
