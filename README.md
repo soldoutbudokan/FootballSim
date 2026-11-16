@@ -31,7 +31,7 @@ Twenty-six procedural athletes (the offense and a defensive squad of fifteen, el
 
 - **Skeleton.** Sixty-five bones a man. Sixteen are the spine and limbs the pose solver places; the rest make them deform like a body: a neck under the head, collarbones that lift and reach with the arm, shoulder-pad caps that stay on the torso instead of swinging with the upper arm, toes, the twist of the upper arm and of the forearm spread along their length, helpers inside the elbows and knees that turn half as far (so a joint bent double keeps its girth), and three joints for every finger and thumb. A vertex follows up to four bones. Limbs ease toward straight instead of locking, the pants take one weight field around each hip, and a body that is down keeps its knees, ankles and toes on top of the turf.
 
-Each rig is driven by inverse kinematics and skinned on the GPU, one merged mesh per material for the whole squad, with a reduced level of detail for distant players. An athlete is about 16,400 triangles at full detail and 3,100 reduced. Fingers are posed for the men within about 24 yd of the camera. The squad is built once; a defender who is off the field this rep is simply not drawn.
+Each rig is driven by inverse kinematics and skinned on the GPU, one merged mesh per material for the whole squad, with a reduced level of detail for distant players and a close-up one for the men right in front of the camera. An athlete is about 16,400 triangles at full detail, 3,100 reduced and 33,000 close up. Fingers are posed for the men within about 24 yd of the camera. The squad is built once; a defender who is off the field this rep is simply not drawn.
 
 The team is a fictional navy-and-silver club: navy helmets with a silver stripe and silver chevrons, silver pants, the offense in navy practice jerseys, the defense in white, and the quarterback in the red non-contact jersey. It carries no real league or team marks.
 
@@ -253,8 +253,8 @@ Auto starts at Balanced, waits through a warm-up, and lowers quality after repea
 | --- | ---: | ---: | --- | --- | ---: | --- |
 | Performance | 800,000 | 0.85 | none (contact shadows only) | 35 % of the trees with alpha-tested leaf cards, no small sideline props, simple turf shading, athletes beyond 20 yd at reduced detail | 0 | off |
 | Balanced | 1,500,000 | 1.15 | 1024² | 70 % of the trees with alpha-tested leaf cards, full sideline, detailed turf without anisotropic filtering, athletes beyond 40 yd at reduced detail | 9,000 | on |
-| High | 2,500,000 | 1.5 | 2048² | all trees with alpha-to-coverage leaf cards, full sideline, detailed turf with 8x anisotropic filtering, full-detail athletes | 22,000 | on |
-| Ultra | 4,200,000 | 2 | 4096² | as High | 45,000 | on |
+| High | 2,500,000 | 1.5 | 2048² | all trees with alpha-to-coverage leaf cards, full sideline, detailed turf with 8x anisotropic filtering, full-detail athletes, close-up bodies within 9 yd | 22,000 | on |
+| Ultra | 4,200,000 | 2 | 4096² | as High, close-up bodies within 12 yd | 45,000 | on |
 
 Post-processing (`dist/js/env/post.js`) is tied to the same profiles; each tier adds passes deliberately:
 
@@ -267,7 +267,7 @@ Post-processing (`dist/js/env/post.js`) is tied to the same profiles; each tier 
 
 Without float render targets the game falls back to drawing straight to the canvas on every profile.
 
-"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). Reduced-detail athletes (about 3,100 instead of 16,400 triangles, no small details, mitten hands) are drawn from a second set of meshes on the same skeletons, chosen per athlete by distance from the camera. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
+"Small details" are the goal-post wind ribbons and the athletes' small parts (towels, tape, belts, chin straps). Reduced-detail athletes (about 3,100 instead of 16,400 triangles, no small details, mitten hands) are drawn from a second set of meshes on the same skeletons, chosen per athlete by distance from the camera. Close-up bodies (High and Ultra) have half as many segments again round every limb and the torso, more rings along them and finer hands, feet and faces, about twice the triangles of the full body; the helmet is the full one. At most six athletes, the nearest inside the distance, are drawn that way. A man's close-up body is baked the first time he comes near (some tens of milliseconds, never more than one in four frames), and the twelve most recently used are kept, so the level costs nothing at start-up and nothing for players who stay away from the camera. Rendering quality never changes the 120 Hz simulation. At the lowest tier Auto can also lower the resolution. These are budgets, not promised frame rates. WebGL 2 is required.
 
 ## Scope and realism
 

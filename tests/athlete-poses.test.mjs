@@ -85,6 +85,32 @@ poseTest('linemen in their stances rest a hand on the turf, on the fingertips, u
   }
 });
 
+poseTest('the nearest few athletes are drawn close up on the tiers that have it, one bake at a time', async () => {
+  const { HERO } = await import('../dist/js/athletes/rig.js'), { HERO_MAX } = await import('../dist/js/athletes.js');
+  const r = rep(1, { offense: 'mesh', coverage: 'cover3' }), squad = r.athletes.squad, snapshot = r.sim.snapshot();
+  const heroes = () => [...squad.levels].filter(level => level === HERO).length;
+  // Over the middle of the line, where a dozen men are within a few yards.
+  r.athletes.camera.position.set(0, 2.5, -r.sim.spot);
+  r.athletes.update(snapshot, 1 / 60);
+  assert.equal(squad.hero.size, 0, 'not on a tier without it');
+  r.athletes.setQuality({ id: 'high', hero: 9 });
+  let last = 0;
+  for (let frame = 0; frame < 80; frame++) {
+    r.athletes.update(snapshot, 1 / 60);
+    assert.ok(squad.hero.size - last <= 1, 'at most one bake a frame');
+    last = squad.hero.size;
+    assert.ok(heroes() <= HERO_MAX);
+  }
+  assert.equal(heroes(), HERO_MAX, 'the nearest ' + HERO_MAX + ' are close-ups');
+  assert.ok(squad.hero.size <= 12, `close-up meshes kept: ${squad.hero.size}`);
+  // Nobody near the camera: nobody is drawn close up; the tier without it frees the meshes.
+  r.athletes.camera.position.set(0, 2.5, 60);
+  r.athletes.update(snapshot, 1 / 60);
+  assert.equal(heroes(), 0);
+  r.athletes.setQuality({ id: 'balanced' });
+  assert.equal(squad.hero.size, 0);
+});
+
 poseTest('on a pass play unengaged linemen sit in a pass set and coverage players crouch', () => {
   const set = [], cover = [];
   // Sample where a posture has blended fully in: a beaten lineman eases back

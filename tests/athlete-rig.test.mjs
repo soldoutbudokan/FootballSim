@@ -308,3 +308,43 @@ rigTest('sideline staff are the athletes\' body in plain clothes: posed, baked, 
   // The poses are different people: hands hang by the thigh at ease and are up at the hips or the chest otherwise.
   assert.ok(hands.atEase < 0.95 && hands.armsCrossed > 1.2, `hands at ${hands.atEase.toFixed(2)} at ease, ${hands.armsCrossed.toFixed(2)} folded`);
 });
+
+rigTest('the close-up level: a finer body baked for one athlete from any pose, drawn in place of his share of the squad', () => {
+  const { squad, rigs, g, each, dispose } = build(['wr', 'ol']);
+  const hero = model.createGeometries({ hero: true });
+  try {
+    const [wr, ol] = rigs, point = new THREE.Vector3();
+    // Baked while he is in a pose, not standing in the bind pose.
+    const pose = standing(ol, (p, d) => { p.pelvis.y = 0.7 * d.hipY; p.hips.x = 0.6; setHand(p, 0, HAND.FIST); });
+    const posed = squad.bones.data.slice(), hand = ol.world.hands[0].clone();
+    const geometry = ol.buildHero(hero);
+    assert.deepEqual(squad.bones.data, posed, 'the bake leaves the bones as they were');
+    ol.apply(pose, 0, 0, 0);
+    assert.ok(ol.world.hands[0].distanceTo(hand) < 1e-9, 'and the joints in the pose they were in');
+    // Twice the triangles of his full body and more, within the budget for a few men.
+    const { base, detail } = g.userData.ranges[ol.index], full = (base[1] + detail[1]) / 3, fine = geometry.index.count / 3;
+    assert.ok(fine > 1.8 * full && fine < 32000, `close-up body: ${fine} triangles against ${full}`);
+    // The same man in the same place: skinned, the two bodies fill the same box.
+    const box = new THREE.Box3(), fineBox = new THREE.Box3();
+    each(ol, p => box.expandByPoint(p));
+    for (let i = 0; i < geometry.attributes.position.count; i++) fineBox.expandByPoint(skin.skinVertex(geometry, squad.bones.data, i, point));
+    for (const axis of ['x', 'y', 'z']) {
+      assert.ok(Math.abs(box.min[axis] - fineBox.min[axis]) < 0.012 && Math.abs(box.max[axis] - fineBox.max[axis]) < 0.012, `${axis}: ${fineBox.min[axis].toFixed(3)}..${fineBox.max[axis].toFixed(3)} against ${box.min[axis].toFixed(3)}..${box.max[axis].toFixed(3)}`);
+    }
+    // Drawing: his body from his own mesh, his helmet still from the squad's.
+    const drawn = mesh => mesh.geometry.groups.reduce((n, group) => n + group.count, 0);
+    const bodyAll = drawn(squad.meshes.body), helmetAll = drawn(squad.meshes.helmet);
+    squad.setLevels(Uint8Array.of(0, model.HERO));
+    assert.equal(drawn(squad.meshes.body), bodyAll, 'without a close-up mesh he stays in the full one');
+    squad.addHero(ol.index, geometry);
+    assert.equal(squad.hero.get(ol.index).visible, false);
+    squad.setLevels(Uint8Array.of(0, model.HERO));
+    assert.equal(squad.hero.get(ol.index).visible, true);
+    assert.equal(drawn(squad.meshes.body), bodyAll - base[1] - detail[1]);
+    assert.equal(drawn(squad.meshes.helmet), helmetAll);
+    squad.removeHero(ol.index);
+    assert.equal(squad.hero.size, 0);
+    assert.equal(drawn(squad.meshes.body), bodyAll, 'and returns to it when the close-up mesh is dropped');
+    assert.ok(wr);
+  } finally { for (const x of Object.values(hero)) x.dispose(); dispose(); }
+});

@@ -45,6 +45,9 @@ export const BONE_STRIDE = 72;
 
 // The level of an athlete who is not drawn at all (no mesh has it).
 export const HIDDEN = 2;
+// The level of an athlete drawn close up: his body from a finer mesh of his
+// own (Squad.addHero), his helmet from the squad's full mesh.
+export const HERO = 3;
 
 export class Squad {
   constructor(scene, count, materials, { lod = true } = {}) {
@@ -59,7 +62,8 @@ export class Squad {
     scene.add(this.group);
     this.meshes = {};
     this.detail = true;
-    this.levels = new Uint8Array(count);   // per athlete: 0 full, 1 reduced
+    this.levels = new Uint8Array(count);   // per athlete: 0 full, 1 reduced, HIDDEN, HERO
+    this.hero = new Map();                 // athlete index -> his close-up body mesh
     this.groupsKey = null;
   }
 
@@ -102,7 +106,8 @@ export class Squad {
   setLevels(levels) {
     let changed = false;
     for (let i = 0; i < this.count; i++) {
-      const level = levels[i] === 1 && !this.meshes.bodyLow ? 0 : levels[i];
+      let level = levels[i] === 1 && !this.meshes.bodyLow ? 0 : levels[i];
+      if (level === HERO && !this.hero.has(i)) level = 0;
       if (this.levels[i] !== level) { this.levels[i] = level; changed = true; }
     }
     if (changed) this.updateGroups();
@@ -122,10 +127,34 @@ export class Squad {
         if (last && last[0] + last[1] === start) last[1] += count;
         else runs.push([start, count]);
       };
-      for (let i = 0; i < this.count; i++) if (ranges[i] && this.levels[i] === level) push(ranges[i].base);
-      if (this.detail && level === 0) for (let i = 0; i < this.count; i++) if (ranges[i] && this.levels[i] === 0) push(ranges[i].detail);
+      // A close-up athlete's helmet is the full one.
+      const here = i => this.levels[i] === level || (mesh === this.meshes.helmet && this.levels[i] === HERO);
+      for (let i = 0; i < this.count; i++) if (ranges[i] && here(i)) push(ranges[i].base);
+      if (this.detail && level === 0) for (let i = 0; i < this.count; i++) if (ranges[i] && here(i)) push(ranges[i].detail);
       for (const [start, count] of runs) g.addGroup(start, count, 0);
     }
+    for (const [i, mesh] of this.hero) mesh.visible = this.levels[i] === HERO;
+  }
+
+  // An athlete's close-up body (Rig.buildHero), drawn in place of his share
+  // of the merged body mesh while his level is HERO. It skins from the same
+  // bones with the same materials.
+  addHero(index, geometry) {
+    const body = this.meshes.body, mesh = new THREE.Mesh(geometry, body.material[0]);
+    mesh.name = 'athletes:hero';
+    mesh.frustumCulled = false; mesh.castShadow = true; mesh.receiveShadow = true; mesh.matrixAutoUpdate = false;
+    mesh.customDepthMaterial = body.customDepthMaterial; mesh.customDistanceMaterial = body.customDistanceMaterial;
+    mesh.visible = false;
+    this.group.add(mesh);
+    this.hero.set(index, mesh);
+  }
+
+  removeHero(index) {
+    const mesh = this.hero.get(index);
+    if (!mesh) return;
+    if (this.levels[index] === HERO) { this.levels[index] = 0; this.updateGroups(); }
+    mesh.removeFromParent(); mesh.geometry.dispose();
+    this.hero.delete(index);
   }
 
   commit() {
@@ -203,18 +232,22 @@ const FRONT = Math.PI / 2, BACK = -Math.PI / 2, OUT = 0, IN = Math.PI;
 // segments around and no in-between rings on the lofted parts, a coarser
 // helmet shell, a simpler facemask and mitten hands. Detail-only parts are
 // never drawn at that distance, so their low versions are not used.
+// `hero`: the close-up set, for an athlete right in front of the camera: half
+// as many segments again around every loft and one more ring between its
+// keys, finer hands, feet and face. It is the body only: his helmet is drawn
+// from the full set.
 //
 // Limbs are authored for the left side, running down from the joint: the
 // outside of a leg is +X and its front +Z; the inside of an arm is +X and its
 // back +Z (the bind pose turns the arms half a turn, see Rig). The right-hand
 // copies are mirrored when they are baked.
-export function createGeometries({ low = false } = {}) {
+export function createGeometries({ low = false, hero = false } = {}) {
   // Segments round a loft at full detail; the reduced set halves `coarse`.
-  const L = (radial, subdiv, coarse = radial) => (low ? { radial: Math.max(6, Math.round(coarse / 2)), subdiv: 1 } : { radial, subdiv });
+  const L = (radial, subdiv, coarse = radial) => (low ? { radial: Math.max(6, Math.round(coarse / 2)), subdiv: 1 } : hero ? { radial: 2 * Math.round(radial * 0.75), subdiv: subdiv + 1 } : { radial, subdiv });
   return {
     // The pants, one piece per side from the waistband to the cuff below
     // the knee (see geometry.js).
-    pants: pants({ low }),
+    pants: pants({ low, hero }),
     // The jersey is tucked in: its hem stays well inside the pants, whose top
     // edge and belt sit clearly outside it, so the two never intersect.
     belt: loft([{ y: 0.122, w: 0.197, d: 0.134 }, { y: 0.158, w: 0.192, d: 0.132 }], { ...L(28, 1, 20), capTop: false, capBottom: false }),
@@ -312,17 +345,13 @@ export function createGeometries({ low = false } = {}) {
       return shadeBy(g, (x, y) => (Math.abs(x) < 0.006 || Math.abs(y + 0.005) < 0.004 ? 0.6 : 1));
     })(),
     tape: loft([{ y: -0.25, w: 0.042, d: 0.038 }, { y: -0.29, w: 0.038, d: 0.0345 }, { y: -0.34, w: 0.0345, d: 0.031 }], { ...L(18, 1, 14), capTop: false, capBottom: false }),
-    glove: glove({ low }),
+    glove: glove({ low, hero }),
     // Thumb and fingers (digit0..digit4); the reduced hand is a mitten.
-    ...(low ? {} : Object.fromEntries(digits().map((g, n) => ['digit' + n, g]))),
-    cleat: cleat({ low }),
+    ...(low ? {} : Object.fromEntries(digits({ hero }).map((g, n) => ['digit' + n, g]))),
+    cleat: cleat({ low, hero }),
     studs: cleatStuds(),
-    helmet: helmetShell({ low }),
-    hardware: helmetHardware({ low }),
-    hardwareCage: helmetHardware({ low, cage: true }),
-    strap: chinStrap(),
-    visor: helmetVisor({ low }),
-    face: athleteFace({ low }),
+    ...(hero ? {} : { helmet: helmetShell({ low }), hardware: helmetHardware({ low }), hardwareCage: helmetHardware({ low, cage: true }), strap: chinStrap(), visor: helmetVisor({ low }) }),
+    face: athleteFace({ low, hero }),
     faceDetails: faceDetails(),
     // A hand towel, curved around the front of the thigh.
     towel: (() => {
@@ -461,6 +490,11 @@ export class Rig {
     for (const list of [this.uppers, this.pads, this.swings]) for (const o of list) o.quaternion.copy(HALF_TURN);
     this.root.updateMatrixWorld(true);
     this.bindInverse = this.joints.map(j => j.matrixWorld.clone().invert());
+    // Every node as it stands now, so a part can be baked later (buildHero).
+    this.nodes = [];
+    this.root.traverse(o => this.nodes.push(o));
+    this.bindLocal = this.nodes.map(o => [o.position.clone(), o.quaternion.clone()]);
+    this.atlas = atlas;
     // Finger bones come last. From far off they are not worth posing: the
     // digits then stay flat on the hand (setFingers).
     this.fingerBase = [BONE_INDEX.thumb1_0, BONE_INDEX.thumb1_1];
@@ -496,6 +530,26 @@ export class Rig {
     for (let i = 0; i < 2; i++) for (const { joints } of this.digits[i]) { if (on) this.hands[i].add(joints[0]); else this.hands[i].remove(joints[0]); }
   }
 
+  // Bakes this athlete's close-up body from the hero set of geometries
+  // (createGeometries({ hero: true })) and returns it. Parts are baked in the
+  // bind pose, so the joints are stood back in it for the baking and then
+  // returned to the pose they were in.
+  buildHero(geometry) {
+    const fingers = this.fingersOn, posed = this.nodes.map(o => [o.position.clone(), o.quaternion.clone()]);
+    this.setFingers(true);
+    this.nodes.forEach((o, i) => { o.position.copy(this.bindLocal[i][0]); o.quaternion.copy(this.bindLocal[i][1]); });
+    this.root.updateMatrixWorld(true);
+    SPINE.clear(); SPINE.add(this.abdomen).add(this.chest).add(this.neck).add(this.head);
+    const builder = this.heroBuilder = new SkinnedGeometryBuilder();
+    this.level = 'Hero';
+    this.buildParts(geometry, this.atlas, null, this.look);
+    this.level = ''; this.heroBuilder = null;
+    this.nodes.forEach((o, i) => { o.position.copy(posed[i][0]); o.quaternion.copy(posed[i][1]); });
+    this.setFingers(fingers);
+    this.root.updateMatrixWorld(true);
+    return builder.build();
+  }
+
   // Bakes one part into a squad mesh. `bone` is the bone it rides on.
   // `blend` lists the joints it bends across: [otherBone, radius, crease] or
   // { bone, radius, crease, helper, pivot, ownIsChild, dir } (see
@@ -505,8 +559,9 @@ export class Rig {
   // arm). `weights(p, field, i)` overrides: field(p) is what blend and chain
   // give. `warp(v)` reshapes the part's own vertices before they are placed.
   part(target, bone, geometry, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1], color = '#ffffff', surface = SURFACE.cloth, grain = undefined, uv = null, blend = [], chain = null, weights = null, warp = null, detail = false } = {}) {
-    // Small details are not drawn on distant athletes.
-    if (detail && this.level) return;
+    // Small details are not drawn on distant athletes; the close-up mesh is the body only.
+    if (detail && this.level === 'Low') return;
+    if (this.level === 'Hero' && target !== 'body') return;
     const own = this.bone[bone], index = name => this.boneBase + BONE_INDEX[name];
     _local.compose(_t.set(...pos), _q.setFromEuler(_e.set(...rot)), _origin.set(...scale));
     const bind = new THREE.Matrix4().multiplyMatrices(own.matrixWorld, _local);
@@ -535,9 +590,10 @@ export class Rig {
       const spread = chainWeights(a, b, chain.bones.map(([name, t]) => [index(name), t])), jointed = field;
       field = p => { const list = jointed(p); return spread(p, list.pop()[1], list); };
     }
-    this.squad.builders[target + this.level].add(geometry, {
+    const hero = this.level === 'Hero';
+    (hero ? this.heroBuilder : this.squad.builders[target + this.level]).add(geometry, {
       bind, weights: weights ? (p, i) => weights(p, field, i) : field, warp,
-      color: _c.set(color), uv, surface, grain, detail, owner: this.index,
+      color: _c.set(color), uv, surface, grain, detail, owner: hero ? 0 : this.index,
     });
   }
 
@@ -658,12 +714,18 @@ export class Rig {
       const knee = other => ({ bone: other, radius: 0.09, crease: { side: -1, radius: 0.03 }, helper: 'knee' + i });
       const elbow = other => ({ bone: other, radius: 0.06, crease: { side: -1, radius: 0.035 }, helper: 'elbow' + i });
       // What is not the thigh's is the pelvis's, and above the waist joint the abdomen's.
+      // Between the legs the cloth belongs to neither thigh: the gusset goes
+      // half way with each, so it follows both into a crouch and stays put
+      // when they scissor in a stride. (The same on both halves: they share
+      // the midline.)
       const hip = (p, below) => {
         const share = thighShare(p, s), list = below(p);
         if (share >= 1) return list;
         for (const entry of list) entry[1] *= share;
-        const up = smoothstep(-0.06, 0.06, p.y - waistY);
-        list.push([index('pelvis'), (1 - share) * (1 - up)], [index('abdomen'), (1 - share) * up]);
+        const up = smoothstep(-0.06, 0.06, p.y - waistY), rest = 1 - share;
+        const gusset = 0.6 * (1 - smoothstep(0.012, 0.07, s * p.x)) * smoothstep(-0.02 * k, 0.07 * k, hipY - p.y);
+        list.push([index('pelvis'), rest * (1 - gusset) * (1 - up)], [index('abdomen'), rest * (1 - gusset) * up]);
+        if (gusset > 0) list.push([index(thigh), rest * gusset / 2], [index(i ? 'thigh0' : 'thigh1'), rest * gusset / 2]);
         return list;
       };
       body(thigh, geometry.pants, { scale: legScale, surface: SURFACE.pants, grain: grain(GRAIN.knit, 0.62 * limb, 0.64), uv: (u, v, n) => (seatUV.getX(n) >= 0 ? hipsPanel(seatUV.getX(n), seatUV.getY(n)) : legPanel(u, v)), blend: [knee(shin)], weights: hip, warp: pantsFit, ...dress('trousers') });

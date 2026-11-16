@@ -1,7 +1,7 @@
 import * as THREE from '../vendor/three.module.js';
 import { GRAVITY } from './sim.js';
 import { smoothstep } from './athletes/math.js';
-import { Squad, Rig, createGeometries, HIDDEN } from './athletes/rig.js';
+import { Squad, Rig, createGeometries, HIDDEN, HERO } from './athletes/rig.js';
 import { setCharacterLight } from './athletes/skin.js';
 import { Animator } from './athletes/motion.js';
 import { createMaterials } from './athletes/uniform.js';
@@ -29,6 +29,14 @@ import { handoffMesh } from './athletes/ballskills.js';
 // switch is pushed past them (and the band widened) to keep them from popping.
 export const LOD_DISTANCE = { performance: 20, balanced: 40 };
 const LOD_HYSTERESIS = { performance: 2, balanced: 4 };
+// The close-up level: on the tiers that have it (profile.hero, yards from the
+// camera) the nearest few athletes inside that distance are drawn from finer
+// bodies of their own. A man keeps his until he is HERO_BAND further out. His
+// mesh is baked the first time he comes within HERO_AHEAD of the distance (a
+// bake takes some tens of milliseconds, so they are HERO_SPACING frames
+// apart), and the HERO_KEEP most recently used are kept.
+export const HERO_MAX = 6;
+const HERO_BAND = 1.5, HERO_AHEAD = 2, HERO_KEEP = 12, HERO_SPACING = 4;
 // Highest ball (yards) a player reaches for: a leaping two-hand catch.
 const CATCH_TOP = 2.6;
 
@@ -46,12 +54,14 @@ export class Athletes {
     this.squad = new Squad(scene, players.length, this.materials);
     this.group = this.squad.group;
     this.rigs = new Map();
+    this.rigList = [];
     this.animators = new Map();
     const atlas = this.materials.atlas;
     players.forEach((spec, i) => {
       const cell = { offset: atlas.offsets.get(spec.id), scale: atlas.scale, white: atlas.white, shared: atlas.shared };
       const rig = new Rig(this.squad, spec, i, geometry, cell, low);
       this.rigs.set(spec.id, rig);
+      this.rigList[i] = rig;
       this.animators.set(spec.id, new Animator(rig, spec));
     });
     this.squad.finish();
@@ -60,6 +70,11 @@ export class Athletes {
     this.levels = new Uint8Array(players.length);
     this.lodDistance = Infinity;
     this.lodBand = 2;
+    this.heroDistance = 0;
+    this.heroGeometry = null;
+    this.heroUsed = new Float64Array(players.length);
+    this.frame = 0;
+    this.lastBake = -Infinity;
     this.ball = new Football(this.group, this.materials);
     this.markers = new Markers(this.group, players.length);
     this.qbId = players.find(p => p.role === 'qb')?.id ?? 'QB';
@@ -77,6 +92,8 @@ export class Athletes {
     this.markers.setQuality(profile);
     this.lodDistance = LOD_DISTANCE[profile.id] ?? Infinity;
     this.lodBand = LOD_HYSTERESIS[profile.id] ?? 2;
+    this.heroDistance = profile.hero || 0;
+    if (!this.heroDistance) for (const i of [...this.squad.hero.keys()]) this.squad.removeHero(i);
   }
 
   // The lighting preset's fill, bounce and rim for the players (env/lighting.js).
@@ -88,8 +105,9 @@ export class Athletes {
   // athlete who is not in the state is hidden.
   chooseLevels(state, controlled) {
     const eye = this.camera?.position;
-    const far = this.lodDistance;
-    const levels = this.levels, here = this.here ||= new Uint8Array(levels.length);
+    const far = this.lodDistance, near = eye ? this.heroDistance : 0;
+    const levels = this.levels, here = this.here ||= new Uint8Array(levels.length), close = this.close ||= [];
+    close.length = 0;
     here.fill(0);
     for (const p of state.players) { const i = this.index.get(p.id); if (i !== undefined) here[i] = 1; }
     for (let i = 0; i < levels.length; i++) if (!here[i]) levels[i] = HIDDEN; else if (levels[i] === HIDDEN) levels[i] = 0;
@@ -97,11 +115,36 @@ export class Athletes {
       const i = this.index.get(p.id);
       if (i === undefined) continue;
       let d = 0;
-      if (Number.isFinite(far)) d = eye ? Math.hypot(p.x - eye.x, 1.1 - eye.y, -p.z - eye.z) : Math.hypot(p.x - controlled.x, p.z - controlled.z) + 11;
-      const limit = this.levels[i] ? far - this.lodBand : far;
+      if (Number.isFinite(far) || near > 0) d = eye ? Math.hypot(p.x - eye.x, 1.1 - eye.y, -p.z - eye.z) : Math.hypot(p.x - controlled.x, p.z - controlled.z) + 11;
+      const was = this.levels[i], limit = was === 1 ? far - this.lodBand : far;
       this.levels[i] = d > limit ? 1 : 0;
+      if (near > 0 && d < near + HERO_AHEAD) close.push([d, i, was === HERO]);
     }
+    if (near > 0) this.chooseHeroes(close, near);
     this.squad.setLevels(this.levels);
+  }
+
+  // The nearest athletes inside the close-up distance take the HERO level
+  // (the squad draws a man from his full mesh until his close-up one exists).
+  chooseHeroes(close, near) {
+    close.sort((a, b) => a[0] - b[0]);
+    this.frame++;
+    let heroes = 0, baked = this.frame - this.lastBake < HERO_SPACING;
+    for (const [d, i, was] of close) {
+      if (heroes < HERO_MAX && d < (was ? near + HERO_BAND : near)) { this.levels[i] = HERO; heroes++; }
+      if (this.squad.hero.has(i)) this.heroUsed[i] = this.frame;
+      else if (!baked) {
+        this.heroGeometry ||= createGeometries({ hero: true });
+        this.squad.addHero(i, this.rigList[i].buildHero(this.heroGeometry));
+        this.heroUsed[i] = this.lastBake = this.frame;
+        baked = true;
+      }
+    }
+    if (this.squad.hero.size > HERO_KEEP) {
+      let stale = -1;
+      for (const i of this.squad.hero.keys()) if (this.levels[i] !== HERO && (stale < 0 || this.heroUsed[i] < this.heroUsed[stale])) stale = i;
+      if (stale >= 0) this.squad.removeHero(stale);
+    }
   }
 
   update(state, dt, { menu = false } = {}) {
@@ -220,6 +263,7 @@ export class Athletes {
     this.squad.bones.texture.dispose();   // shader uniforms, not material properties
     this.materials.detail?.dispose();
     this.materials.folds?.dispose();
+    if (this.heroGeometry) for (const g of Object.values(this.heroGeometry)) g.dispose();
   }
 
   // After the whistle with no carrier (an interception) the simulation keeps

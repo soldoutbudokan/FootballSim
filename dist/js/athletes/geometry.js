@@ -146,16 +146,18 @@ export function loft(keys, { radial = 16, subdiv = 3, capTop = true, capBottom =
 // round the ring from the outside seam, v from the hip to the cuff, running
 // on above the hip); vertices above PANTS.split also carry `seat`, their
 // place on the hips panel of the uniform atlas (u round the whole pelvis from
-// the left side seam, v from the crotch to the waist), others (-1, -1).
-export const PANTS = { hip: 0.112, split: -0.05, crotch: -0.078, top: 0.158, waist: 0.166, legTop: 0.075, cuff: -0.574 };
+// the left side seam, v from the crotch to the waist), others (-1, -1). The
+// split is the lowest ring that still runs round the whole pelvis: below it
+// the inside of the thigh has no bearing round the body to map by.
+export const PANTS = { hip: 0.112, split: 0.02, crotch: -0.078, top: 0.158, waist: 0.166, legTop: 0.075, cuff: -0.574 };
 
-export function pants({ low = false } = {}) {
-  const radial = low ? 12 : 28, subdiv = low ? 1 : 2, H = PANTS.hip, cols = radial + 1;
+export function pants({ low = false, hero = false } = {}) {
+  const radial = low ? 12 : hero ? 40 : 28, subdiv = low ? 1 : hero ? 3 : 2, H = PANTS.hip, cols = radial + 1;
   // [y, outer edge, inner edge (both from the midline), half depth, z]
   const rows = [
     // The waistband turns in under the jersey behind the belt.
     [PANTS.top, 0.15, -0.15, 0.103, 0], [0.14, 0.172, -0.172, 0.119, -0.003], [0.1, 0.188, -0.188, 0.124, -0.006], [0.06, 0.2026, -0.2026, 0.129, -0.013],
-    [0.02, 0.207, -0.207, 0.124, -0.013], [-0.02, 0.213, -0.12, 0.12, -0.008], [PANTS.split, 0.216, -0.04, 0.119, -0.003], [PANTS.crotch, 0.218, 0.004, 0.119, 0.001],
+    [PANTS.split, 0.207, -0.207, 0.124, -0.013], [-0.02, 0.213, -0.12, 0.12, -0.008], [-0.05, 0.216, -0.04, 0.119, -0.003], [PANTS.crotch, 0.218, 0.004, 0.119, 0.001],
     [-0.105, 0.22, 0.008, 0.121, 0.003], [-0.2, 0.215, 0.009, 0.115, 0.006], [-0.3, 0.201, 0.023, 0.095, 0.005], [-0.39, 0.187, 0.037, 0.08, 0.002],
     [-0.45, 0.178, 0.046, 0.073, 0.008], [-0.5, 0.176, 0.048, 0.072, 0.011], [-0.545, 0.17, 0.054, 0.062, 0.004], [-0.566, 0.168, 0.056, 0.058, 0], [PANTS.cuff, 0.158, 0.066, 0.047, 0],
   ];
@@ -189,6 +191,9 @@ export function pants({ low = false } = {}) {
   // there lie in the plane.
   const flat = new Uint8Array(p.count);
   for (let i = 0; i < p.count; i++) {
+    // The cleft of the seat and the crotch lie in shade.
+    const deep = (1 - smoothstep(0, 0.03, p.getX(i) + H)) * smoothstep(0.12, 0.05, p.getY(i)) * (p.getZ(i) < 0.02 ? 1 : 0.5);
+    if (deep > 0) col.setXYZ(i, col.getX(i) * (1 - 0.42 * deep), col.getY(i) * (1 - 0.42 * deep), col.getZ(i) * (1 - 0.42 * deep));
     if (p.getX(i) > -H) continue;
     flat[i] = 1;
     p.setX(i, -H);
@@ -204,7 +209,8 @@ export function pants({ low = false } = {}) {
     position.set([x, y, z], to * 3); normal.set([n.getX(from), n.getY(from), n.getZ(from)], to * 3); color.set([col.getX(from), col.getY(from), col.getZ(from)], to * 3);
     uvs.set([uv.getX(from), (PANTS.legTop - y) / legSpan], to * 2);
     if (hips) {
-      const around = Math.atan2(z, x + H) / (2 * Math.PI);
+      // (The ring closes on itself at the outside seam: u is 0 where it starts and 1 where it ends.)
+      const around = uv.getX(from) > 0.999 ? 1 : Math.atan2(z, x + H) / (2 * Math.PI);
       seat.set([around < -1e-6 ? around + 1 : Math.max(0, around), (y - PANTS.crotch) / (PANTS.waist - PANTS.crotch)], to * 2);
     }
   };
@@ -480,7 +486,7 @@ export function helmetVisor({ low = false } = {}) {
 // A head with a jaw, cheekbones, a brow ridge, a nose and lips. The face
 // stays behind the facemask; it shows through the open cage on unvisored
 // players and in every close view.
-export function athleteFace({ low = false } = {}) {
+export function athleteFace({ low = false, hero = false } = {}) {
   const FRONT = Math.PI / 2;
   const head = loft([
     { y: -0.105, w: 0.035, d: 0.04, z: 0.018, n: 2.5 },
@@ -492,7 +498,7 @@ export function athleteFace({ low = false } = {}) {
     { y: 0.093, w: 0.061, d: 0.069, z: -0.011 },
     { y: 0.113, w: 0.028, d: 0.037, z: -0.011 },
   ], {
-    radial: low ? 8 : 18, subdiv: low ? 1 : 2,
+    radial: low ? 8 : hero ? 26 : 18, subdiv: low ? 1 : hero ? 3 : 2,
     // On the front of the head only: eye sockets under a brow ridge,
     // cheekbones, the muzzle and both lips, the chin, the hollow of each cheek.
     sculpt: low ? null : mounds([
@@ -559,7 +565,7 @@ export const HAND_DIGITS = [
 // with a darker strap.
 const gripShade = g => shadeBy(g, (x, y) => (y < -0.02 && x > 0.008 ? 0.5 : y > -0.013 ? 0.62 : 1));
 
-export function glove({ low = false } = {}) {
+export function glove({ low = false, hero = false } = {}) {
   if (low) {
     const hand = loft([
       { y: 0.012, w: 0.026, d: 0.029 }, { y: -0.04, w: 0.024, d: 0.044 },
@@ -572,18 +578,18 @@ export function glove({ low = false } = {}) {
     { y: 0.016, w: 0.0335, d: 0.0345 }, { y: -0.012, w: 0.029, d: 0.034 },
     { y: -0.04, w: 0.021, d: 0.042, n: 2.4 }, { y: -0.075, w: 0.019, d: 0.048, x: 0.001, n: 2.8 },
     { y: -0.098, w: 0.0185, d: 0.049, x: 0.003, n: 3 }, { y: -0.113, w: 0.0135, d: 0.0465, x: 0.005, n: 3 },
-  ], { radial: 10, subdiv: 1 }));
+  ], { radial: hero ? 16 : 10, subdiv: hero ? 2 : 1 }));
 }
 
 // One geometry per digit of HAND_DIGITS, each with a ring on either side of
 // its joints so a knuckle folds between two rings instead of across one.
-export function digits() {
+export function digits({ hero = false } = {}) {
   return HAND_DIGITS.map(({ base, lean, length: L, joints: [j1, j2], radius: r }) => {
     const ring = (t, k, x = 0) => ({ y: -L * t, w: r * 0.92 * k, d: r * k, x });
     const g = loft([
       { y: 0.008, w: r * 0.9, d: r * 0.98 }, ring(0.1, 1), ring(j1 - 0.08, 0.97), ring(j1, 1.03, -0.0006), ring(j1 + 0.08, 0.95),
       ring(j2 - 0.06, 0.89), ring(j2, 0.92, -0.0005), ring(j2 + 0.07, 0.85), ring(0.95, 0.68), ring(1, 0.36),
-    ], { radial: 6, subdiv: 1, capTop: false });
+    ], { radial: hero ? 10 : 6, subdiv: hero ? 2 : 1, capTop: false });
     if (lean) { g.rotateX(lean[0]); g.rotateZ(lean[1]); }
     g.translate(...base);
     return gripShade(g);
@@ -593,8 +599,8 @@ export function digits() {
 // Cleat around the ankle joint: heel at -Z, toe at +Z, the outsole at about
 // y = -0.086 and the studs just below it. A moulded upper with a padded
 // collar, a darker outsole plate and (`studs`) seven studs.
-export function cleat({ low = false } = {}) {
-  const detail = low ? { radial: 6, subdiv: 1 } : { radial: 10, subdiv: 1 };
+export function cleat({ low = false, hero = false } = {}) {
+  const detail = low ? { radial: 6, subdiv: 1 } : hero ? { radial: 16, subdiv: 2 } : { radial: 10, subdiv: 1 };
   // Authored along +Y (heel to toe), then laid down: z offsets are heights.
   const h = v => -v;
   const upper = loft([
@@ -617,7 +623,7 @@ export function cleat({ low = false } = {}) {
     { y: 0.11, w: 0.052, d: 0.007, z: h(-0.083), n: 3 }, { y: 0.135, w: 0.052, d: 0.007, z: h(-0.083), n: 3 },
     { y: 0.16, w: 0.0505, d: 0.007, z: h(-0.082), n: 3 },
     { y: 0.21, w: 0.039, d: 0.007, z: h(-0.079), n: 3 }, { y: 0.229, w: 0.015, d: 0.005, z: h(-0.075) },
-  ], low ? { radial: 4, subdiv: 1 } : { radial: 8, subdiv: 1 });
+  ], low ? { radial: 4, subdiv: 1 } : hero ? { radial: 12, subdiv: 2 } : { radial: 8, subdiv: 1 });
   sole.rotateX(Math.PI / 2);
   shadeBy(sole, () => 0.1);
   // Baked shading: darker down by the sole, a darker tongue under the laces.
@@ -627,7 +633,7 @@ export function cleat({ low = false } = {}) {
   // The padded collar around the ankle.
   const collar = loft([
     { y: -0.035, w: 0.039, d: 0.044, z: -0.016 }, { y: 0.012, w: 0.037, d: 0.042, z: -0.014 }, { y: 0.03, w: 0.0345, d: 0.039, z: -0.013 },
-  ], { radial: 10, subdiv: 1, capBottom: false, capTop: false });
+  ], { radial: hero ? 16 : 10, subdiv: 1, capBottom: false, capTop: false });
   const g = mergeGeometries([upper, sole, collar]);
   return g;
 }
